@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2009-2016
- *     dmex    2016-2022
+ *     dmex    2016-2023
  *
  */
 
@@ -24,7 +24,7 @@
 PPH_OBJECT_TYPE PhpProcessPropContextType = NULL;
 PPH_OBJECT_TYPE PhpProcessPropPageContextType = NULL;
 PPH_OBJECT_TYPE PhpProcessPropPageWaitContextType = NULL;
-PH_STRINGREF PhpLoadingText = PH_STRINGREF_INIT(L"Loading...");
+PH_STRINGREF PhProcessPropPageLoadingText = PH_STRINGREF_INIT(L"Loading...");
 static RECT MinimumSize = { -1, -1, -1, -1 };
 SLIST_HEADER WaitContextQueryListHead;
 
@@ -177,6 +177,8 @@ INT CALLBACK PhpPropSheetProc(
                 MinimumSize = rect;
                 MinimumSize.left = 0;
             }
+
+            SetTimer(hwndDlg, 2000, 2000, NULL);
         }
         break;
     }
@@ -208,18 +210,13 @@ LRESULT CALLBACK PhpPropSheetWndProc(
 
     oldWndProc = propSheetContext->PropSheetWindowHookProc;
 
-    if (RtlQueryDepthSList(&WaitContextQueryListHead))
-    {
-        PhpFlushProcessPropSheetWaitContextData();
-    }
-
     switch (uMsg)
     {
     case WM_DESTROY:
         {
             HWND tabControl;
             TCITEM tabItem;
-            WCHAR text[128];
+            WCHAR text[128] = L"";
 
             // Save the window position and size.
 
@@ -304,6 +301,16 @@ LRESULT CALLBACK PhpPropSheetWndProc(
                 {
                     return TRUE;
                 }
+            }
+        }
+        break;
+    case WM_TIMER:
+        {
+            UINT id = (UINT)wParam;
+
+            if (id == 2000)
+            {
+                PhpFlushProcessPropSheetWaitContextData();
             }
         }
         break;
@@ -532,7 +539,7 @@ VOID PhpCreateProcessPropSheetWaitContext(
         PhpProcessPropertiesWaitCallback,
         waitContext,
         INFINITE,
-        WT_EXECUTEONLYONCE | WT_EXECUTEINIOTHREAD
+        WT_EXECUTEONLYONCE | WT_EXECUTEINWAITTHREAD
         )))
     {
         PropContext->ProcessWaitContext = waitContext;
@@ -540,8 +547,12 @@ VOID PhpCreateProcessPropSheetWaitContext(
     else
     {
         PhDereferenceObject(waitContext->ProcessItem);
+        waitContext->ProcessItem = NULL;
+
+        NtClose(waitContext->ProcessHandle);
+        waitContext->ProcessHandle = NULL;
+
         PhDereferenceObject(waitContext);
-        NtClose(processHandle);
     }
 }
 
@@ -553,7 +564,9 @@ VOID PhpFlushProcessPropSheetWaitContextData(
     PPH_PROCESS_WAITPROPCONTEXT data;
     PROCESS_BASIC_INFORMATION basicInfo;
 
-    //if (!RtlFirstEntrySList(&QueryListHead))
+    //if (!RtlQueryDepthSList(&WaitContextQueryListHead))
+    //    return;
+    //if (!RtlFirstEntrySList(&WaitContextQueryListHead))
     //    return;
 
     entry = RtlInterlockedFlushSList(&WaitContextQueryListHead);
@@ -661,7 +674,7 @@ BOOLEAN PhPropPageDlgProcHeader(
     if (ProcessItem)
         *ProcessItem = propPageContext->PropContext->ProcessItem;
 
-    if (uMsg == WM_DESTROY)
+    if (uMsg == WM_NCDESTROY)
     {
         PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
 

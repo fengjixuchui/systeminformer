@@ -6,13 +6,14 @@
  * Authors:
  *
  *     wj32    2010-2012
- *     dmex    2019-2021
+ *     dmex    2019-2023
  *
  */
 
 #include <ph.h>
 #include <subprocesstag.h>
 #include <svcsup.h>
+#include <mapldr.h>
 
 #define SIP(String, Integer) \
     { (String), (PVOID)(Integer) }
@@ -241,6 +242,13 @@ SC_HANDLE PhOpenService(
     serviceHandle = OpenService(PhGetServiceManagerHandle(), ServiceName, DesiredAccess);
 
     return serviceHandle;
+}
+
+VOID PhCloseServiceHandle(
+    _In_ SC_HANDLE ServiceHandle
+    )
+{
+    CloseServiceHandle(ServiceHandle);
 }
 
 PVOID PhGetServiceConfig(
@@ -679,7 +687,7 @@ PPH_STRING PhGetServiceFileName(
 
     if (NT_SUCCESS(status))
     {
-        if (serviceDllString = PhQueryRegistryString(keyHandle, L"ImagePath"))
+        if (serviceDllString = PhQueryRegistryStringZ(keyHandle, L"ImagePath"))
         {
             PPH_STRING expandedString;
 
@@ -725,7 +733,7 @@ NTSTATUS PhpGetServiceDllName(
 
     if (NT_SUCCESS(status))
     {
-        if (serviceDllString = PhQueryRegistryString(keyHandle, L"ServiceDll"))
+        if (serviceDllString = PhQueryRegistryStringZ(keyHandle, L"ServiceDll"))
         {
             PPH_STRING expandedString;
 

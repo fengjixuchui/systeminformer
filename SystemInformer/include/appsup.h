@@ -1,3 +1,15 @@
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
+ *
+ * This file is part of System Informer.
+ *
+ * Authors:
+ *
+ *     wj32    2016-2017
+ *     dmex    2017-2023
+ *
+ */
+
 #ifndef PH_APPSUP_H
 #define PH_APPSUP_H
 
@@ -107,11 +119,6 @@ PhaGetProcessKnownCommandLine(
     _Out_ PPH_KNOWN_PROCESS_COMMAND_LINE KnownCommandLine
     );
 // end_phapppub
-
-PPH_STRING PhGetServiceRelevantFileName(
-    _In_ PPH_STRINGREF ServiceName,
-    _In_ SC_HANDLE ServiceHandle
-    );
 
 PPH_STRING PhEscapeStringForDelimiter(
     _In_ PPH_STRING String,
@@ -432,12 +439,23 @@ NTAPI
 PhHandleCopyListViewEMenuItem(
     _In_ struct _PH_EMENU_ITEM *SelectedItem
     );
-// end_phapppub
 
-BOOLEAN PhShellOpenKey2(
+PHAPPAPI
+VOID
+NTAPI
+PhShellOpenKey(
     _In_ HWND WindowHandle,
     _In_ PPH_STRING KeyName
     );
+
+PHAPPAPI
+BOOLEAN
+NTAPI
+PhShellOpenKey2(
+    _In_ HWND WindowHandle,
+    _In_ PPH_STRING KeyName
+    );
+// end_phapppub
 
 PPH_STRING PhPcre2GetErrorMessage(
     _In_ INT ErrorCode
@@ -526,7 +544,7 @@ FORCEINLINE PVOID PhpGenericPropertyPageHeader(
             PhSetWindowContext(hwndDlg, ContextHash, context);
         }
         break;
-    case WM_DESTROY:
+    case WM_NCDESTROY:
         {
             context = PhGetWindowContext(hwndDlg, ContextHash);
             PhRemoveWindowContext(hwndDlg, ContextHash);

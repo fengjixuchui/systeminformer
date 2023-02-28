@@ -191,7 +191,7 @@ PWSTR StatusBarGetText(
 }
 
 VOID StatusBarShowMenu(
-    VOID
+    _In_ HWND WindowHandle
     )
 {
     PPH_EMENU menu;
@@ -207,7 +207,7 @@ VOID StatusBarShowMenu(
 
     selectedItem = PhShowEMenu(
         menu,
-        PhMainWndHandle,
+        WindowHandle,
         PH_EMENU_SHOW_LEFTRIGHT,
         PH_ALIGN_LEFT | PH_ALIGN_BOTTOM,
         cursorPos.x,
@@ -216,7 +216,7 @@ VOID StatusBarShowMenu(
 
     if (selectedItem && selectedItem->Id != ULONG_MAX)
     {
-        StatusBarShowCustomizeDialog();
+        StatusBarShowCustomizeDialog(WindowHandle);
 
         StatusBarUpdate(TRUE);
     }
@@ -515,7 +515,7 @@ VOID StatusBarUpdate(
 
                 if (tnHandle = GetCurrentTreeNewHandle())
                 {
-                    ULONG i;
+                    ULONG j;
                     ULONG visibleCount;
                     ULONG selectedCount;
                     PH_FORMAT format[2];
@@ -523,9 +523,9 @@ VOID StatusBarUpdate(
                     visibleCount = TreeNew_GetFlatNodeCount(tnHandle);
                     selectedCount = 0;
 
-                    for (i = 0; i < visibleCount; i++)
+                    for (j = 0; j < visibleCount; j++)
                     {
-                        if (TreeNew_GetFlatNode(tnHandle, i)->Selected)
+                        if (TreeNew_GetFlatNode(tnHandle, j)->Selected)
                             selectedCount++;
                     }
 
@@ -590,9 +590,9 @@ VOID StatusBarUpdate(
                 PhGetSelectedProcessItems(&processes, &numberOfProcesses);
                 PhReferenceObjects(processes, numberOfProcesses);
 
-                for (ULONG i = 0; i < numberOfProcesses; i++)
+                for (ULONG j = 0; j < numberOfProcesses; j++)
                 {
-                    value += processes[i]->VmCounters.WorkingSetSize;
+                    value += processes[j]->VmCounters.WorkingSetSize;
                 }
 
                 if (value)
@@ -621,9 +621,9 @@ VOID StatusBarUpdate(
                 PhGetSelectedProcessItems(&processes, &numberOfProcesses);
                 PhReferenceObjects(processes, numberOfProcesses);
 
-                for (ULONG i = 0; i < numberOfProcesses; i++)
+                for (ULONG j = 0; j < numberOfProcesses; j++)
                 {
-                    value += processes[i]->VmCounters.PagefileUsage;
+                    value += processes[j]->VmCounters.PagefileUsage;
                 }
 
                 if (value)

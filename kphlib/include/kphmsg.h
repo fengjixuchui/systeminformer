@@ -10,7 +10,7 @@
  */
 
 #pragma once
-#include <kphlibbase.h>
+
 #include <kphmsgdefs.h>
 
 #pragma warning(push)
@@ -139,7 +139,7 @@ typedef struct _KPH_MESSAGE
     union
     {
         //
-        // Message form user
+        // Message from user
         //
         union
         {

@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2013
- *     dmex    2018-2022
+ *     dmex    2018-2023
  *
  */
 
@@ -58,6 +58,7 @@
 #include <apiimport.h>
 #include <actions.h>
 #include <lsasup.h>
+#include <mapldr.h>
 #include <phsvc.h>
 #include <phsvccl.h>
 #include <phsettings.h>
@@ -151,8 +152,8 @@ INT_PTR CALLBACK PhpRunFileWndProc(
     _In_ LPARAM lParam
     );
 
-VOID PhSetDesktopWinStaAccess(
-    VOID
+NTSTATUS PhSetDesktopWinStaAccess(
+    _In_ HWND WindowHandle
     );
 
 VOID PhpSplitUserName(
@@ -184,12 +185,12 @@ VOID PhShowRunAsDialog(
     _In_opt_ HANDLE ProcessId
     )
 {
-    DialogBoxParam(
+    PhDialogBox(
         PhInstanceHandle,
         MAKEINTRESOURCE(IDD_RUNAS),
         PhCsForceNoParent ? NULL : ParentWindowHandle,
         PhpRunAsDlgProc,
-        (LPARAM)ProcessId
+        ProcessId
         );
 }
 
@@ -197,11 +198,12 @@ BOOLEAN PhShowRunFileDialog(
     _In_ HWND ParentWindowHandle
     )
 {
-    if (DialogBox(
+    if (PhDialogBox(
         PhInstanceHandle,
         MAKEINTRESOURCE(IDD_RUNFILEDLG),
         ParentWindowHandle,
-        PhpRunFileWndProc
+        PhpRunFileWndProc,
+        NULL
         ) == IDOK)
     {
         return TRUE;
@@ -234,7 +236,7 @@ BOOLEAN PhShowRunFileDialog(
     //            );
     //    }
     //
-    //    FreeLibrary(shell32Handle);
+    //    PhFreeLibrary(shell32Handle);
     //}
 }
 
@@ -471,7 +473,7 @@ BOOLEAN PhpInitializeNetApi(VOID)
 
             if (!(NetUserEnum_I && NetApiBufferFree_I))
             {
-                FreeLibrary(netapiModuleHandle);
+                PhFreeLibrary(netapiModuleHandle);
                 netapiModuleHandle = NULL;
             }
         }
@@ -501,7 +503,7 @@ BOOLEAN PhpInitializeMRUList(VOID)
 
             if (!(CreateMRUList_I && AddMRUString_I && EnumMRUList_I && FreeMRUList_I))
             {
-                FreeLibrary(comctl32ModuleHandle);
+                PhFreeLibrary(comctl32ModuleHandle);
                 comctl32ModuleHandle = NULL;
             }
         }
@@ -602,12 +604,12 @@ VOID PhpFreeProgramsComboBox(
     _In_ HWND ComboBoxHandle
     )
 {
-    ULONG total;
+    INT total;
 
     if ((total = ComboBox_GetCount(ComboBoxHandle)) == CB_ERR)
         return;
 
-    for (ULONG i = 0; i < total; i++)
+    for (INT i = 0; i < total; i++)
     {
         ComboBox_DeleteString(ComboBoxHandle, i);
     }
@@ -617,12 +619,12 @@ static VOID PhpFreeAccountsComboBox(
     _In_ HWND ComboBoxHandle
     )
 {
-    ULONG total;
+    INT total;
 
     if ((total = ComboBox_GetCount(ComboBoxHandle)) == CB_ERR)
         return;
 
-    for (ULONG i = 0; i < total; i++)
+    for (INT i = 0; i < total; i++)
     {
         ComboBox_DeleteString(ComboBoxHandle, i);
     }
@@ -760,8 +762,8 @@ static VOID PhpFreeSessionsComboBox(
     )
 {
     PPH_RUNAS_SESSION_ITEM entry;
-    ULONG total;
-    ULONG i;
+    INT total;
+    INT i;
 
     if ((total = ComboBox_GetCount(ComboBoxHandle)) == CB_ERR)
         return;
@@ -940,8 +942,8 @@ static VOID PhpFreeDesktopsComboBox(
     )
 {
     PPH_RUNAS_DESKTOP_ITEM entry;
-    ULONG total;
-    ULONG i;
+    INT total;
+    INT i;
 
     if ((total = ComboBox_GetCount(ComboBoxHandle)) == CB_ERR)
         return;
@@ -1359,7 +1361,10 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
                             if (!PhIsNullOrEmptyString(desktopName) && !PhEqualString2(desktopName, L"WinSta0\\Default", TRUE))
                                 createInfo.DesktopName = PhGetString(desktopName);
 
-                            PhSetDesktopWinStaAccess();
+                            status = PhSetDesktopWinStaAccess(hwndDlg);
+
+                            if (!NT_SUCCESS(status))
+                                goto CleanupAsUserExit;
 
                             status = PhCreateProcessAsUser(
                                 &createInfo,
@@ -1369,6 +1374,7 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
                                 NULL
                                 );
 
+                           CleanupAsUserExit:
                             if (domainPart) PhDereferenceObject(domainPart);
                             if (userPart) PhDereferenceObject(userPart);
                         }
@@ -1428,7 +1434,7 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
                                 memset(&startupInfo, 0, sizeof(STARTUPINFOEX));
                                 startupInfo.StartupInfo.cb = sizeof(STARTUPINFOEX);
                                 startupInfo.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
-                                startupInfo.StartupInfo.wShowWindow = SW_SHOWDEFAULT;
+                                startupInfo.StartupInfo.wShowWindow = SW_SHOWNORMAL;
 
                                 status = PhOpenProcess(
                                     &processHandle,
@@ -1485,6 +1491,11 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
 
                                     NtClose(tokenHandle);
                                 }
+
+                                status = PhSetDesktopWinStaAccess(hwndDlg);
+
+                                if (!NT_SUCCESS(status))
+                                    goto CleanupExit;
 
                                 status = PhCreateProcessWin32Ex(
                                     NULL,
@@ -1696,36 +1707,41 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
  * Sets the access control lists of the current window station
  * and desktop to allow all access.
  */
-VOID PhSetDesktopWinStaAccess(
-    VOID
+NTSTATUS PhSetDesktopWinStaAccess(
+    _In_ HWND WindowHandle
     )
 {
-    static SID_IDENTIFIER_AUTHORITY appPackageAuthority = SECURITY_APP_PACKAGE_AUTHORITY;
-
     HWINSTA wsHandle;
     HDESK desktopHandle;
     ULONG allocationLength;
+    PSID allAppPackagesSid = PhSeAnyPackageSid();
+    UCHAR securityDescriptorBuffer[SECURITY_DESCRIPTOR_MIN_LENGTH + 0x50];
     PSECURITY_DESCRIPTOR securityDescriptor;
     PACL dacl;
-    CHAR allAppPackagesSidBuffer[FIELD_OFFSET(SID, SubAuthority) + sizeof(ULONG) * 2];
-    PSID allAppPackagesSid;
+
+    if (WindowHandle && PhGetIntegerSetting(L"EnableWarnings") && PhShowMessage2(
+        WindowHandle,
+        TDCBF_YES_BUTTON | TDCBF_NO_BUTTON,
+        TD_WARNING_ICON,
+        L"WARNING: This will grant Everyone access to the current window station and desktop.",
+        L"Are you sure you want to continue?"
+        ) == IDNO)
+    {
+        return STATUS_ACCESS_DENIED;
+    }
 
     // TODO: Set security on the correct window station and desktop.
-
-    allAppPackagesSid = (PSID)allAppPackagesSidBuffer;
-    RtlInitializeSid(allAppPackagesSid, &appPackageAuthority, SECURITY_BUILTIN_APP_PACKAGE_RID_COUNT);
-    *RtlSubAuthoritySid(allAppPackagesSid, 0) = SECURITY_APP_PACKAGE_BASE_RID;
-    *RtlSubAuthoritySid(allAppPackagesSid, 1) = SECURITY_BUILTIN_PACKAGE_ANY_PACKAGE;
 
     // We create a DACL that allows everyone to access everything.
 
     allocationLength = SECURITY_DESCRIPTOR_MIN_LENGTH +
         (ULONG)sizeof(ACL) +
         (ULONG)sizeof(ACCESS_ALLOWED_ACE) +
-        RtlLengthSid(&PhSeEveryoneSid) +
+        PhLengthSid(&PhSeEveryoneSid) +
         (ULONG)sizeof(ACCESS_ALLOWED_ACE) +
-        RtlLengthSid(allAppPackagesSid);
-    securityDescriptor = PhAllocate(allocationLength);
+        PhLengthSid(allAppPackagesSid);
+
+    securityDescriptor = (PSECURITY_DESCRIPTOR)securityDescriptorBuffer;
     dacl = PTR_ADD_OFFSET(securityDescriptor, SECURITY_DESCRIPTOR_MIN_LENGTH);
 
     RtlCreateSecurityDescriptor(securityDescriptor, SECURITY_DESCRIPTOR_REVISION);
@@ -1748,6 +1764,10 @@ VOID PhSetDesktopWinStaAccess(
         PhSetObjectSecurity(wsHandle, DACL_SECURITY_INFORMATION, securityDescriptor);
         CloseWindowStation(wsHandle);
     }
+    else
+    {
+        return PhGetLastWin32ErrorAsNtStatus();
+    }
 
     if (desktopHandle = OpenDesktop(
         L"Default",
@@ -1759,8 +1779,17 @@ VOID PhSetDesktopWinStaAccess(
         PhSetObjectSecurity(desktopHandle, DACL_SECURITY_INFORMATION, securityDescriptor);
         CloseDesktop(desktopHandle);
     }
+    else
+    {
+        return PhGetLastWin32ErrorAsNtStatus();
+    }
 
-    PhFree(securityDescriptor);
+#ifdef DEBUG
+    assert(allocationLength < sizeof(securityDescriptorBuffer));
+    assert(RtlLengthSecurityDescriptor(securityDescriptor) < sizeof(securityDescriptorBuffer));
+#endif
+
+    return STATUS_SUCCESS;
 }
 
 /**
@@ -1783,6 +1812,11 @@ NTSTATUS PhExecuteRunAsCommand(
     PPH_STRING portName;
     UNICODE_STRING portNameUs;
     ULONG attempts;
+
+    status = PhSetDesktopWinStaAccess(Parameters->WindowHandle);
+
+    if (!NT_SUCCESS(status))
+        return status;
 
     if (!(scManagerHandle = OpenSCManager(NULL, NULL, SC_MANAGER_CREATE_SERVICE)))
         return PhGetLastWin32ErrorAsNtStatus();
@@ -1818,8 +1852,6 @@ NTSTATUS PhExecuteRunAsCommand(
     {
         return NTSTATUS_FROM_WIN32(win32Result);
     }
-
-    PhSetDesktopWinStaAccess();
 
     StartService(serviceHandle, 0, NULL);
     DeleteService(serviceHandle);
@@ -1927,6 +1959,7 @@ NTSTATUS PhExecuteRunAsCommand3(
     parameters.DesktopName = DesktopName;
     parameters.UseLinkedToken = UseLinkedToken;
     parameters.CreateSuspendedProcess = CreateSuspendedProcess;
+    parameters.WindowHandle = hWnd;
 
     // Try to use an existing instance of the service if possible.
     if (RunAsOldServiceName[0] != UNICODE_NULL)
@@ -2225,7 +2258,7 @@ NTSTATUS PhpRunAsShellExecute(
     info.lpParameters = Parameters;
     info.lpDirectory = PhGetString(parentDirectory);
     info.fMask = SEE_MASK_FLAG_NO_UI;
-    info.nShow = SW_SHOWDEFAULT;
+    info.nShow = SW_SHOWNORMAL;
     info.hwnd = hWnd;
 
     if (Elevated)
@@ -2254,25 +2287,10 @@ BOOLEAN PhpRunFileAsInteractiveUser(
     _In_ PPH_STRING Command
     )
 {
-    ULONG (WINAPI *WdcRunTaskAsInteractiveUser_I)(
-        _In_ PWSTR CommandLine,
-        _In_ PWSTR CurrentDirectory,
-        _In_ ULONG Reserved
-        ) = NULL;
     BOOLEAN success = FALSE;
-    PVOID wdcLibraryHandle;
     PPH_STRING executeString = NULL;
     INT cmdlineArgCount;
     PWSTR* cmdlineArgList;
-
-    if (!(wdcLibraryHandle = PhLoadLibrary(L"wdc.dll")))
-        return FALSE;
-
-    if (!(WdcRunTaskAsInteractiveUser_I = PhGetDllBaseProcedureAddress(wdcLibraryHandle, "WdcRunTaskAsInteractiveUser", 0)))
-    {
-        FreeLibrary(wdcLibraryHandle);
-        return FALSE;
-    }
 
     // Extract the filename.
     if (cmdlineArgList = CommandLineToArgvW(Command->Buffer, &cmdlineArgCount))
@@ -2324,7 +2342,7 @@ BOOLEAN PhpRunFileAsInteractiveUser(
     {
         PPH_STRING parentDirectory = PhpQueryRunFileParentDirectory(FALSE);
 
-        if (WdcRunTaskAsInteractiveUser_I(PhGetString(executeString), PhGetString(parentDirectory), 0) == 0)
+        if (PhCreateProcessAsInteractiveUser(PhGetString(executeString), PhGetString(parentDirectory)) == S_OK)
         {
             success = TRUE;
         }
@@ -2335,8 +2353,7 @@ BOOLEAN PhpRunFileAsInteractiveUser(
         }
     }
 
-    if (executeString) PhDereferenceObject(executeString);
-    FreeLibrary(wdcLibraryHandle);
+    PhClearReference(&executeString);
 
     return success;
 }
@@ -2423,7 +2440,7 @@ NTSTATUS PhpRunFileProgram(
         memset(&startupInfo, 0, sizeof(STARTUPINFOEX));
         startupInfo.StartupInfo.cb = sizeof(STARTUPINFOEX);
         startupInfo.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
-        startupInfo.StartupInfo.wShowWindow = SW_SHOWDEFAULT;
+        startupInfo.StartupInfo.wShowWindow = SW_SHOWNORMAL;
         parentDirectory = PhpQueryRunFileParentDirectory(FALSE);
 
         // NOTE: CreateProcess has an issue when launching processes with execution aliases
@@ -2632,7 +2649,7 @@ NTSTATUS RunAsCreateProcessThread(
     memset(&startupInfo, 0, sizeof(STARTUPINFOEX));
     startupInfo.StartupInfo.cb = sizeof(STARTUPINFOEX);
     startupInfo.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
-    startupInfo.StartupInfo.wShowWindow = SW_SHOWDEFAULT;
+    startupInfo.StartupInfo.wShowWindow = SW_SHOWNORMAL;
 
     if (!(serviceHandle = PhOpenService(L"TrustedInstaller", SERVICE_QUERY_STATUS | SERVICE_START)))
     {

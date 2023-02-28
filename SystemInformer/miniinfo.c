@@ -696,41 +696,44 @@ VOID PhMipCalculateWindowRectangle(
 
         if (RtlEqualMemory(&monitorInfo.rcWork, &monitorInfo.rcMonitor, sizeof(RECT)))
         {
-            APPBARDATA taskbarRect = { sizeof(APPBARDATA) };
+            HWND trayWindow;
+            RECT taskbarRect;
 
-            // dmex: FindWindow + Shell_TrayWnd causes a lot of FPs by security software (malware uses this string to inject code into Explorer)...
-            // TODO: This comment block should be removed if the SHAppBarMessage function is more reliable.
-            //HWND trayWindow;
-            //RECT taskbarRect;
-            //if ((trayWindow = FindWindow(L"Shell_TrayWnd", NULL)) &&
-            //    GetMonitorInfo(MonitorFromWindow(trayWindow, MONITOR_DEFAULTTOPRIMARY), &monitorInfo) && // Just in case
-            //    GetWindowRect(trayWindow, &taskbarRect))
+            //APPBARDATA appbarData = { sizeof(APPBARDATA) };
+            //
+            //if (SHAppBarMessage(ABM_GETTASKBARPOS, &appbarData))
+            //{
+            //    taskbarRect = appbarData.rc;
+            //}
 
             // The taskbar probably has auto-hide enabled. We need to adjust for that.
-            if (SHAppBarMessage(ABM_GETTASKBARPOS, &taskbarRect))
+
+            if ((trayWindow = GetShellWindow()) && // trayWindow = FindWindow(L"Shell_TrayWnd", NULL)
+                GetMonitorInfo(MonitorFromWindow(trayWindow, MONITOR_DEFAULTTOPRIMARY), &monitorInfo) && // Just in case
+                GetWindowRect(trayWindow, &taskbarRect))
             {
                 LONG monitorMidX = (monitorInfo.rcMonitor.left + monitorInfo.rcMonitor.right) / 2;
                 LONG monitorMidY = (monitorInfo.rcMonitor.top + monitorInfo.rcMonitor.bottom) / 2;
 
-                if (taskbarRect.rc.right < monitorMidX)
+                if (taskbarRect.right < monitorMidX)
                 {
                     // Left
-                    monitorInfo.rcWork.left += taskbarRect.rc.right - taskbarRect.rc.left;
+                    monitorInfo.rcWork.left += taskbarRect.right - taskbarRect.left;
                 }
-                else if (taskbarRect.rc.bottom < monitorMidY)
+                else if (taskbarRect.bottom < monitorMidY)
                 {
                     // Top
-                    monitorInfo.rcWork.top += taskbarRect.rc.bottom - taskbarRect.rc.top;
+                    monitorInfo.rcWork.top += taskbarRect.bottom - taskbarRect.top;
                 }
-                else if (taskbarRect.rc.left > monitorMidX)
+                else if (taskbarRect.left > monitorMidX)
                 {
                     // Right
-                    monitorInfo.rcWork.right -= taskbarRect.rc.right - taskbarRect.rc.left;
+                    monitorInfo.rcWork.right -= taskbarRect.right - taskbarRect.left;
                 }
-                else if (taskbarRect.rc.top > monitorMidY)
+                else if (taskbarRect.top > monitorMidY)
                 {
                     // Bottom
-                    monitorInfo.rcWork.bottom -= taskbarRect.rc.bottom - taskbarRect.rc.top;
+                    monitorInfo.rcWork.bottom -= taskbarRect.bottom - taskbarRect.top;
                 }
             }
         }
@@ -848,7 +851,7 @@ PPH_MINIINFO_SECTION PhMipCreateInternalSection(
     PH_MINIINFO_SECTION section;
 
     memset(&section, 0, sizeof(PH_MINIINFO_SECTION));
-    PhInitializeStringRef(&section.Name, Name);
+    PhInitializeStringRefLongHint(&section.Name, Name);
     section.Flags = Flags;
     section.Callback = Callback;
 
@@ -1216,7 +1219,7 @@ PPH_MINIINFO_LIST_SECTION PhMipCreateListSection(
     listSection->Callback = Template->Callback;
 
     memset(&section, 0, sizeof(PH_MINIINFO_SECTION));
-    PhInitializeStringRef(&section.Name, Name);
+    PhInitializeStringRefLongHint(&section.Name, Name);
     section.Flags = PH_MINIINFO_SECTION_NO_UPPER_MARGINS;
     section.Callback = PhMipListSectionCallback;
     section.Context = listSection;

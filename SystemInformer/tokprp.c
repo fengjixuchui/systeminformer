@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2012
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
@@ -17,6 +17,7 @@
 #include <emenu.h>
 #include <hndlinfo.h>
 #include <lsasup.h>
+#include <mapldr.h>
 #include <secedit.h>
 #include <settings.h>
 #include <symprv.h>
@@ -526,14 +527,21 @@ PPH_STRING PhGetElevationTypeString(
 
     PhInitializeStringBuilder(&sb, 13);
 
-    PhAppendStringBuilder2(&sb, IsElevated ? L"Yes" : L"No");
+    if (ElevationType)
+    {
+        PhAppendStringBuilder2(&sb, IsElevated ? L"Yes" : L"No");
 
-    if (ElevationType == TokenElevationTypeFull)
-        PhAppendStringBuilder2(&sb, L" (Full)");
-    else if (ElevationType == TokenElevationTypeLimited)
-        PhAppendStringBuilder2(&sb, L" (Limited)");
+        if (ElevationType == TokenElevationTypeFull)
+            PhAppendStringBuilder2(&sb, L" (Full)");
+        else if (ElevationType == TokenElevationTypeLimited)
+            PhAppendStringBuilder2(&sb, L" (Limited)");
+        else if (ElevationType == TokenElevationTypeDefault)
+            PhAppendStringBuilder2(&sb, L" (Default)");
+    }
     else
-        PhAppendStringBuilder2(&sb, L" (Default)");
+    {
+        PhAppendStringBuilder2(&sb, L"Unknown");
+    }
 
     return PhFinalStringBuilderString(&sb);
 }
@@ -677,7 +685,7 @@ VOID PhpUpdateSidsFromTokenGroups(
             tokenGroupResolve = PhAllocateZero(sizeof(PHP_TOKEN_GROUP_RESOLVE_CONTEXT));
             tokenGroupResolve->ListViewHandle = ListViewHandle;
             tokenGroupResolve->LvItem = lvitem;
-            tokenGroupResolve->TokenGroupSid = PhAllocateCopy(Groups->Groups[i].Sid, RtlLengthSid(Groups->Groups[i].Sid));
+            tokenGroupResolve->TokenGroupSid = PhAllocateCopy(Groups->Groups[i].Sid, PhLengthSid(Groups->Groups[i].Sid));
 
             PhQueueItemWorkQueue(PhGetGlobalWorkQueue(), PhpTokenGroupResolveWorker, tokenGroupResolve);
         }
@@ -978,7 +986,7 @@ INT_PTR CALLBACK PhpTokenPageProc(
                 tokenPageContext->Context // ProcessId
                 )))
             {
-                PTOKEN_USER tokenUser;
+                PH_TOKEN_USER tokenUser;
                 PPH_STRING stringUserSid;
                 ULONG sessionId;
                 BOOLEAN isElevated;
@@ -986,7 +994,7 @@ INT_PTR CALLBACK PhpTokenPageProc(
                 PPH_STRING tokenElevated = NULL;
                 BOOLEAN isVirtualizationAllowed;
                 BOOLEAN isVirtualizationEnabled;
-                PSID appContainerSid;
+                PH_TOKEN_APPCONTAINER tokenAppContainer;
                 PPH_STRING appContainerName;
                 PPH_STRING appContainerSidString;
 
@@ -1004,18 +1012,16 @@ INT_PTR CALLBACK PhpTokenPageProc(
 
                         tokenUserResolve = PhAllocateZero(sizeof(PHP_TOKEN_USER_RESOLVE_CONTEXT));
                         tokenUserResolve->WindowHandle = GetDlgItem(hwndDlg, IDC_USER);
-                        tokenUserResolve->TokenUserSid = PhAllocateCopy(tokenUser->User.Sid, RtlLengthSid(tokenUser->User.Sid));
+                        tokenUserResolve->TokenUserSid = PhAllocateCopy(tokenUser.User.Sid, PhLengthSid(tokenUser.User.Sid));
 
                         PhQueueItemWorkQueue(PhGetGlobalWorkQueue(), PhpTokenUserResolveWorker, tokenUserResolve);
                     }
 
-                    if (stringUserSid = PhSidToStringSid(tokenUser->User.Sid))
+                    if (stringUserSid = PhSidToStringSid(tokenUser.User.Sid))
                     {
                         PhSetDialogItemText(hwndDlg, IDC_USERSID, stringUserSid->Buffer);
                         PhDereferenceObject(stringUserSid);
                     }
-
-                    PhFree(tokenUser);
                 }
 
                 if (NT_SUCCESS(PhGetTokenSessionId(tokenHandle, &sessionId)))
@@ -1026,7 +1032,7 @@ INT_PTR CALLBACK PhpTokenPageProc(
                 {
                     tokenElevated = PH_AUTO(PhGetElevationTypeString(isElevated, elevationType));
                 }
-                PhSetDialogItemText(hwndDlg, IDC_ELEVATED, PhGetStringOrDefault(tokenElevated, L"N/A"));
+                PhSetDialogItemText(hwndDlg, IDC_ELEVATED, PhGetStringOrDefault(tokenElevated, L"Unknown"));
 
                 if (NT_SUCCESS(PhGetTokenIsVirtualizationAllowed(tokenHandle, &isVirtualizationAllowed)))
                 {
@@ -1052,11 +1058,10 @@ INT_PTR CALLBACK PhpTokenPageProc(
                     appContainerName = NULL;
                     appContainerSidString = NULL;
 
-                    if (NT_SUCCESS(PhGetTokenAppContainerSid(tokenHandle, &appContainerSid)))
+                    if (NT_SUCCESS(PhGetTokenAppContainerSid(tokenHandle, &tokenAppContainer)))
                     {
-                        appContainerName = PhGetAppContainerName(appContainerSid);
-                        appContainerSidString = PhSidToStringSid(appContainerSid);
-                        PhFree(appContainerSid);
+                        appContainerName = PhGetAppContainerName(tokenAppContainer.AppContainer.Sid);
+                        appContainerSidString = PhSidToStringSid(tokenAppContainer.AppContainer.Sid);
                     }
 
                     if (appContainerName)
@@ -1108,7 +1113,7 @@ INT_PTR CALLBACK PhpTokenPageProc(
             if (tokenPageContext->Privileges) PhFree(tokenPageContext->Privileges);
         }
         break;
-    case WM_DPICHANGED:
+    case WM_DPICHANGED_AFTERPARENT:
         {
             PhpTokenSetImageList(hwndDlg, tokenPageContext);
         }
@@ -1907,6 +1912,8 @@ VOID PhpShowTokenAdvancedProperties(
         page.lParam = (LPARAM)Context;
         pages[numberOfPages++] = CreatePropertySheetPage(&page);
 
+        // AppModel Policy
+
         memset(&page, 0, sizeof(PROPSHEETPAGE));
         page.dwSize = sizeof(PROPSHEETPAGE);
         page.dwFlags = PSP_USETITLE;
@@ -1986,8 +1993,8 @@ INT_PTR CALLBACK PhpTokenGeneralPageProc(
                 tokenPageContext->Context // ProcessId
                 )))
             {
-                PTOKEN_USER tokenUser;
-                PTOKEN_OWNER tokenOwner;
+                PH_TOKEN_USER tokenUser;
+                PH_TOKEN_OWNER tokenOwner;
                 PTOKEN_PRIMARY_GROUP tokenPrimaryGroup;
                 TOKEN_ELEVATION_TYPE elevationType;
                 BOOLEAN isElevated;
@@ -1997,16 +2004,13 @@ INT_PTR CALLBACK PhpTokenGeneralPageProc(
 
                 if (NT_SUCCESS(PhGetTokenUser(tokenHandle, &tokenUser)))
                 {
-                    tokenUserName = PH_AUTO(PhGetSidFullName(tokenUser->User.Sid, TRUE, NULL));
-                    tokenUserSid = PH_AUTO(PhSidToStringSid(tokenUser->User.Sid));
-
-                    PhFree(tokenUser);
+                    tokenUserName = PH_AUTO(PhGetSidFullName(tokenUser.User.Sid, TRUE, NULL));
+                    tokenUserSid = PH_AUTO(PhSidToStringSid(tokenUser.User.Sid));
                 }
 
                 if (NT_SUCCESS(PhGetTokenOwner(tokenHandle, &tokenOwner)))
                 {
-                    tokenOwnerName = PH_AUTO(PhGetSidFullName(tokenOwner->Owner, TRUE, NULL));
-                    PhFree(tokenOwner);
+                    tokenOwnerName = PH_AUTO(PhGetSidFullName(tokenOwner.Owner.Sid, TRUE, NULL));
                 }
 
                 if (NT_SUCCESS(PhGetTokenPrimaryGroup(tokenHandle, &tokenPrimaryGroup)))
@@ -2082,7 +2086,7 @@ INT_PTR CALLBACK PhpTokenGeneralPageProc(
             else
                 PhSetDialogItemText(hwndDlg, IDC_SESSIONID, L"Unknown");
 
-            PhSetDialogItemText(hwndDlg, IDC_ELEVATED, PhGetStringOrDefault(tokenElevated, L"N/A"));
+            PhSetDialogItemText(hwndDlg, IDC_ELEVATED, PhGetStringOrDefault(tokenElevated, L"Unknown"));
             PhSetDialogItemText(hwndDlg, IDC_VIRTUALIZATION, tokenVirtualization);
             PhSetDialogItemText(hwndDlg, IDC_UIACCESS, tokenUIAccess);
             PhSetDialogItemText(hwndDlg, IDC_SOURCENAME, tokenSourceName);
@@ -2723,14 +2727,14 @@ BOOLEAN PhpAddTokenCapabilities(
             {
                 if (subAuthoritiesCount == SECURITY_APP_PACKAGE_RID_COUNT)
                 {
-                    PSID appContainerSid;
+                    PH_TOKEN_APPCONTAINER tokenAppContainer;
 
                     //if (*RtlSubAuthoritySid(TokenPageContext->Capabilities->Groups[i].Sid, 1) == SECURITY_CAPABILITY_APP_RID)
                     //    continue;
 
-                    if (NT_SUCCESS(PhGetTokenAppContainerSid(tokenHandle, &appContainerSid)))
+                    if (NT_SUCCESS(PhGetTokenAppContainerSid(tokenHandle, &tokenAppContainer)))
                     {
-                        if (PhIsPackageCapabilitySid(appContainerSid, TokenPageContext->Capabilities->Groups[i].Sid))
+                        if (PhIsPackageCapabilitySid(tokenAppContainer.AppContainer.Sid, TokenPageContext->Capabilities->Groups[i].Sid))
                         {
                             static PH_STRINGREF packageNameStringRef = PH_STRINGREF_INIT(L"Package: ");
 
@@ -2744,8 +2748,6 @@ BOOLEAN PhpAddTokenCapabilities(
                                 PhpAddAttributeNode(&TokenPageContext->CapsTreeContext, node, PhCreateString2(&packageNameStringRef));
                             }
                         }
-
-                        PhFree(appContainerSid);
                     }
                 }
                 else if (subAuthoritiesCount == SECURITY_CAPABILITY_RID_COUNT)
@@ -3411,13 +3413,13 @@ PPH_STRING PhpGetTokenFolderPath(
     PPH_STRING profileFolderPath = NULL;
     PPH_STRING profileKeyPath = NULL;
     PPH_STRING tokenUserSid;
-    PTOKEN_USER tokenUser;
+    PH_TOKEN_USER tokenUser;
 
     if (NT_SUCCESS(PhGetTokenUser(TokenHandle, &tokenUser)))
     {
         ULONG subAuthority;
 
-        subAuthority = *RtlSubAuthoritySid(tokenUser->User.Sid, 0);
+        subAuthority = *RtlSubAuthoritySid(tokenUser.User.Sid, 0);
         //RtlIdentifierAuthoritySid(tokenUser->User.Sid) == (BYTE[])SECURITY_NT_AUTHORITY
 
         if (subAuthority == SECURITY_UMFD_BASE_RID)
@@ -3430,14 +3432,12 @@ PPH_STRING PhpGetTokenFolderPath(
         }
         else
         {
-            if (tokenUserSid = PhSidToStringSid(tokenUser->User.Sid))
+            if (tokenUserSid = PhSidToStringSid(tokenUser.User.Sid))
             {
                 profileKeyPath = PhConcatStringRef2(&servicesKeyName, &tokenUserSid->sr);
                 PhDereferenceObject(tokenUserSid);
             }
         }
-
-        PhFree(tokenUser);
     }
 
     if (profileKeyPath)
@@ -3454,7 +3454,7 @@ PPH_STRING PhpGetTokenFolderPath(
         {
             PPH_STRING profileImagePath;
 
-            if (profileFolderPath = PhQueryRegistryString(keyHandle, L"ProfileImagePath"))
+            if (profileFolderPath = PhQueryRegistryStringZ(keyHandle, L"ProfileImagePath"))
             {
                 if (profileImagePath = PhExpandEnvironmentStrings(&profileFolderPath->sr))
                 {
@@ -3485,12 +3485,11 @@ PPH_STRING PhpGetTokenRegistryPath(
 {
     PPH_STRING profileRegistryPath = NULL;
     PPH_STRING tokenUserSid = NULL;
-    PTOKEN_USER tokenUser;
+    PH_TOKEN_USER tokenUser;
 
     if (NT_SUCCESS(PhGetTokenUser(TokenHandle, &tokenUser)))
     {
-        tokenUserSid = PhSidToStringSid(tokenUser->User.Sid);
-        PhFree(tokenUser);
+        tokenUserSid = PhSidToStringSid(tokenUser.User.Sid);
     }
 
     if (tokenUserSid)
@@ -3563,40 +3562,41 @@ PPH_STRING PhpGetTokenAppContainerFolderPath(
             NULL
             );
 
-#ifdef DEBUG
-        if (NT_SUCCESS(PhImpersonateToken(NtCurrentThread(), TokenHandle)))
-        {
-            if (GetAppContainerFolderPath_Import())
-            {
-                PPH_STRING appContainerSid = PhSidToStringSid(TokenAppContainerSid);
-        
-                if (SUCCEEDED(GetAppContainerFolderPath_Import()(appContainerSid->Buffer, &folderPath)) && folderPath)
-                {
-                    assert(PhEqualString2(appContainerFolderPath, folderPath, TRUE));
-                    CoTaskMemFree(folderPath);
-                }
-        
-                PhDereferenceObject(appContainerSid);
-            }
-        
-            PhRevertImpersonationToken(NtCurrentThread());
-        }
-#endif
+        //if (PhIsNullOrEmptyString(appContainerFolderPath))
+        //{
+        //    if (NT_SUCCESS(PhImpersonateToken(NtCurrentThread(), TokenHandle)))
+        //    {
+        //        if (GetAppContainerFolderPath_Import())
+        //        {
+        //            PPH_STRING appContainerSid = PhSidToStringSid(TokenAppContainerSid);
+        //
+        //            if (SUCCEEDED(GetAppContainerFolderPath_Import()(appContainerSid->Buffer, &folderPath)) && folderPath)
+        //            {
+        //                assert(PhEqualString2(appContainerFolderPath, folderPath, TRUE));
+        //                CoTaskMemFree(folderPath);
+        //            }
+        //
+        //            PhDereferenceObject(appContainerSid);
+        //        }
+        //
+        //        PhRevertImpersonationToken(NtCurrentThread());
+        //    }
+        //}
 
         // Workaround for pseudo Appcontainers created by System processes that default to the \systemprofile path. (dmex)
         if (PhIsNullOrEmptyString(appContainerFolderPath))
         {
-            PTOKEN_USER tokenUser;
-        
+            PH_TOKEN_USER tokenUser;
+
             if (NT_SUCCESS(PhGetTokenUser(TokenHandle, &tokenUser)))
             {
                 ULONG subAuthority;
                 PPH_STRING tokenProfilePathString;
                 PPH_STRING appContainerName;
-        
-                subAuthority = *RtlSubAuthoritySid(tokenUser->User.Sid, 0);
-                //RtlIdentifierAuthoritySid(tokenUser->User.Sid) == (BYTE[])SECURITY_NT_AUTHORITY
-        
+
+                subAuthority = *RtlSubAuthoritySid(tokenUser.User.Sid, 0);
+                //RtlIdentifierAuthoritySid(tokenUser.User.Sid) == (BYTE[])SECURITY_NT_AUTHORITY
+
                 if (subAuthority == SECURITY_UMFD_BASE_RID)
                 {
                     if (tokenProfilePathString = PhpGetTokenFolderPath(TokenHandle))
@@ -3604,21 +3604,19 @@ PPH_STRING PhpGetTokenAppContainerFolderPath(
                         if (appContainerName = PhGetAppContainerName(TokenAppContainerSid))
                         {
                             static PH_STRINGREF appDataPackagePath = PH_STRINGREF_INIT(L"\\AppData\\Local\\Packages\\");
-        
+
                             PhMoveReference(&appContainerFolderPath, PhConcatStringRef3(
                                 &tokenProfilePathString->sr,
                                 &appDataPackagePath,
                                 &appContainerName->sr
                                 ));
-        
+
                             PhDereferenceObject(appContainerName);
                         }
-        
+
                         PhDereferenceObject(tokenProfilePathString);
                     }
                 }
-        
-                PhFree(tokenUser);
             }
         }
 
@@ -3735,7 +3733,7 @@ INT_PTR CALLBACK PhpTokenContainerPageProc(
                 )))
             {
                 APPCONTAINER_SID_TYPE appContainerSidType = InvalidAppContainerSidType;
-                PSID appContainerSid;
+                PH_TOKEN_APPCONTAINER tokenAppContainer;
                 PSID appContainerSidParent = NULL;
                 PPH_STRING appContainerName = NULL;
                 PPH_STRING appContainerSidString = NULL;
@@ -3743,16 +3741,15 @@ INT_PTR CALLBACK PhpTokenContainerPageProc(
                 PPH_STRING packageFullName;
                 PPH_STRING packagePath;
 
-                if (NT_SUCCESS(PhGetTokenAppContainerSid(tokenHandle, &appContainerSid)))
+                if (NT_SUCCESS(PhGetTokenAppContainerSid(tokenHandle, &tokenAppContainer)))
                 {
                     if (RtlGetAppContainerSidType_Import())
-                        RtlGetAppContainerSidType_Import()(appContainerSid, &appContainerSidType);
+                        RtlGetAppContainerSidType_Import()(tokenAppContainer.AppContainer.Sid, &appContainerSidType);
                     if (RtlGetAppContainerParent_Import())
-                        RtlGetAppContainerParent_Import()(appContainerSid, &appContainerSidParent);
+                        RtlGetAppContainerParent_Import()(tokenAppContainer.AppContainer.Sid, &appContainerSidParent);
 
-                    appContainerName = PhGetAppContainerName(appContainerSid);
-                    appContainerSidString = PhSidToStringSid(appContainerSid);
-                    PhFree(appContainerSid);
+                    appContainerName = PhGetAppContainerName(tokenAppContainer.AppContainer.Sid);
+                    appContainerSidString = PhSidToStringSid(tokenAppContainer.AppContainer.Sid);
                 }
 
                 if (appContainerName)
@@ -3830,25 +3827,38 @@ INT_PTR CALLBACK PhpTokenContainerPageProc(
                 NtClose(tokenHandle);
             }
 
-            if (NT_SUCCESS(tokenPageContext->OpenObject(
+            tokenHandle = NULL;
+
+            if (!NT_SUCCESS(tokenPageContext->OpenObject(
                 &tokenHandle,
                 TOKEN_QUERY | TOKEN_IMPERSONATE | TOKEN_DUPLICATE,
                 tokenPageContext->Context // ProcessId
                 )))
             {
-                PSID appContainerSid;
+                if (!NT_SUCCESS(tokenPageContext->OpenObject(
+                    &tokenHandle,
+                    TOKEN_QUERY | TOKEN_IMPERSONATE,
+                    tokenPageContext->Context // ProcessId
+                    )))
+                {
+                    tokenPageContext->OpenObject(
+                        &tokenHandle,
+                        TOKEN_QUERY,
+                        tokenPageContext->Context // ProcessId
+                        );
+                }
+            }
+
+            if (tokenHandle)
+            {
+                PH_TOKEN_APPCONTAINER tokenAppContainer;
                 PPH_STRING appContainerFolderPath;
                 PPH_STRING appContainerRegistryPath;
 
-                if (NT_SUCCESS(PhGetTokenAppContainerSid(tokenHandle, &appContainerSid)))
-                {
-                    appContainerFolderPath = PhpGetTokenAppContainerFolderPath(tokenHandle, appContainerSid);
-                    PhFree(appContainerSid);
-                }
+                if (NT_SUCCESS(PhGetTokenAppContainerSid(tokenHandle, &tokenAppContainer)))
+                    appContainerFolderPath = PhpGetTokenAppContainerFolderPath(tokenHandle, tokenAppContainer.AppContainer.Sid);
                 else
-                {
                     appContainerFolderPath = PhpGetTokenAppContainerFolderPath(tokenHandle, NULL);
-                }
 
                 if (appContainerFolderPath)
                 {
@@ -3982,24 +3992,24 @@ typedef enum _AppModelPolicy_Type
     AppModelPolicy_Type_AppServiceLifetime = 28,
     AppModelPolicy_Type_WebPlatform = 29,
     AppModelPolicy_Type_WinInetStoragePartitioning = 30,
-    AppModelPolicy_Type_IndexerProtocolHandlerHost = 31,
+    AppModelPolicy_Type_IndexerProtocolHandlerHost = 31, // since RS2
     AppModelPolicy_Type_LoaderIncludeUserDirectories = 32,
     AppModelPolicy_Type_ConvertAppContainerToRestrictedAppContainer = 33,
     AppModelPolicy_Type_PackageMayContainPrivateMapiProvider = 34,
-    AppModelPolicy_Type_AdminProcessPackageClaims = 35,
+    AppModelPolicy_Type_AdminProcessPackageClaims = 35, // since RS3
     AppModelPolicy_Type_RegistryRedirectionBehavior = 36,
     AppModelPolicy_Type_BypassCreateProcessAppxExtension = 37,
     AppModelPolicy_Type_KnownFolderRedirection = 38,
     AppModelPolicy_Type_PrivateActivateAsPackageWinrtClasses = 39,
     AppModelPolicy_Type_AppPrivateFolderRedirection = 40,
     AppModelPolicy_Type_GlobalSystemAppDataAccess = 41,
-    AppModelPolicy_Type_ConsoleHandleInheritance = 42,
+    AppModelPolicy_Type_ConsoleHandleInheritance = 42, // since RS4
     AppModelPolicy_Type_ConsoleBufferAccess = 43,
     AppModelPolicy_Type_ConvertCallerTokenToUserTokenForDeployment = 44,
-    AppModelPolicy_Type_ShellExecuteRetrieveIdentityFromCurrentProcess = 45,
-    AppModelPolicy_Type_CodeIntegritySigning = 46,
+    AppModelPolicy_Type_ShellExecuteRetrieveIdentityFromCurrentProcess = 45, // since RS5
+    AppModelPolicy_Type_CodeIntegritySigning = 46, // since 19H1
     AppModelPolicy_Type_PTCActivation = 47,
-    AppModelPolicy_Type_ComIntraPackageRpcCall = 48,
+    AppModelPolicy_Type_ComIntraPackageRpcCall = 48, // since 20H1
     AppModelPolicy_Type_LoadUser32ShimOnWindowsCoreOS = 49,
     AppModelPolicy_Type_SecurityCapabilitiesOverride = 50,
     AppModelPolicy_Type_CurrentDirectoryOverride = 51,
@@ -4007,7 +4017,7 @@ typedef enum _AppModelPolicy_Type
     AppModelPolicy_Type_UseOriginalFileNameInTokenFQBNAttribute = 53,
     AppModelPolicy_Type_LoaderIncludeAlternateForwarders = 54,
     AppModelPolicy_Type_PullPackageDependencyData = 55,
-    AppModelPolicy_Type_AppInstancingErrorBehavior = 56,
+    AppModelPolicy_Type_AppInstancingErrorBehavior = 56, // since WIN11
     AppModelPolicy_Type_BackgroundTaskRegistrationType = 57,
     AppModelPolicy_Type_ModsPowerNotification = 58,
     AppModelPolicy_Type_Count = 58,
@@ -4184,7 +4194,7 @@ NTSTATUS PhGetAppModelPolicy(
 
         if (PhGetSymbolFromName(symbolProvider, L"GetAppModelPolicy", &symbolInfo))
         {
-            if (NT_SUCCESS(PhSetProcessValidCallTarget(NtCurrentProcess(), (PVOID)symbolInfo.Address)))
+            if (NT_SUCCESS(PhGuardGrantSuppressedCallAccess(NtCurrentProcess(), (PVOID)symbolInfo.Address)))
             {
                 GetAppModelPolicy_I = (PVOID)symbolInfo.Address;
             }
@@ -4197,6 +4207,19 @@ NTSTATUS PhGetAppModelPolicy(
 
     if (GetAppModelPolicy_I)
     {
+        // GetAppModelPolicy doesn't perform range checks and will read out-of-bound
+        // and return garbage if we ask it about a not-yet-supported policy type (diversenok)
+        if ((PolicyType >= AppModelPolicy_Type_AppInstancingErrorBehavior && WindowsVersion < WINDOWS_11) ||
+            (PolicyType >= AppModelPolicy_Type_ComIntraPackageRpcCall && WindowsVersion < WINDOWS_10_20H1) ||
+            (PolicyType >= AppModelPolicy_Type_CodeIntegritySigning && WindowsVersion < WINDOWS_10_19H1) ||
+            (PolicyType >= AppModelPolicy_Type_ShellExecuteRetrieveIdentityFromCurrentProcess && WindowsVersion < WINDOWS_10_RS5) ||
+            (PolicyType >= AppModelPolicy_Type_ConsoleHandleInheritance && WindowsVersion < WINDOWS_10_RS4) ||
+            (PolicyType >= AppModelPolicy_Type_AdminProcessPackageClaims && WindowsVersion < WINDOWS_10_RS3) ||
+            (PolicyType >= AppModelPolicy_Type_IndexerProtocolHandlerHost && WindowsVersion < WINDOWS_10_RS2))
+        {
+            return STATUS_INVALID_INFO_CLASS;
+        }
+
         return GetAppModelPolicy_I(TokenHandle, PolicyType, PolicyValue);
     }
 

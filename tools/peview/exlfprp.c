@@ -203,7 +203,7 @@ VOID PvpSetWslmageVersionInfo(
     PhSetDialogItemText(WindowHandle, IDC_COMPANYNAME, L"Loading...");
     PhSetDialogItemText(WindowHandle, IDC_VERSION, L"Loading...");
 
-    PhQueueItemWorkQueue(PhGetGlobalWorkQueue(), PvpQueryWslImageThreadStart, WindowHandle);
+    PhCreateThread2(PvpQueryWslImageThreadStart, WindowHandle);
 
     Static_SetIcon(GetDlgItem(WindowHandle, IDC_FILEICON), PvImageLargeIcon);
 }
@@ -463,7 +463,7 @@ INT_PTR CALLBACK PvpExlfGeneralDlgProc(
 
             PvpLoadWslSections(lvHandle);
 
-            PhInitializeWindowTheme(hwndDlg, PeEnableThemeSupport);
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
         }
         break;
     case WM_DESTROY:

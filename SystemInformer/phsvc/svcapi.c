@@ -6,15 +6,15 @@
  * Authors:
  *
  *     wj32    2011-2015
- *     dmex    2019-2022
+ *     dmex    2019-2023
  *
  */
 
 #include <phapp.h>
 #include <phsvc.h>
-#include <apiimport.h>
 #include <extmgri.h>
 #include <lsasup.h>
+#include <mapldr.h>
 #include <phplug.h>
 #include <secedit.h>
 #include <svcsup.h>
@@ -486,6 +486,10 @@ NTSTATUS PhSvcApiControlProcess(
         if (NT_SUCCESS(status = PhOpenProcess(&processHandle, PROCESS_TERMINATE, processId)))
         {
             status = PhTerminateProcess(processHandle, 1); // see notes in PhUiTerminateProcesses
+
+            if (status == STATUS_SUCCESS || status == STATUS_PROCESS_IS_TERMINATING)
+                PhTerminateProcess(processHandle, DBG_TERMINATE_PROCESS); // debug terminate (dmex)
+
             NtClose(processHandle);
         }
         break;
@@ -1114,7 +1118,7 @@ NTSTATUS PhSvcApiSetTcpEntry(
 
     if (!localSetTcpEntry)
     {
-        HMODULE iphlpapiModule;
+        PVOID iphlpapiModule;
 
         iphlpapiModule = PhLoadLibrary(L"iphlpapi.dll");
 
@@ -1128,7 +1132,7 @@ NTSTATUS PhSvcApiSetTcpEntry(
                 {
                     // Another thread got the address of SetTcpEntry already.
                     // Decrement the reference count of iphlpapi.dll.
-                    FreeLibrary(iphlpapiModule);
+                    PhFreeLibrary(iphlpapiModule);
                 }
             }
         }
@@ -1163,7 +1167,7 @@ NTSTATUS PhSvcApiControlThread(
     case PhSvcControlThreadTerminate:
         if (NT_SUCCESS(status = PhOpenThread(&threadHandle, THREAD_TERMINATE, threadId)))
         {
-            status = NtTerminateThread(threadHandle, STATUS_SUCCESS);
+            status = PhTerminateThread(threadHandle, STATUS_SUCCESS);
             NtClose(threadHandle);
         }
         break;

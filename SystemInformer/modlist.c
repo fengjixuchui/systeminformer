@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2016
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
@@ -14,7 +14,6 @@
 #include <modlist.h>
 
 #include <emenu.h>
-#include <mapimg.h>
 #include <settings.h>
 #include <verify.h>
 
@@ -52,9 +51,9 @@ LONG PhpModuleTreeNewPostSortFunction(
 BOOLEAN NTAPI PhpModuleTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
+    _In_ PVOID Context
     );
 
 VOID PhInitializeModuleList(
@@ -755,9 +754,9 @@ END_SORT_FUNCTION
 BOOLEAN NTAPI PhpModuleTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
+    _In_ PVOID Context
     )
 {
     PPH_MODULE_LIST_CONTEXT context = Context;
@@ -771,10 +770,6 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
     case TreeNewGetChildren:
         {
             PPH_TREENEW_GET_CHILDREN getChildren = Parameter1;
-
-            if (!getChildren)
-                break;
-
             node = (PPH_MODULE_NODE)getChildren->Node;
 
             if (context->TreeNewSortOrder == NoSortOrder)
@@ -862,10 +857,6 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
     case TreeNewIsLeaf:
         {
             PPH_TREENEW_IS_LEAF isLeaf = Parameter1;
-
-            if (!isLeaf)
-                break;
-
             node = (PPH_MODULE_NODE)isLeaf->Node;
 
             if (context->TreeNewSortOrder == NoSortOrder)
@@ -878,9 +869,6 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
         {
             PPH_TREENEW_GET_CELL_TEXT getCellText = Parameter1;
             PPH_MODULE_ITEM moduleItem;
-
-            if (!getCellText)
-                break;
 
             node = (PPH_MODULE_NODE)getCellText->Node;
             moduleItem = node->ModuleItem;
@@ -946,7 +934,7 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
                 {
                     if (moduleItem->LoadCount != USHRT_MAX)
                     {
-                        PhPrintInt32(node->LoadCountText, moduleItem->LoadCount);
+                        PhPrintUInt32(node->LoadCountText, moduleItem->LoadCount);
                         PhInitializeStringRefLongHint(&getCellText->Text, node->LoadCountText);
                     }
                     else
@@ -963,8 +951,7 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
                 {
                     if (moduleItem->Type != PH_MODULE_TYPE_ELF_MAPPED_IMAGE)
                     {
-                        PhInitializeStringRef(&getCellText->Text,
-                            moduleItem->VerifyResult == VrTrusted ? L"Trusted" : L"Not trusted");
+                        getCellText->Text = PhVerifyResultToStringRef(moduleItem->VerifyResult);
                     }
                     else
                     {
@@ -1186,9 +1173,6 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
             PPH_TREENEW_GET_NODE_COLOR getNodeColor = Parameter1;
             PPH_MODULE_ITEM moduleItem;
 
-            if (!getNodeColor)
-                break;
-
             node = (PPH_MODULE_NODE)getNodeColor->Node;
             moduleItem = node->ModuleItem;
 
@@ -1196,7 +1180,7 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
                 ; // Dummy
             else if (PhEnableProcessQueryStage2 &&
                 context->HighlightUntrustedModules &&
-                moduleItem->VerifyResult != VrTrusted &&
+                PH_VERIFY_UNTRUSTED(moduleItem->VerifyResult) &&
                 (moduleItem->Type == PH_MODULE_TYPE_MODULE ||
                 moduleItem->Type == PH_MODULE_TYPE_WOW64_MODULE ||
                 moduleItem->Type == PH_MODULE_TYPE_MAPPED_IMAGE ||
@@ -1229,10 +1213,6 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
     case TreeNewGetNodeFont:
         {
             PPH_TREENEW_GET_NODE_FONT getNodeFont = Parameter1;
-
-            if (!getNodeFont)
-                break;
-
             node = (PPH_MODULE_NODE)getNodeFont->Node;
 
             // Make the executable file module item bold.
@@ -1250,10 +1230,6 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
     case TreeNewGetCellTooltip:
         {
             PPH_TREENEW_GET_CELL_TOOLTIP getCellTooltip = Parameter1;
-
-            if (!getCellTooltip)
-                break;
-
             node = (PPH_MODULE_NODE)getCellTooltip->Node;
 
             if (getCellTooltip->Column->Id != 0)
@@ -1328,9 +1304,6 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
     case TreeNewKeyDown:
         {
             PPH_TREENEW_KEY_EVENT keyEvent = Parameter1;
-
-            if (!keyEvent)
-                break;
 
             switch (keyEvent->VirtualKey)
             {

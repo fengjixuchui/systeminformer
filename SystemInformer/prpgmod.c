@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2009-2016
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
@@ -29,16 +29,11 @@
 static PH_STRINGREF EmptyModulesText = PH_STRINGREF_INIT(L"There are no modules to display.");
 
 static VOID NTAPI ModuleAddedHandler(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_MODULES_CONTEXT modulesContext = (PPH_MODULES_CONTEXT)Context;
-
-    if (!modulesContext)
-        return;
-    if (!Parameter)
-        return;
 
     // Parameter contains a pointer to the added module item.
     PhReferenceObject(Parameter);
@@ -46,40 +41,31 @@ static VOID NTAPI ModuleAddedHandler(
 }
 
 static VOID NTAPI ModuleModifiedHandler(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_MODULES_CONTEXT modulesContext = (PPH_MODULES_CONTEXT)Context;
-
-    if (!modulesContext)
-        return;
 
     PhPushProviderEventQueue(&modulesContext->EventQueue, ProviderModifiedEvent, Parameter, PhGetRunIdProvider(&modulesContext->ProviderRegistration));
 }
 
 static VOID NTAPI ModuleRemovedHandler(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_MODULES_CONTEXT modulesContext = (PPH_MODULES_CONTEXT)Context;
-
-    if (!modulesContext)
-        return;
 
     PhPushProviderEventQueue(&modulesContext->EventQueue, ProviderRemovedEvent, Parameter, PhGetRunIdProvider(&modulesContext->ProviderRegistration));
 }
 
 static VOID NTAPI ModulesUpdatedHandler(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_MODULES_CONTEXT modulesContext = (PPH_MODULES_CONTEXT)Context;
-
-    if (!modulesContext)
-        return;
 
     PostMessage(modulesContext->WindowHandle, WM_PH_MODULES_UPDATED, PhGetRunIdProvider(&modulesContext->ProviderRegistration), 0);
 }
@@ -648,7 +634,7 @@ INT_PTR CALLBACK PhpProcessModulesDlgProc(
 
             // Initialize the list.
             PhInitializeModuleList(hwndDlg, modulesContext->TreeNewHandle, &modulesContext->ListContext);
-            TreeNew_SetEmptyText(modulesContext->TreeNewHandle, &PhpLoadingText, 0);
+            TreeNew_SetEmptyText(modulesContext->TreeNewHandle, &PhProcessPropPageLoadingText, 0);
             PhInitializeProviderEventQueue(&modulesContext->EventQueue, 100);
             modulesContext->LastRunStatus = -1;
             modulesContext->ErrorMessage = NULL;

@@ -260,7 +260,7 @@ INT_PTR CALLBACK PvOptionsWndProc(
 
             PvLoadGeneralPage(context);
 
-            PhInitializeWindowTheme(hwndDlg, PeEnableThemeSupport);
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
         }
         break;
     case WM_DESTROY:
@@ -382,10 +382,11 @@ VOID PvShowOptionsWindow(
     _In_ HWND ParentWindow
     )
 {
-    DialogBox(
+    PhDialogBox(
         PhInstanceHandle,
         MAKEINTRESOURCE(IDD_OPTIONS),
         ParentWindow,
-        PvOptionsWndProc
+        PvOptionsWndProc,
+        NULL
         );
 }

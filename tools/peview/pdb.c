@@ -13,7 +13,9 @@
 #include <symprv.h>
 
 #include <dbghelp.h>
-#include "dia2.h"
+#define COM_NO_WINDOWS_H 1
+#include "../thirdparty/msdiasdk/dia2.h"
+#include "../thirdparty/msdiasdk/dia3.h"
 
 ULONG SearchResultsAddIndex = 0;
 PPH_LIST SearchResults = NULL;

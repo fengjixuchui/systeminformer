@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2015
- *     dmex    2018-2022
+ *     dmex    2018-2023
  *
  */
 
@@ -51,6 +51,8 @@ EXTENDEDTOOLS_INTERFACE PluginInterface =
     EtLookupTotalGpuAdapterEngineUtilization
 };
 
+ULONG EtWindowsVersion = WINDOWS_ANCIENT;
+BOOLEAN EtIsExecutingInWow64 = FALSE;
 ULONG ProcessesUpdatedCount = 0;
 static HANDLE ModuleProcessId = NULL;
 ULONG EtUpdateInterval = 0;
@@ -65,6 +67,9 @@ VOID NTAPI LoadCallback(
     _In_opt_ PVOID Context
     )
 {
+    EtWindowsVersion = PhWindowsVersion;
+    EtIsExecutingInWow64 = PhIsExecutingInWow64();
+
     EtLoadSettings();
 
     EtEtwStatisticsInitialization();
@@ -73,11 +78,16 @@ VOID NTAPI LoadCallback(
 }
 
 VOID NTAPI UnloadCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
-    EtSaveSettingsDiskTreeList();
+    BOOLEAN SessionEnding = (BOOLEAN)PtrToUlong(Parameter);
+
+    // Skip ETW when the system is shutting down. (dmex)
+    if (SessionEnding)
+        return;
+
     EtEtwStatisticsUninitialization();
     EtFramesMonitorUninitialization();
 }
@@ -133,6 +143,7 @@ VOID NTAPI MenuItemCallback(
                 ((PPH_MODULE_ITEM)menuItem->Context)->Name
                 );
         }
+        break;
     case ID_REPARSE_POINTS:
     case ID_REPARSE_OBJID:
     case ID_REPARSE_SDDL:
@@ -846,7 +857,7 @@ PPH_STRING PhGetSelectedListViewItemText(
         LVNI_SELECTED
         );
 
-    if (index != -1)
+    if (index != INT_ERROR)
     {
         WCHAR buffer[DOS_MAX_PATH_LENGTH] = L"";
 

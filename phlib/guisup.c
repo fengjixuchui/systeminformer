@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2009-2016
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
@@ -14,6 +14,7 @@
 #include <apiimport.h>
 #include <guisup.h>
 #include <mapimg.h>
+#include <mapldr.h>
 #include <settings.h>
 #include <guisupp.h>
 
@@ -99,24 +100,65 @@ VOID PhGuiSupportInitialization(
         SetWindowTheme_I = PhGetDllBaseProcedureAddress(uxthemeHandle, "SetWindowTheme", 0);
         IsThemeActive_I = PhGetDllBaseProcedureAddress(uxthemeHandle, "IsThemeActive", 0);
         IsThemePartDefined_I = PhGetDllBaseProcedureAddress(uxthemeHandle, "IsThemePartDefined", 0);
-        GetThemeClass_I = PhGetDllBaseProcedureAddress(uxthemeHandle, "GetThemeClass", 0);
         GetThemeInt_I = PhGetDllBaseProcedureAddress(uxthemeHandle, "GetThemeInt", 0);
         GetThemePartSize_I = PhGetDllBaseProcedureAddress(uxthemeHandle, "GetThemePartSize", 0);
         DrawThemeBackground_I = PhGetDllBaseProcedureAddress(uxthemeHandle, "DrawThemeBackground", 0);
+
+        if (WindowsVersion >= WINDOWS_11)
+        {
+            GetThemeClass_I = PhGetDllBaseProcedureAddress(uxthemeHandle, NULL, 74);
+        }
     }
 
-    PhGuiSupportUpdateSystemMetrics();
+    PhGuiSupportUpdateSystemMetrics(NULL);
 }
 
 VOID PhGuiSupportUpdateSystemMetrics(
-    VOID
+    _In_opt_ HWND WindowHandle
     )
 {
-    PhSystemDpi = PhGetSystemDpi();
+    PhSystemDpi = WindowHandle ? PhGetWindowDpi(WindowHandle) : PhGetSystemDpi();
     PhSmallIconSize.X = PhGetSystemMetrics(SM_CXSMICON, PhSystemDpi);
     PhSmallIconSize.Y = PhGetSystemMetrics(SM_CYSMICON, PhSystemDpi);
     PhLargeIconSize.X = PhGetSystemMetrics(SM_CXICON, PhSystemDpi);
     PhLargeIconSize.Y = PhGetSystemMetrics(SM_CYICON, PhSystemDpi);
+}
+
+VOID PhInitializeFont(
+    _In_ HWND WindowHandle
+    )
+{
+    LONG windowDpi = PhGetWindowDpi(WindowHandle);
+    HFONT oldFont = PhApplicationFont;
+
+    if (
+        !(PhApplicationFont = PhCreateFont(L"Microsoft Sans Serif", 8, FW_NORMAL, DEFAULT_PITCH, windowDpi)) &&
+        !(PhApplicationFont = PhCreateFont(L"Tahoma", 8, FW_NORMAL, DEFAULT_PITCH, windowDpi))
+        )
+    {
+        PhApplicationFont = PhCreateMessageFont(windowDpi);
+    }
+
+    if (oldFont) DeleteFont(oldFont);
+}
+
+VOID PhInitializeMonospaceFont(
+    _In_ HWND WindowHandle
+    )
+{
+    LONG windowDpi = PhGetWindowDpi(WindowHandle);
+    HFONT oldFont = PhMonospaceFont;
+
+    if (
+        !(PhMonospaceFont = PhCreateFont(L"Lucida Console", 9, FW_DONTCARE, FF_MODERN, windowDpi)) &&
+        !(PhMonospaceFont = PhCreateFont(L"Courier New", 9, FW_DONTCARE, FF_MODERN, windowDpi)) &&
+        !(PhMonospaceFont = PhCreateFont(NULL, 9, FW_DONTCARE, FF_MODERN, windowDpi))
+        )
+    {
+        PhMonospaceFont = GetStockFont(SYSTEM_FIXED_FONT);
+    }
+
+    if (oldFont) DeleteFont(oldFont);
 }
 
 HTHEME PhOpenThemeData(
@@ -150,7 +192,7 @@ VOID PhCloseThemeData(
 
 VOID PhSetControlTheme(
     _In_ HWND Handle,
-    _In_ PWSTR Theme
+    _In_opt_ PCWSTR Theme
     )
 {
     if (SetWindowTheme_I)
@@ -181,9 +223,10 @@ BOOLEAN PhIsThemePartDefined(
     return !!IsThemePartDefined_I(ThemeHandle, PartId, StateId);
 }
 
+_Success_(return)
 BOOLEAN PhGetThemeClass(
     _In_ HTHEME ThemeHandle,
-    _Out_writes_z_(*ClassLength) PWSTR Class,
+    _Out_writes_z_(ClassLength) PWSTR Class,
     _In_ ULONG ClassLength
     )
 {
@@ -193,6 +236,7 @@ BOOLEAN PhGetThemeClass(
     return SUCCEEDED(GetThemeClass_I(ThemeHandle, Class, ClassLength));
 }
 
+_Success_(return)
 BOOLEAN PhGetThemeInt(
     _In_ HTHEME ThemeHandle,
     _In_ INT PartId,
@@ -207,6 +251,7 @@ BOOLEAN PhGetThemeInt(
     return SUCCEEDED(GetThemeInt_I(ThemeHandle, PartId, StateId, PropId, Value));
 }
 
+_Success_(return)
 BOOLEAN PhGetThemePartSize(
     _In_ HTHEME ThemeHandle,
     _In_opt_ HDC hdc,
@@ -540,7 +585,7 @@ ULONG PhGetWindowTextEx(
 ULONG PhGetWindowTextToBuffer(
     _In_ HWND hwnd,
     _In_ ULONG Flags,
-    _Out_writes_bytes_opt_(BufferLength) PWSTR Buffer,
+    _Out_writes_bytes_(BufferLength) PWSTR Buffer,
     _In_opt_ ULONG BufferLength,
     _Out_opt_ PULONG ReturnLength
     )
@@ -923,9 +968,25 @@ VOID PhGetStockApplicationIcon(
     _Out_opt_ HICON *LargeIcon
     )
 {
-    static PH_INITONCE initOnce = PH_INITONCE_INIT;
     static HICON smallIcon = NULL;
     static HICON largeIcon = NULL;
+    static LONG systemDpi = 0;
+
+    if (systemDpi != PhSystemDpi)
+    {
+        if (smallIcon)
+        {
+            DestroyIcon(smallIcon);
+            smallIcon = NULL;
+        }
+        if (largeIcon)
+        {
+            DestroyIcon(largeIcon);
+            largeIcon = NULL;
+        }
+
+        systemDpi = PhSystemDpi;
+    }
 
     // This no longer uses SHGetFileInfo because it is *very* slow and causes many other DLLs to be
     // loaded, increasing memory usage. The worst thing about it, however, is that it is horribly
@@ -934,7 +995,7 @@ VOID PhGetStockApplicationIcon(
     // the function at the same time, instead of waiting for initialization to finish it simply
     // fails the other threads.
 
-    if (PhBeginInitOnce(&initOnce))
+    if (!smallIcon || !largeIcon)
     {
         if (WindowsVersion < WINDOWS_10)
         {
@@ -958,14 +1019,14 @@ VOID PhGetStockApplicationIcon(
                 PhDereferenceObject(systemDirectory);
             }
         }
+    }
 
-        // Fallback icons
+    if (!smallIcon || !largeIcon)
+    {
         if (!smallIcon)
-            smallIcon = PhLoadIcon(NULL, IDI_APPLICATION, PH_LOAD_ICON_SIZE_SMALL, 0, 0, PhSystemDpi);
+            smallIcon = PhLoadIcon(NULL, IDI_APPLICATION, PH_LOAD_ICON_SIZE_SMALL, 0, 0, systemDpi);
         if (!largeIcon)
-            largeIcon = PhLoadIcon(NULL, IDI_APPLICATION, PH_LOAD_ICON_SIZE_LARGE, 0, 0, PhSystemDpi);
-
-        PhEndInitOnce(&initOnce);
+            largeIcon = PhLoadIcon(NULL, IDI_APPLICATION, PH_LOAD_ICON_SIZE_LARGE, 0, 0, systemDpi);
     }
 
     if (SmallIcon)
@@ -1178,6 +1239,54 @@ HWND PhCreateWindow(
         InstanceHandle,
         Parameter
         );
+}
+
+INT_PTR PhDialogBox(
+    _In_ PVOID Instance,
+    _In_ PWSTR Template,
+    _In_opt_ HWND ParentWindow,
+    _In_ DLGPROC DialogProc,
+    _In_opt_ PVOID Parameter
+    )
+{
+    PDLGTEMPLATEEX dialogTemplate;
+    INT_PTR dialogResult;
+
+    if (!PhLoadResource(Instance, Template, RT_DIALOG, NULL, &dialogTemplate))
+        return INT_ERROR;
+
+    dialogResult = DialogBoxIndirectParam(
+        Instance,
+        (LPDLGTEMPLATE)dialogTemplate,
+        ParentWindow,
+        DialogProc,
+        (LPARAM)Parameter
+        );
+
+    return dialogResult;
+}
+
+// rev from LoadMenuW
+HMENU PhLoadMenu(
+    _In_ PVOID DllBase,
+    _In_ PCWSTR MenuName
+    )
+{
+    HMENU menuHandle = NULL;
+    LPMENUTEMPLATE templateBuffer;
+
+    if (PhLoadResource(
+        DllBase,
+        MenuName,
+        RT_MENU,
+        NULL,
+        &templateBuffer
+        ))
+    {
+        menuHandle = LoadMenuIndirect(templateBuffer);
+    }
+
+    return menuHandle;
 }
 
 BOOLEAN PhModalPropertySheet(
@@ -1713,7 +1822,7 @@ BOOL CALLBACK PhpGetProcessMainWindowEnumWindowsProc(
 }
 
 HWND PhGetProcessMainWindow(
-    _In_ HANDLE ProcessId,
+    _In_opt_ HANDLE ProcessId,
     _In_opt_ HANDLE ProcessHandle
     )
 {
@@ -1721,7 +1830,7 @@ HWND PhGetProcessMainWindow(
 }
 
 HWND PhGetProcessMainWindowEx(
-    _In_ HANDLE ProcessId,
+    _In_opt_ HANDLE ProcessId,
     _In_opt_ HANDLE ProcessHandle,
     _In_ BOOLEAN SkipInvisible
     )
@@ -1920,6 +2029,54 @@ VOID PhWindowNotifyTopMostEvent(
     PhReleaseQueuedLockExclusive(&WindowCallbackListLock);
 }
 
+_Success_(return)
+BOOLEAN PhRegenerateUserEnvironment(
+    _Out_opt_ PVOID* NewEnvironment,
+    _In_ BOOLEAN UpdateCurrentEnvironment
+    )
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static BOOL (WINAPI *RegenerateUserEnvironment_I)(
+        _Out_ PVOID* NewEnvironment,
+        _In_ BOOL UpdateCurrentEnvironment
+        ) = NULL;
+    PVOID environment;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PVOID shell32Handle;
+
+        if (shell32Handle = PhLoadLibrary(L"shell32.dll"))
+        {
+            RegenerateUserEnvironment_I = PhGetDllBaseProcedureAddress(shell32Handle, "RegenerateUserEnvironment", 0);
+        }
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (!RegenerateUserEnvironment_I)
+        return FALSE;
+
+    if (RegenerateUserEnvironment_I(&environment, UpdateCurrentEnvironment))
+    {
+        if (NewEnvironment)
+        {
+            *NewEnvironment = environment;
+        }
+        else
+        {
+            if (DestroyEnvironmentBlock_Import() && !UpdateCurrentEnvironment)
+            {
+                DestroyEnvironmentBlock_Import()(environment);
+            }
+        }
+
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 HICON PhGetInternalWindowIcon(
     _In_ HWND WindowHandle,
     _In_ UINT Type
@@ -1991,7 +2148,7 @@ BOOLEAN PhGetProcessDpiAwareness(
     {
         PVOID baseAddress;
 
-        if (baseAddress = PhGetLoaderEntryDllBase(L"user32.dll"))
+        if (baseAddress = PhGetLoaderEntryDllBaseZ(L"user32.dll"))
         {
             if (WindowsVersion >= WINDOWS_10_RS1)
             {
@@ -2403,27 +2560,26 @@ PPH_STRING PhpGetImageMunResourcePath(
         if (NativeFileName)
         {
             if (PhDoesFileExist(&fileName->sr))
-                PhMoveReference(&filePath, fileName);
-            else
-                PhDereferenceObject(fileName);
+            {
+                PhDereferenceObject(directory);
+                return fileName;
+            }
         }
         else
         {
             if (PhDoesFileExistWin32(PhGetString(fileName)))
-                PhMoveReference(&filePath, fileName);
-            else
-                PhDereferenceObject(fileName);
+            {
+                PhDereferenceObject(directory);
+                return fileName;
+            }
         }
     }
 
-    if (PhIsNullOrEmptyString(filePath))
-    {
-        PhSetReference(&filePath, FileName);
-    }
-
     PhClearReference(&directory);
+    PhClearReference(&fileName);
 
-    return filePath;
+    PhReferenceObject(FileName);
+    return FileName;
 }
 
 // rev from PrivateExtractIconExW with changes
@@ -3000,7 +3156,7 @@ VOID PhCustomDrawTreeTimeLine(
     FrameRect(Hdc, &borderRect, GetStockBrush(GRAY_BRUSH));
 }
 
-// Windows Imaging Component (WIC) bitmap support 
+// Windows Imaging Component (WIC) bitmap support
 
 static PVOID PhpGetWicImagingFactoryInterface(
     VOID
@@ -3285,9 +3441,9 @@ HBITMAP PhLoadImageFromResource(
     if (SUCCEEDED(IWICBitmapSource_GetSize(wicBitmapSource, &sourceWidth, &sourceHeight)) && sourceWidth == Width && sourceHeight == Height)
     {
         if (SUCCEEDED(IWICBitmapSource_CopyPixels(
-            wicBitmapSource, 
-            NULL, 
-            Width * sizeof(RGBQUAD), 
+            wicBitmapSource,
+            NULL,
+            Width * sizeof(RGBQUAD),
             Width * Height * sizeof(RGBQUAD),
             bitmapBuffer
             )))
@@ -3304,15 +3460,15 @@ HBITMAP PhLoadImageFromResource(
             if (SUCCEEDED(IWICBitmapScaler_Initialize(
                 wicBitmapScaler,
                 wicBitmapSource,
-                Width, 
-                Height, 
+                Width,
+                Height,
                 WindowsVersion < WINDOWS_10 ? WICBitmapInterpolationModeFant : WICBitmapInterpolationModeHighQualityCubic
                 )))
             {
                 if (SUCCEEDED(IWICBitmapScaler_CopyPixels(
-                    wicBitmapScaler, 
-                    NULL, 
-                    Width * sizeof(RGBQUAD), 
+                    wicBitmapScaler,
+                    NULL,
+                    Width * sizeof(RGBQUAD),
                     Width * Height * sizeof(RGBQUAD),
                     bitmapBuffer
                     )))
@@ -3480,4 +3636,51 @@ CleanupExit:
     }
 
     return bitmapHandle;
+}
+
+BOOLEAN PhSetWindowCompositionAttribute(
+    _In_ HWND WindowHandle,
+    _In_ PWINDOWCOMPOSITIONATTRIBUTEDATA AttributeData
+    )
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static BOOL (WINAPI* SetWindowCompositionAttribute_I)(
+        _In_ HWND WindowHandle,
+        _In_ PWINDOWCOMPOSITIONATTRIBUTEDATA AttributeData
+        ) = NULL;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        SetWindowCompositionAttribute_I = PhGetDllProcedureAddress(L"user32.dll", "SetWindowCompositionAttribute", 0);
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (SetWindowCompositionAttribute_I)
+    {
+        return !!SetWindowCompositionAttribute_I(WindowHandle, AttributeData);
+    }
+
+    return FALSE;
+}
+
+BOOLEAN PhSetWindowAcrylicCompositionColor(
+    _In_ HWND WindowHandle,
+    _In_ ULONG GradientColor
+    )
+{
+    ACCENT_POLICY policy =
+    {
+        ACCENT_ENABLE_ACRYLICBLURBEHIND,
+        ACCENT_WINDOWS11_LUMINOSITY | ACCENT_BORDER_ALL,
+        GradientColor,
+        0
+    };
+    WINDOWCOMPOSITIONATTRIBUTEDATA attribute =
+    {
+        WCA_ACCENT_POLICY,
+        &policy,
+        sizeof(ACCENT_POLICY)
+    };
+
+    return PhSetWindowCompositionAttribute(WindowHandle, &attribute);
 }

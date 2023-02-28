@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2015
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
@@ -14,7 +14,6 @@
 
 #include <svcsup.h>
 #include <verify.h>
-#include <lsasup.h>
 
 #include <phplug.h>
 #include <phsettings.h>
@@ -386,7 +385,7 @@ PPH_STRING PhGetProcessTooltipText(
 
         PhInitializeStringBuilder(&notes, 40);
 
-        if (Process->FileNameWin32)
+        if (Process->FileName)
         {
             if (Process->VerifyResult == VrTrusted)
             {
@@ -450,7 +449,9 @@ PPH_STRING PhGetProcessTooltipText(
             PhAppendStringBuilder2(&notes, L"    Process is managed (.NET).\n");
         if (Process->IsElevated)
         {
-            if (Process->ElevationType == TokenElevationTypeFull)
+            if (Process->ElevationType == TokenElevationTypeDefault)
+                PhAppendStringBuilder2(&notes, L"    Process is per default elevated.\n");
+            else if (Process->ElevationType == TokenElevationTypeFull)
                 PhAppendStringBuilder2(&notes, L"    Process is full elevated.\n");
             else if (Process->ElevationType == TokenElevationTypeLimited)
                 PhAppendStringBuilder2(&notes, L"    Process is limited elevated.\n");
@@ -551,7 +552,7 @@ VOID PhpFillUmdfDrivers(
                         PH_STRINGREF deviceName;
                         PPH_STRING hardwareId;
 
-                        if (deviceDesc = PhQueryRegistryString(driverKeyHandle, L"DeviceDesc"))
+                        if (deviceDesc = PhQueryRegistryStringZ(driverKeyHandle, L"DeviceDesc"))
                         {
                             PH_STRINGREF firstPart;
                             PH_STRINGREF secondPart;
@@ -566,7 +567,7 @@ VOID PhpFillUmdfDrivers(
                             PhInitializeStringRef(&deviceName, L"Unknown Device");
                         }
 
-                        hardwareId = PhQueryRegistryString(driverKeyHandle, L"HardwareID");
+                        hardwareId = PhQueryRegistryStringZ(driverKeyHandle, L"HardwareID");
 
                         PhAppendStringBuilder(Drivers, &StandardIndent);
                         PhAppendStringBuilder(Drivers, &deviceName);
@@ -773,7 +774,7 @@ PPH_STRING PhGetServiceTooltipText(
 
         // File information
 
-        if (fileName = PhGetServiceRelevantFileName(&Service->Name->sr, serviceHandle))
+        if (fileName = PhGetServiceHandleFileName(serviceHandle, &Service->Name->sr))
         {
             PH_IMAGE_VERSION_INFO versionInfo;
             PPH_STRING versionInfoText;

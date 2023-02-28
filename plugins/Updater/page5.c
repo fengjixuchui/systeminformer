@@ -5,48 +5,11 @@
  *
  * Authors:
  *
- *     dmex    2016-2022
+ *     dmex    2016-2023
  *
  */
 
 #include "updater.h"
-
-static TASKDIALOG_BUTTON TaskDialogButtonArray[] =
-{
-    { IDYES, L"Install" }
-};
-
-BOOLEAN UpdaterCheckApplicationDirectory(
-    VOID
-    )
-{
-    static PH_STRINGREF fileNameStringRef = PH_STRINGREF_INIT(L"\\test");
-    HANDLE fileHandle;
-    PPH_STRING fileName;
-
-    fileName = PhGetApplicationDirectoryFileName(&fileNameStringRef, TRUE);
-
-    if (PhIsNullOrEmptyString(fileName))
-        return FALSE;
-
-    if (NT_SUCCESS(PhCreateFile(
-        &fileHandle,
-        &fileName->sr,
-        FILE_GENERIC_WRITE | DELETE,
-        FILE_ATTRIBUTE_NORMAL,
-        FILE_SHARE_READ | FILE_SHARE_DELETE,
-        FILE_OPEN_IF,
-        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_DELETE_ON_CLOSE
-        )))
-    {
-        PhDereferenceObject(fileName);
-        NtClose(fileHandle);
-        return TRUE;
-    }
-
-    PhDereferenceObject(fileName);
-    return FALSE;
-}
 
 HRESULT CALLBACK FinalTaskDialogCallbackProc(
     _In_ HWND hwndDlg,
@@ -62,7 +25,13 @@ HRESULT CALLBACK FinalTaskDialogCallbackProc(
     {
     case TDN_NAVIGATED:
         {
-            if (!UpdaterCheckApplicationDirectory())
+            context->DirectoryElevationRequired = !!UpdateCheckDirectoryElevationRequired();
+
+#ifdef FORCE_ELEVATION_CHECK
+            context->DirectoryElevationRequired = TRUE;
+#endif
+
+            if (context->DirectoryElevationRequired)
             {
                 SendMessage(hwndDlg, TDM_SET_BUTTON_ELEVATION_REQUIRED_STATE, IDYES, TRUE);
             }
@@ -79,48 +48,8 @@ HRESULT CALLBACK FinalTaskDialogCallbackProc(
             }
             else if (buttonId == IDYES)
             {
-                PVOID parameters;
-
-                if (PhIsNullOrEmptyString(context->SetupFilePath))
-                    break;
-
-                parameters = PH_AUTO(PhCreateKsiSettingsBlob());
-                parameters = PH_AUTO(PhConcatStrings(3, L"-update \"", PhGetStringOrEmpty(parameters), L"\""));
-
-                ProcessHacker_PrepareForEarlyShutdown();
-
-                if (PhShellExecuteEx(
-                    hwndDlg,
-                    PhGetString(context->SetupFilePath),
-                    PhGetString(parameters),
-                    SW_SHOW,
-                    PH_SHELL_EXECUTE_NOZONECHECKS | PH_SHELL_EXECUTE_NOASYNC | (UpdaterCheckApplicationDirectory() ? 0 : PH_SHELL_EXECUTE_ADMIN),
-                    0,
-                    NULL
-                    ))
-                {
-                    ProcessHacker_Destroy();
-                }
-                else
-                {
-                    ULONG errorCode = GetLastError();
-
-                    // Install failed, cancel the shutdown.
-                    ProcessHacker_CancelEarlyShutdown();
-
-                    // Show error dialog.
-                    if (errorCode != ERROR_CANCELLED) // Ignore UAC decline.
-                    {
-                        PhShowStatus(hwndDlg, L"Unable to execute the setup.", 0, errorCode);
-
-                        if (context->StartupCheck)
-                            ShowAvailableDialog(context);
-                        else
-                            ShowCheckForUpdatesDialog(context);
-                    }
-
+                if (!UpdateShellExecute(context, hwndDlg))
                     return S_FALSE;
-                }
             }
         }
         break;
@@ -139,6 +68,10 @@ VOID ShowUpdateInstallDialog(
     _In_ PPH_UPDATER_CONTEXT Context
     )
 {
+    TASKDIALOG_BUTTON TaskDialogButtonArray[] =
+    {
+        { IDYES, L"Install" }
+    };
     TASKDIALOGCONFIG config;
 
     memset(&config, 0, sizeof(TASKDIALOGCONFIG));

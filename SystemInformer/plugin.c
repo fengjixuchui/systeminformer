@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2015
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
@@ -20,6 +20,7 @@
 #include <phsvccl.h>
 #include <procprv.h>
 #include <settings.h>
+#include <mapldr.h>
 
 typedef struct _PHP_PLUGIN_LOAD_ERROR
 {
@@ -40,6 +41,11 @@ INT NTAPI PhpPluginsCompareFunction(
 
 NTSTATUS PhLoadPlugin(
     _In_ PPH_STRING FileName
+    );
+
+VOID PhInvokeCallbackForAllPlugins(
+    _In_ PH_PLUGIN_CALLBACK Callback,
+    _In_opt_ PVOID Parameters
     );
 
 VOID PhpExecuteCallbackForAllPlugins(
@@ -548,10 +554,10 @@ VOID PhLoadPlugins(
  * Notifies all plugins that the program is shutting down.
  */
 VOID PhUnloadPlugins(
-    VOID
+    _In_ BOOLEAN SessionEnding
     )
 {
-    PhpExecuteCallbackForAllPlugins(PluginCallbackUnload, FALSE);
+    PhInvokeCallbackForAllPlugins(PluginCallbackUnload, UlongToPtr(SessionEnding));
 }
 
 /**
@@ -564,6 +570,21 @@ NTSTATUS PhLoadPlugin(
     )
 {
     return PhLoadPluginImage(&FileName->sr, NULL);
+}
+
+VOID PhInvokeCallbackForAllPlugins(
+    _In_ PH_PLUGIN_CALLBACK Callback,
+    _In_opt_ PVOID Parameters
+    )
+{
+    PPH_AVL_LINKS links;
+
+    for (links = PhMinimumElementAvlTree(&PhPluginsByName); links; links = PhSuccessorElementAvlTree(links))
+    {
+        PPH_PLUGIN plugin = CONTAINING_RECORD(links, PH_PLUGIN, Links);
+
+        PhInvokeCallback(PhGetPluginCallback(plugin, Callback), Parameters);
+    }
 }
 
 VOID PhpExecuteCallbackForAllPlugins(

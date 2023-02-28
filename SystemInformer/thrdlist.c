@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2011-2012
- *     dmex    2018-2022
+ *     dmex    2018-2023
  *
  */
 
@@ -48,14 +48,11 @@ LONG PhpThreadTreeNewPostSortFunction(
 BOOLEAN NTAPI PhpThreadTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
+    _In_ PVOID Context
     );
 
-PPH_STRING PhGetSystemCallNumberName(
-    _In_ USHORT SystemCallNumber
-    );
 PPH_STRING PhGetApartmentStateString(
     _In_ OLETLSFLAGS ApartmentState
     );
@@ -115,7 +112,7 @@ VOID PhInitializeThreadList(
     PhAddTreeNewColumn(TreeNewHandle, PH_THREAD_TREELIST_COLUMN_LASTSTATUSCODE, FALSE, L"Last status code", 50, PH_ALIGN_LEFT, ULONG_MAX, 0);
     PhAddTreeNewColumnEx2(TreeNewHandle, PH_THREAD_TREELIST_COLUMN_TIMELINE, FALSE, L"Timeline", 100, PH_ALIGN_LEFT, ULONG_MAX, 0, TN_COLUMN_FLAG_CUSTOMDRAW | TN_COLUMN_FLAG_SORTDESCENDING);
     PhAddTreeNewColumn(TreeNewHandle, PH_THREAD_TREELIST_COLUMN_APARTMENTSTATE, FALSE, L"COM apartment", 50, PH_ALIGN_LEFT, ULONG_MAX, 0);
-    PhAddTreeNewColumn(TreeNewHandle, PH_THREAD_TREELIST_COLUMN_FIBER, FALSE, L"Fiber", 50, PH_ALIGN_RIGHT, ULONG_MAX, 0);
+    PhAddTreeNewColumn(TreeNewHandle, PH_THREAD_TREELIST_COLUMN_FIBER, FALSE, L"Fiber", 50, PH_ALIGN_RIGHT, ULONG_MAX, DT_RIGHT);
     PhAddTreeNewColumn(TreeNewHandle, PH_THREAD_TREELIST_COLUMN_PRIORITYBOOST, FALSE, L"Priority boost", 50, PH_ALIGN_LEFT, ULONG_MAX, 0);
     PhAddTreeNewColumnEx(TreeNewHandle, PH_THREAD_TREELIST_COLUMN_CPUUSER, FALSE, L"CPU (user)", 50, PH_ALIGN_LEFT, ULONG_MAX, DT_RIGHT, TRUE);
     PhAddTreeNewColumnEx(TreeNewHandle, PH_THREAD_TREELIST_COLUMN_CPUKERNEL, FALSE, L"CPU (kernel)", 50, PH_ALIGN_RIGHT, ULONG_MAX, DT_RIGHT, TRUE);
@@ -700,16 +697,14 @@ END_SORT_FUNCTION
 BOOLEAN NTAPI PhpThreadTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
+    _In_ PVOID Context
     )
 {
     PPH_THREAD_LIST_CONTEXT context = Context;
     PPH_THREAD_NODE node;
 
-    if (!context)
-        return FALSE;
     if (PhCmForwardMessage(hwnd, Message, Parameter1, Parameter2, &context->Cm))
         return TRUE;
 
@@ -718,9 +713,6 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
     case TreeNewGetChildren:
         {
             PPH_TREENEW_GET_CHILDREN getChildren = Parameter1;
-
-            if (!getChildren)
-                break;
 
             if (!getChildren->Node)
             {
@@ -796,9 +788,6 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
         {
             PPH_TREENEW_IS_LEAF isLeaf = Parameter1;
 
-            if (!isLeaf)
-                break;
-
             isLeaf->IsLeaf = TRUE;
         }
         return TRUE;
@@ -807,27 +796,13 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
             PPH_TREENEW_GET_CELL_TEXT getCellText = Parameter1;
             PPH_THREAD_ITEM threadItem;
 
-            if (!getCellText)
-                break;
-
             node = (PPH_THREAD_NODE)getCellText->Node;
             threadItem = node->ThreadItem;
 
             switch (getCellText->Id)
             {
             case PH_THREAD_TREELIST_COLUMN_TID:
-                {
-                    PH_FORMAT format;
-                    SIZE_T returnLength;
-
-                    PhInitFormatIU(&format, HandleToUlong(threadItem->ThreadId));
-
-                    if (PhFormatToBuffer(&format, 1, node->ThreadIdText, sizeof(node->ThreadIdText), &returnLength))
-                    {
-                        getCellText->Text.Buffer = node->ThreadIdText;
-                        getCellText->Text.Length = returnLength - sizeof(UNICODE_NULL);
-                    }
-                }
+                PhInitializeStringRefLongHint(&getCellText->Text, threadItem->ThreadIdString);
                 break;
             case PH_THREAD_TREELIST_COLUMN_CPU:
                 {
@@ -1731,9 +1706,6 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
             PPH_TREENEW_GET_NODE_COLOR getNodeColor = Parameter1;
             PPH_THREAD_ITEM threadItem;
 
-            if (!getNodeColor)
-                break;
-
             node = (PPH_THREAD_NODE)getNodeColor->Node;
             threadItem = node->ThreadItem;
 
@@ -1754,9 +1726,6 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
             PPH_TREENEW_CUSTOM_DRAW customDraw = Parameter1;
             PPH_THREAD_ITEM threadItem;
             RECT rect;
-
-            if (!customDraw)
-                break;
 
             node = (PPH_THREAD_NODE)customDraw->Node;
             threadItem = node->ThreadItem;
@@ -1794,9 +1763,6 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
     case TreeNewKeyDown:
         {
             PPH_TREENEW_KEY_EVENT keyEvent = Parameter1;
-
-            if (!keyEvent)
-                break;
 
             switch (keyEvent->VirtualKey)
             {
@@ -1914,396 +1880,6 @@ VOID PhDeselectAllThreadNodes(
     )
 {
     TreeNew_DeselectRange(Context->TreeNewHandle, 0, -1);
-}
-
-// TODO: Move the below code to a better location. (dmex)
-#include <mapimg.h>
-//#include <symprv.h>
-
-#define NUMBER_SERVICE_TABLES 2
-#define NTOS_SERVICE_INDEX 0
-#define WIN32K_SERVICE_INDEX 1
-#define SERVICE_NUMBER_MASK ((1 << 12) -  1)
-
-typedef struct _PH_SYSCALL_ENTRY
-{
-    ULONG_PTR Address;
-    PPH_STRING Name;
-} PH_SYSCALL_ENTRY, *PPH_SYSCALL_ENTRY;
-
-typedef union _PH_SYSTEMCALL_ENTRY
-{
-    USHORT SystemCallNumber;
-    struct
-    {
-        USHORT SystemCallIndex : 12;
-        USHORT SystemServiceIndex : 4;
-    };
-} PH_SYSTEMCALL_ENTRY, *PPH_SYSTEMCALL_ENTRY;
-
-static int __cdecl PhpSystemCallListIndexSort(
-    _In_ const void* Context,
-    _In_ const void *elem1,
-    _In_ const void *elem2
-    )
-{
-    PPH_SYSCALL_ENTRY entry1 = *(PPH_SYSCALL_ENTRY*)elem1;
-    PPH_SYSCALL_ENTRY entry2 = *(PPH_SYSCALL_ENTRY*)elem2;
-
-    return uintptrcmp(entry1->Address, entry2->Address);
-}
-
-//VOID PhpGenerateWin32kSyscallListLegacy(
-//    _Out_ PPH_LIST* Win32kSystemCallList
-//    )
-//{
-//    static PH_STRINGREF system32FileNameSr = PH_STRINGREF_INIT(L"\\System32\\");
-//    static PH_STRINGREF win32kFileNameSr = PH_STRINGREF_INIT(L"win32k.sys");
-//    PPH_LIST win32kSystemCallList = NULL;
-//    PH_MAPPED_IMAGE mappedImage;
-//    PH_STRINGREF systemRootString;
-//    PPH_STRING fileName;
-//
-//    PhGetSystemRoot(&systemRootString);
-//    fileName = PhConcatStringRef3(&systemRootString, &system32FileNameSr, &win32kFileNameSr);
-//
-//    if (NT_SUCCESS(PhLoadMappedImage(PhGetString(fileName), NULL, &mappedImage)))
-//    {
-//        PPH_SYMBOL_PROVIDER symbolProvider;
-//        ULONG serviceTableLimit = 0;
-//        PVOID serviceTableAddress = NULL;
-//
-//        if (symbolProvider = PhCreateSymbolProvider(NULL))
-//        {
-//            PhLoadSymbolProviderOptions(symbolProvider);
-//
-//            if (PhLoadModuleSymbolProvider(
-//                symbolProvider,
-//                PhGetString(fileName),
-//                (ULONG64)mappedImage.ViewBase,
-//                (ULONG)mappedImage.Size
-//                ))
-//            {
-//                PH_SYMBOL_INFORMATION symbolInfo;
-//
-//                if (PhGetSymbolFromName(
-//                    symbolProvider,
-//                    L"W32pServiceTable",
-//                    &symbolInfo
-//                    ))
-//                {
-//                    serviceTableAddress = PhMappedImageRvaToVa(
-//                        &mappedImage,
-//                        PtrToUlong(PTR_SUB_OFFSET(symbolInfo.Address, mappedImage.ViewBase)),
-//                        NULL
-//                        );
-//                }
-//
-//                if (PhGetSymbolFromName(
-//                    symbolProvider,
-//                    L"W32pServiceLimit",
-//                    &symbolInfo
-//                    ))
-//                {
-//                    PVOID serviceLimitSymbol;
-//
-//                    if (serviceLimitSymbol = PhMappedImageRvaToVa(
-//                        &mappedImage,
-//                        PtrToUlong(PTR_SUB_OFFSET(symbolInfo.Address, mappedImage.ViewBase)),
-//                        NULL
-//                        ))
-//                    {
-//                        serviceTableLimit = *(PULONG)serviceLimitSymbol;
-//                    }
-//                }
-//            }
-//
-//            if (serviceTableLimit > 0 && serviceTableLimit < PAGE_SIZE)
-//            {
-//                win32kSystemCallList = PhCreateList(serviceTableLimit);
-//
-//                for (ULONG i = 0; i < serviceTableLimit; i++)
-//                {
-//                    PPH_STRING name;
-//                    PPH_STRING symbol = NULL;
-//                    ULONG_PTR entry;
-//
-//                    entry = ((PULONG_PTR)serviceTableAddress)[i];
-//                    entry = (ULONG_PTR)PTR_SUB_OFFSET(entry, mappedImage.NtHeaders->OptionalHeader.ImageBase);
-//                    entry = (ULONG_PTR)PTR_ADD_OFFSET(entry, mappedImage.ViewBase);
-//
-//                    name = PhGetSymbolFromAddress(
-//                        symbolProvider,
-//                        (ULONG64)entry,
-//                        NULL,
-//                        NULL,
-//                        &symbol,
-//                        NULL
-//                        );
-//
-//                    PhAddItemList(win32kSystemCallList, symbol);
-//                    PhDereferenceObject(name);
-//                }
-//            }
-//
-//            PhDereferenceObject(symbolProvider);
-//        }
-//
-//        PhUnloadMappedImage(&mappedImage);
-//    }
-//
-//    *Win32kSystemCallList = win32kSystemCallList;
-//
-//    PhDereferenceObject(fileName);
-//}
-
-VOID PhpGenerateSyscallLists(
-    _Out_ PPH_LIST* NtdllSystemCallList,
-    _Out_ PPH_LIST* Win32kSystemCallList
-    )
-{
-    static PH_STRINGREF ntdllPath = PH_STRINGREF_INIT(L"\\SystemRoot\\System32\\ntdll.dll");
-    static PH_STRINGREF win32kPath = PH_STRINGREF_INIT(L"\\SystemRoot\\System32\\win32k.sys");
-    static PH_STRINGREF win32uPath = PH_STRINGREF_INIT(L"\\SystemRoot\\System32\\win32u.dll");
-    PPH_LIST ntdllSystemCallList = NULL;
-    PPH_LIST win32kSystemCallList = NULL;
-    PH_MAPPED_IMAGE mappedImage;
-    PH_MAPPED_IMAGE_EXPORTS exports;
-    PH_MAPPED_IMAGE_EXPORT_ENTRY exportEntry;
-    PH_MAPPED_IMAGE_EXPORT_FUNCTION exportFunction;
-
-    if (NT_SUCCESS(PhLoadMappedImageEx(&ntdllPath, NULL, &mappedImage)))
-    {
-        if (NT_SUCCESS(PhGetMappedImageExports(&exports, &mappedImage)))
-        {
-            PPH_LIST list = PhCreateList(exports.NumberOfEntries);
-
-            for (ULONG i = 0; i < exports.NumberOfEntries; i++)
-            {
-                if (NT_SUCCESS(PhGetMappedImageExportEntry(&exports, i, &exportEntry)))
-                {
-                    if (!(exportEntry.Name && strncmp(exportEntry.Name, "Zw", 2) == 0))
-                        continue;
-
-                    if (NT_SUCCESS(PhGetMappedImageExportFunction(&exports, NULL, exportEntry.Ordinal, &exportFunction)))
-                    {
-                        PPH_SYSCALL_ENTRY entry;
-
-                        entry = PhAllocate(sizeof(PH_SYSCALL_ENTRY));
-                        entry->Address = (ULONG_PTR)exportFunction.Function;
-                        entry->Name = PhZeroExtendToUtf16(exportEntry.Name);
-                        entry->Name->Buffer[0] = L'N';
-                        entry->Name->Buffer[1] = L't';
-
-                        PhAddItemList(list, entry);
-                    }
-                }
-            }
-
-            qsort_s(list->Items, list->Count, sizeof(PVOID), PhpSystemCallListIndexSort, NULL);
-
-            if (list->Count)
-            {
-                ntdllSystemCallList = PhCreateList(list->Count);
-
-                for (ULONG i = 0; i < list->Count; i++)
-                {
-                    PPH_SYSCALL_ENTRY entry = list->Items[i];
-                    PhAddItemList(ntdllSystemCallList, entry->Name);
-                    PhFree(entry);
-                }
-            }
-
-            PhDereferenceObject(list);
-        }
-
-        PhUnloadMappedImage(&mappedImage);
-    }
-
-    if (WindowsVersion >= WINDOWS_10_20H1)
-    {
-        // Win32k has two types of syscall filtering. The first is a process mitigation disabling every win32k syscall
-        // while the second is a specific filter for specific individual system call indexes. The CreateWin32KFilterBitmap
-        // function enumerates the exports from win32k.sys starting with __win32kstub_ for building the syscall table and
-        // more reliable than win32u.dll since syscalls are deleted instead of being replaced with RaiseFailFastException. (dmex)
-
-        if (NT_SUCCESS(PhLoadMappedImageEx(&win32kPath, NULL, &mappedImage)))
-        {
-            if (NT_SUCCESS(PhGetMappedImageExports(&exports, &mappedImage)))
-            {
-                PPH_LIST list = PhCreateList(exports.NumberOfEntries);
-
-                for (ULONG i = 0; i < exports.NumberOfEntries; i++)
-                {
-                    if (NT_SUCCESS(PhGetMappedImageExportEntry(&exports, i, &exportEntry)))
-                    {
-                        if (!(exportEntry.Name && strncmp(exportEntry.Name, "__win32kstub_", 13) == 0))
-                            continue;
-
-                        if (NT_SUCCESS(PhGetMappedImageExportFunction(&exports, NULL, exportEntry.Ordinal, &exportFunction)))
-                        {
-                            PPH_SYSCALL_ENTRY entry;
-
-                            entry = PhAllocate(sizeof(PH_SYSCALL_ENTRY));
-                            entry->Address = (ULONG_PTR)exportFunction.Function;
-                            entry->Name = PhZeroExtendToUtf16(exportEntry.Name);
-                            PhSkipStringRef(&entry->Name->sr, 13 * sizeof(WCHAR));
-
-                            PhAddItemList(list, entry);
-                        }
-                    }
-                }
-
-                qsort_s(list->Items, list->Count, sizeof(PVOID), PhpSystemCallListIndexSort, NULL);
-
-                if (list->Count)
-                {
-                    win32kSystemCallList = PhCreateList(list->Count);
-
-                    for (ULONG i = 0; i < list->Count; i++)
-                    {
-                        PPH_SYSCALL_ENTRY entry = list->Items[i];
-                        PhAddItemList(win32kSystemCallList, entry->Name);
-                        PhFree(entry);
-                    }
-                }
-
-                PhDereferenceObject(list);
-            }
-
-            PhUnloadMappedImage(&mappedImage);
-        }
-    }
-    else
-    {
-        if (NT_SUCCESS(PhLoadMappedImageEx(&win32uPath, NULL, &mappedImage)))
-        {
-            if (NT_SUCCESS(PhGetMappedImageExports(&exports, &mappedImage)))
-            {
-                PPH_LIST list = PhCreateList(exports.NumberOfEntries);
-
-                for (ULONG i = 0; i < exports.NumberOfEntries; i++)
-                {
-                    if (NT_SUCCESS(PhGetMappedImageExportEntry(&exports, i, &exportEntry)))
-                    {
-                        if (!(exportEntry.Name && strncmp(exportEntry.Name, "Nt", 2) == 0))
-                            continue;
-
-                        if (NT_SUCCESS(PhGetMappedImageExportFunction(&exports, NULL, exportEntry.Ordinal, &exportFunction)))
-                        {
-                            PPH_SYSCALL_ENTRY entry;
-
-                            entry = PhAllocate(sizeof(PH_SYSCALL_ENTRY));
-                            entry->Address = (ULONG_PTR)exportFunction.Function;
-                            entry->Name = PhZeroExtendToUtf16(exportEntry.Name);
-
-                            // NOTE: When system calls are deleted from win32k.sys the win32u.dll interface gets
-                            // replaced with stubs that call RaiseFailFastException. This breaks the sorting via
-                            // RVA based on exports since these exports still exist so we'll check the prologue. (dmex)
-                            if (WindowsVersion >= WINDOWS_10_21H1)
-                            {
-                                PBYTE exportAddress;
-
-                                if (exportAddress = PhMappedImageRvaToVa(&mappedImage, PtrToUlong(exportFunction.Function), NULL))
-                                {
-                                    PPH_SYSTEMCALL_ENTRY systemCallEntry = NULL;
-
-                                #ifdef _WIN64
-                                    BYTE prologue[4] = { 0x4C, 0x8B, 0xD1, 0xB8 };
-
-                                    if (RtlEqualMemory(exportAddress, prologue, sizeof(prologue)))
-                                    {
-                                        systemCallEntry = PTR_ADD_OFFSET(exportAddress, sizeof(prologue));
-                                    }
-                                #else
-                                    BYTE prologue[1] = { 0xB8 };
-
-                                    if (RtlEqualMemory(exportAddress, prologue, sizeof(prologue)))
-                                    {
-                                        systemCallEntry = PTR_ADD_OFFSET(exportAddress, sizeof(prologue));
-                                    }
-                                #endif
-
-                                    if (systemCallEntry && systemCallEntry->SystemServiceIndex == WIN32K_SERVICE_INDEX)
-                                    {
-                                        entry->Address = systemCallEntry->SystemCallIndex;
-                                        PhAddItemList(list, entry);
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                PhAddItemList(list, entry);
-                            }
-                        }
-                    }
-                }
-
-                qsort_s(list->Items, list->Count, sizeof(PVOID), PhpSystemCallListIndexSort, NULL);
-
-                if (list->Count)
-                {
-                    win32kSystemCallList = PhCreateList(list->Count);
-
-                    for (ULONG i = 0; i < list->Count; i++)
-                    {
-                        PPH_SYSCALL_ENTRY entry = list->Items[i];
-                        PhAddItemList(win32kSystemCallList, entry->Name);
-                        PhFree(entry);
-                    }
-                }
-
-                PhDereferenceObject(list);
-            }
-
-            PhUnloadMappedImage(&mappedImage);
-        }
-    }
-
-    *NtdllSystemCallList = ntdllSystemCallList;
-    *Win32kSystemCallList = win32kSystemCallList;
-}
-
-PPH_STRING PhGetSystemCallNumberName(
-    _In_ USHORT SystemCallNumber
-    )
-{
-    static PH_INITONCE initOnce = PH_INITONCE_INIT;
-    static PPH_LIST ntdllSystemCallList = NULL;
-    static PPH_LIST win32kSystemCallList = NULL;
-    PPH_SYSTEMCALL_ENTRY systemCallEntry = (PPH_SYSTEMCALL_ENTRY)&SystemCallNumber;
-
-    if (PhBeginInitOnce(&initOnce))
-    {
-        PhpGenerateSyscallLists(&ntdllSystemCallList, &win32kSystemCallList);
-        PhEndInitOnce(&initOnce);
-    }
-
-    switch (systemCallEntry->SystemServiceIndex)
-    {
-    case NTOS_SERVICE_INDEX:
-        {
-            if (ntdllSystemCallList && systemCallEntry->SystemCallIndex <= ntdllSystemCallList->Count)
-            {
-                PPH_STRING entry = ntdllSystemCallList->Items[systemCallEntry->SystemCallIndex];
-
-                return PhReferenceObject(entry);
-            }
-        }
-        break;
-    case WIN32K_SERVICE_INDEX:
-        {
-            if (win32kSystemCallList && systemCallEntry->SystemCallIndex <= win32kSystemCallList->Count)
-            {
-                PPH_STRING entry = win32kSystemCallList->Items[systemCallEntry->SystemCallIndex];
-
-                return PhReferenceObject(entry);
-            }
-        }
-        break;
-    }
-
-    return NULL;
 }
 
 PPH_STRING PhGetApartmentStateString(

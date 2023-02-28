@@ -1,9 +1,22 @@
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
+ *
+ * This file is part of System Informer.
+ *
+ * Authors:
+ *
+ *     wj32    2010-2015
+ *     dmex    2015-2023
+ *
+ */
+
 #ifndef ES_EXTSRV_H
 #define ES_EXTSRV_H
 
 #include <phdk.h>
 #include <phappresource.h>
 #include <settings.h>
+#include <mapldr.h>
 
 #include "resource.h"
 
@@ -143,6 +156,15 @@ INT_PTR CALLBACK EspServiceTriggersDlgProc(
 // pnp
 
 INT_PTR CALLBACK EspPnPServiceDlgProc(
+    _In_ HWND hwndDlg,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam
+    );
+
+// package
+
+INT_PTR CALLBACK EspPackageServiceDlgProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
     _In_ WPARAM wParam,

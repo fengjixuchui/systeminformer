@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     dmex    2013-2022
+ *     dmex    2013-2023
  *
  */
 
@@ -266,17 +266,16 @@ NTSTATUS WaitChainCallbackThread(
     PWCT_CONTEXT context = (PWCT_CONTEXT)Parameter;
 
     if (!WaitChainRegisterCallbacks(context))
-        return NTSTATUS_FROM_WIN32(GetLastError());
+        return PhDosErrorToNtStatus(GetLastError());
 
     // Synchronous WCT session
     if (!(context->WctSessionHandle = OpenThreadWaitChainSession(0, NULL)))
-        return NTSTATUS_FROM_WIN32(GetLastError());
+        return PhDosErrorToNtStatus(GetLastError());
 
     //TreeNew_SetRedraw(context->TreeNewHandle, FALSE);
 
     if (context->IsProcessItem)
     {
-        NTSTATUS status;
         HANDLE threadHandle;
         HANDLE newThreadHandle;
         THREAD_BASIC_INFORMATION basicInfo;
@@ -322,7 +321,7 @@ NTSTATUS WaitChainCallbackThread(
 
     if (context->Ole32ModuleHandle)
     {
-        FreeLibrary(context->Ole32ModuleHandle);
+        PhFreeLibrary(context->Ole32ModuleHandle);
     }
 
     //TreeNew_SetRedraw(context->TreeNewHandle, TRUE);
@@ -1075,11 +1074,11 @@ VOID EtShowWaitChainDialog(
 {
     PhReferenceObject(Context);
 
-    DialogBoxParam(
+    PhDialogBox(
         PluginInstance->DllBase,
         MAKEINTRESOURCE(IDD_WCT_DIALOG),
         NULL,
         WaitChainDlgProc,
-        (LPARAM)Context
+        Context
         );
 }

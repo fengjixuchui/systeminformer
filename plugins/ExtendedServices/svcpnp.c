@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     wj32    2021
+ *     dmex    2022
  *
  */
 
@@ -190,7 +190,7 @@ BOOLEAN HardwareDeviceShowProperties(
             }
         }
 
-        FreeLibrary(devMgrHandle);
+        PhFreeLibrary(devMgrHandle);
     }
 
     return FALSE;
@@ -260,7 +260,7 @@ BOOLEAN HardwareDeviceOpenKey(
         if (bestObjectName)
         {
             // HKLM\SYSTEM\ControlSet\Control\Class\ += DEVPKEY_Device_Driver
-            PhShellOpenKey(ParentWindow, bestObjectName);
+            PhShellOpenKey2(ParentWindow, bestObjectName);
             PhDereferenceObject(bestObjectName);
         }
 
@@ -403,7 +403,7 @@ VOID EspLoadDeviceInstanceImage(
 
                 if (PhExtractIconEx(dllIconPath, FALSE, (INT)index, &smallIcon, NULL, dpiValue))
                 {
-                    UINT imageIndex = PhImageListAddIcon(Context->ImageList, smallIcon);
+                    INT imageIndex = PhImageListAddIcon(Context->ImageList, smallIcon);
                     PhSetListViewItemImageIndex(Context->ListViewHandle, ItemIndex, imageIndex);
                     DestroyIcon(smallIcon);
                 }
@@ -753,12 +753,8 @@ INT_PTR CALLBACK EspPnPServiceDlgProc(
         {
             LONG dpiValue;
 
-            dpiValue = PhGetWindowDpi(hwndDlg);
-
             context->WindowHandle = hwndDlg;
             context->ListViewHandle = GetDlgItem(hwndDlg, IDC_LIST);
-
-            PhCenterWindow(hwndDlg, GetParent(hwndDlg));
 
             PhSetListViewStyle(context->ListViewHandle, FALSE, TRUE);
             PhSetControlTheme(context->ListViewHandle, L"explorer");
@@ -770,6 +766,7 @@ INT_PTR CALLBACK EspPnPServiceDlgProc(
             PhAddListViewGroup(context->ListViewHandle, 0, L"Connected");
             PhAddListViewGroup(context->ListViewHandle, 1, L"Disconnected");
 
+            dpiValue = PhGetWindowDpi(hwndDlg);
             context->ImageList = PhImageListCreate(
                 PhGetDpi(24, dpiValue), // PhGetSystemMetrics(SM_CXSMICON, dpiValue)
                 PhGetDpi(24, dpiValue), // PhGetSystemMetrics(SM_CYSMICON, dpiValue)

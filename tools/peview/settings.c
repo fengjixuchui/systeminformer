@@ -5,14 +5,13 @@
  *
  * Authors:
  *
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
 #include <peview.h>
 
 static PPH_STRING PvSettingsFileName = NULL;
-BOOLEAN PeEnableThemeSupport = FALSE;
 
 VOID PvAddDefaultSettings(
     VOID
@@ -25,6 +24,7 @@ VOID PvAddDefaultSettings(
     PhpAddIntegerSetting(L"EnableLegacyPropertiesDialog", L"0");
     PhpAddIntegerSetting(L"EnableSecurityAdvancedDialog", L"1");
     PhpAddIntegerSetting(L"EnableThemeSupport", L"0");
+    PhpAddIntegerSetting(L"EnableThemeAcrylicSupport", L"1");
     PhpAddIntegerSetting(L"EnableTreeListBorder", L"1");
     PhpAddIntegerSetting(L"EnableVersionSupport", L"0");
     PhpAddIntegerSetting(L"GraphColorMode", L"1");
@@ -58,9 +58,11 @@ VOID PvAddDefaultSettings(
     PhpAddStringSetting(L"ImageCfgListViewColumns", L"");
     PhpAddStringSetting(L"ImageClrListViewColumns", L"");
     PhpAddStringSetting(L"ImageClrImportsListViewColumns", L"");
+    PhpAddStringSetting(L"ImageClrTablesListViewColumns", L"");
     PhpAddStringSetting(L"ImageAttributesListViewColumns", L"");
     PhpAddStringSetting(L"ImagePropertiesListViewColumns", L"");
     PhpAddStringSetting(L"ImageRelocationsListViewColumns", L"");
+    PhpAddStringSetting(L"ImageDynamicRelocationsListViewColumns", L"");
     PhpAddStringSetting(L"ImageSecurityListViewColumns", L"");
     PhpAddStringSetting(L"ImageSecurityListViewSort", L"");
     PhpAddStringSetting(L"ImageSecurityTreeColumns", L"");
@@ -81,6 +83,7 @@ VOID PvAddDefaultSettings(
     PhpAddStringSetting(L"LibListViewColumns", L"");
     PhpAddStringSetting(L"PdbTreeListColumns", L"");
     PhpAddIntegerSetting(L"TreeListBorderEnable", L"0");
+    PhpAddStringSetting(L"CHPEListViewColumns", L"");
     // Wsl properties
     PhpAddStringSetting(L"GeneralWslTreeListColumns", L"");
     PhpAddStringSetting(L"DynamicWslListViewColumns", L"");
@@ -92,8 +95,9 @@ VOID PvUpdateCachedSettings(
     VOID
     )
 {
-    //PhMaxSizeUnit = PhGetIntegerSetting(L"MaxSizeUnit");
-    PeEnableThemeSupport = !!PhGetIntegerSetting(L"EnableThemeSupport");
+    PhMaxSizeUnit = PhGetIntegerSetting(L"MaxSizeUnit");
+    PhEnableThemeSupport = !!PhGetIntegerSetting(L"EnableThemeSupport");
+    PhEnableThemeListviewBorder = !!PhGetIntegerSetting(L"TreeListBorderEnable");
 }
 
 VOID PvInitializeSettings(
@@ -138,7 +142,6 @@ VOID PvInitializeSettings(
     if (!PhIsNullOrEmptyString(PvSettingsFileName))
     {
         status = PhLoadSettings(&PvSettingsFileName->sr);
-        PvUpdateCachedSettings();
 
         // If we didn't find the file, it will be created. Otherwise,
         // there was probably a parsing error and we don't want to
@@ -181,9 +184,6 @@ VOID PvInitializeSettings(
             }
         }
     }
-
-    // Apply basic global settings.
-    PhMaxSizeUnit = PhGetIntegerSetting(L"MaxSizeUnit");
 
     PvUpdateCachedSettings();
 }

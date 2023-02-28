@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2011
- *     dmex    2019-2022
+ *     dmex    2019-2023
  *
  */
 
@@ -22,6 +22,7 @@
 
 #include <accctrl.h>
 #include <lsasup.h>
+#include <mapldr.h>
 
 NTSTATUS PhOpenLsaPolicy(
     _Out_ PLSA_HANDLE PolicyHandle,
@@ -427,7 +428,7 @@ NTSTATUS PhLookupName(
         {
             if (Sid)
             {
-                *Sid = PhAllocateCopy(sids[0].Sid, RtlLengthSid(sids[0].Sid));
+                *Sid = PhAllocateCopy(sids[0].Sid, PhLengthSid(sids[0].Sid));
             }
 
             if (DomainName)
@@ -587,6 +588,8 @@ PPH_STRING PhSidToStringSid(
     }
     else
     {
+        PhDereferenceObject(string);
+
         return NULL;
     }
 }
@@ -597,12 +600,11 @@ PPH_STRING PhGetTokenUserString(
     )
 {
     PPH_STRING tokenUserString = NULL;
-    PTOKEN_USER tokenUser;
+    PH_TOKEN_USER tokenUser;
 
     if (NT_SUCCESS(PhGetTokenUser(TokenHandle, &tokenUser)))
     {
-        tokenUserString = PhGetSidFullName(tokenUser->User.Sid, IncludeDomain, NULL);
-        PhFree(tokenUser);
+        tokenUserString = PhGetSidFullName(tokenUser.User.Sid, IncludeDomain, NULL);
     }
 
     return tokenUserString;
@@ -756,25 +758,25 @@ VOID PhInitializeCapabilitySidCache(
             BYTE capabilitySidBuffer[SECURITY_MAX_SID_SIZE] = { 0 };
             PSID capabilityGroupSid = (PSID)capabilityGroupSidBuffer;
             PSID capabilitySid = (PSID)capabilitySidBuffer;
-            UNICODE_STRING capabilityNameUs;
+            UNICODE_STRING capabilityName;
 
             if (PhEndsWithStringRef2(&namePart, L"\r", FALSE))
                 namePart.Length -= sizeof(WCHAR);
 
-            if (!PhStringRefToUnicodeString(&namePart, &capabilityNameUs))
+            if (!PhStringRefToUnicodeString(&namePart, &capabilityName))
                 continue;
 
             if (NT_SUCCESS(RtlDeriveCapabilitySidsFromName_Import()(
-                &capabilityNameUs,
+                &capabilityName,
                 capabilityGroupSid,
                 capabilitySid
                 )))
             {
                 PH_CAPABILITY_ENTRY entry;
 
-                entry.Name = PhCreateStringFromUnicodeString(&capabilityNameUs);
-                entry.CapabilityGroupSid = PhAllocateCopy(capabilityGroupSid, RtlLengthSid(capabilityGroupSid));
-                entry.CapabilitySid = PhAllocateCopy(capabilitySid, RtlLengthSid(capabilitySid));
+                entry.Name = PhCreateStringFromUnicodeString(&capabilityName);
+                entry.CapabilityGroupSid = PhAllocateCopy(capabilityGroupSid, PhLengthSid(capabilityGroupSid));
+                entry.CapabilitySid = PhAllocateCopy(capabilitySid, PhLengthSid(capabilitySid));
 
                 PhAddItemArray(CapabilitySidArrayList, &entry);
             }
@@ -806,12 +808,12 @@ PPH_STRING PhGetCapabilitySidName(
     {
         entry = PhItemArray(&capabilitySidArrayList, i);
 
-        if (RtlEqualSid(entry->CapabilitySid, CapabilitySid))
+        if (PhEqualSid(entry->CapabilitySid, CapabilitySid))
         {
             return PhReferenceObject(entry->Name);
         }
 
-        if (RtlEqualSid(entry->CapabilityGroupSid, CapabilitySid))
+        if (PhEqualSid(entry->CapabilityGroupSid, CapabilitySid))
         {
             return PhReferenceObject(entry->Name);
         }
@@ -856,7 +858,7 @@ BOOLEAN NTAPI PhpAccessManagerEnumerateKeyCallback(
         0
         )))
     {
-        if (guidString = PhQueryRegistryString(keyHandle, L"LegacyInterfaceClassGuid"))
+        if (guidString = PhQueryRegistryStringZ(keyHandle, L"LegacyInterfaceClassGuid"))
         {
             PH_CAPABILITY_GUID_ENTRY entry;
 

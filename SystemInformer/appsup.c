@@ -12,9 +12,6 @@
 
 #include <phapp.h>
 
-#include <dbghelp.h>
-#include <shellapi.h>
-
 #include <cpysave.h>
 #include <emenu.h>
 #include <svcsup.h>
@@ -24,6 +21,8 @@
 #include <actions.h>
 #include <phappres.h>
 #include <phsvccl.h>
+
+#include <shellapi.h>
 
 #include "..\tools\thirdparty\pcre\pcre2.h"
 
@@ -376,11 +375,15 @@ PH_KNOWN_PROCESS_TYPE PhGetProcessKnownTypeEx(
         else if (
             PhStartsWithStringRef2(&name, L"\\System32", TRUE)
 #ifdef _WIN64
-            || (PhStartsWithStringRef2(&name, L"\\SysWow64", TRUE) && (isWow64 = TRUE, TRUE)) // ugly but necessary
+            || (PhStartsWithStringRef2(&name, L"\\SysWOW64", TRUE) && (isWow64 = TRUE, TRUE)) // ugly but necessary
+#ifdef _M_ARM64
+            || (PhStartsWithStringRef2(&name, L"\\SysArm32", TRUE) && (isWow64 = TRUE, TRUE)) // ugly but necessary
+            || (PhStartsWithStringRef2(&name, L"\\SyChpe32", TRUE) && (isWow64 = TRUE, TRUE)) // ugly but necessary
+#endif
 #endif
             )
         {
-            // SysTem32 and SysWow64 are both 8 characters long.
+            // System32, SysWow64, SysArm32, and SyChpe32 are all 8 characters long.
             PhSkipStringRef(&name, 9 * sizeof(WCHAR));
 
             if (FALSE)
@@ -638,8 +641,7 @@ BOOLEAN PhaGetProcessKnownCommandLine(
                 0
                 )))
             {
-                KnownCommandLine->ComSurrogate.Name =
-                    PH_AUTO(PhQueryRegistryString(rootKeyHandle, NULL));
+                KnownCommandLine->ComSurrogate.Name = PH_AUTO(PhQueryRegistryString(rootKeyHandle, NULL));
 
                 if (NT_SUCCESS(PhOpenKey(
                     &inprocServer32KeyHandle,
@@ -649,12 +651,9 @@ BOOLEAN PhaGetProcessKnownCommandLine(
                     0
                     )))
                 {
-                    KnownCommandLine->ComSurrogate.FileName =
-                        PH_AUTO(PhQueryRegistryString(inprocServer32KeyHandle, NULL));
+                    KnownCommandLine->ComSurrogate.FileName = PH_AUTO(PhQueryRegistryString(inprocServer32KeyHandle, NULL));
 
-                    if (fileName = PH_AUTO(PhExpandEnvironmentStrings(
-                        &KnownCommandLine->ComSurrogate.FileName->sr
-                        )))
+                    if (fileName = PH_AUTO(PhExpandEnvironmentStrings(&KnownCommandLine->ComSurrogate.FileName->sr)))
                     {
                         KnownCommandLine->ComSurrogate.FileName = fileName;
                     }
@@ -672,8 +671,7 @@ BOOLEAN PhaGetProcessKnownCommandLine(
                 0
                 )))
             {
-                KnownCommandLine->ComSurrogate.Name =
-                    PH_AUTO(PhQueryRegistryString(rootKeyHandle, NULL));
+                KnownCommandLine->ComSurrogate.Name = PH_AUTO(PhQueryRegistryString(rootKeyHandle, NULL));
                 NtClose(rootKeyHandle);
             }
         }
@@ -683,51 +681,6 @@ BOOLEAN PhaGetProcessKnownCommandLine(
     }
 
     return TRUE;
-}
-
-PPH_STRING PhGetServiceRelevantFileName(
-    _In_ PPH_STRINGREF ServiceName,
-    _In_ SC_HANDLE ServiceHandle
-    )
-{
-    PPH_STRING fileName = NULL;
-    LPQUERY_SERVICE_CONFIG config;
-
-    if (config = PhGetServiceConfig(ServiceHandle))
-    {
-        PhGetServiceDllParameter(config->dwServiceType, ServiceName, &fileName);
-
-        if (!fileName)
-        {
-            PPH_STRING commandLine;
-
-            if (config->lpBinaryPathName[0])
-            {
-                commandLine = PhCreateString(config->lpBinaryPathName);
-
-                if (config->dwServiceType & SERVICE_WIN32)
-                {
-                    PH_STRINGREF dummyFileName;
-                    PH_STRINGREF dummyArguments;
-
-                    PhParseCommandLineFuzzy(&commandLine->sr, &dummyFileName, &dummyArguments, &fileName);
-
-                    if (!fileName)
-                        PhSwapReference(&fileName, commandLine);
-                }
-                else
-                {
-                    fileName = PhGetFileName(commandLine);
-                }
-
-                PhDereferenceObject(commandLine);
-            }
-        }
-
-        PhFree(config);
-    }
-
-    return fileName;
 }
 
 PPH_STRING PhEscapeStringForDelimiter(
@@ -932,8 +885,8 @@ VOID PhLoadSymbolProviderOptions(
     PPH_STRING searchPath = NULL;
 
     PhSetOptionsSymbolProvider(
-        SYMOPT_UNDNAME,
-        PhGetIntegerSetting(L"DbgHelpUndecorate") ? SYMOPT_UNDNAME : 0
+        PH_SYMOPT_UNDNAME,
+        PhGetIntegerSetting(L"DbgHelpUndecorate") ? PH_SYMOPT_UNDNAME : 0
         );
 
     PhQueryEnvironmentVariable(NULL, &symbolPath, &searchPath);
@@ -1652,7 +1605,11 @@ VOID PhDeleteTreeNewFilterSupport(
     _In_ PPH_TN_FILTER_SUPPORT Support
     )
 {
+    if (!Support->FilterList)
+        return;
+
     PhDereferenceObject(Support->FilterList);
+    Support->FilterList = NULL;
 }
 
 PPH_TN_FILTER_ENTRY PhAddTreeNewFilter(
@@ -2066,6 +2023,57 @@ BOOLEAN PhpSelectFavoriteInRegedit(
     }
 
     return TRUE;
+}
+
+/**
+ * Opens a key in the Registry Editor.
+ *
+ * \param hWnd A handle to the parent window.
+ * \param KeyName The key name to open.
+ */
+VOID PhShellOpenKey(
+    _In_ HWND WindowHandle,
+    _In_ PPH_STRING KeyName
+    )
+{
+    static PH_STRINGREF regeditKeyName = PH_STRINGREF_INIT(L"Software\\Microsoft\\Windows\\CurrentVersion\\Applets\\Regedit");
+    HANDLE regeditKeyHandle;
+    PPH_STRING lastKey;
+    PPH_STRING regeditFileName;
+    PH_STRINGREF systemRootString;
+
+    if (!NT_SUCCESS(PhCreateKey(
+        &regeditKeyHandle,
+        KEY_WRITE,
+        PH_KEY_CURRENT_USER,
+        &regeditKeyName,
+        0,
+        0,
+        NULL
+        )))
+        return;
+
+    lastKey = PhExpandKeyName(KeyName, FALSE);
+    PhSetValueKeyZ(regeditKeyHandle, L"LastKey", REG_SZ, lastKey->Buffer, (ULONG)lastKey->Length + sizeof(UNICODE_NULL));
+    NtClose(regeditKeyHandle);
+    PhDereferenceObject(lastKey);
+
+    // Start regedit. If we aren't elevated, request that regedit be elevated. This is so we can get
+    // the consent dialog in the center of the specified window. (wj32)
+
+    PhGetSystemRoot(&systemRootString);
+    regeditFileName = PhConcatStringRefZ(&systemRootString, L"\\regedit.exe");
+
+    if (PhGetOwnTokenAttributes().Elevated)
+    {
+        PhShellExecute(WindowHandle, regeditFileName->Buffer, NULL);
+    }
+    else
+    {
+        PhShellExecuteEx(WindowHandle, regeditFileName->Buffer, NULL, SW_NORMAL, PH_SHELL_EXECUTE_ADMIN, 0, NULL);
+    }
+
+    PhDereferenceObject(regeditFileName);
 }
 
 /**

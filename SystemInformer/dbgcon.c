@@ -21,6 +21,7 @@
 #include <refp.h>
 #include <settings.h>
 #include <symprv.h>
+#include <mapldr.h>
 #include <workqueue.h>
 #include <workqueuep.h>
 
@@ -469,7 +470,8 @@ static VOID PhStartStopwatch(
     _Inout_ PSTOPWATCH Stopwatch
     )
 {
-    NtQueryPerformanceCounter(&Stopwatch->StartCounter, &Stopwatch->Frequency);
+    PhQueryPerformanceCounter(&Stopwatch->StartCounter);
+    PhQueryPerformanceFrequency(&Stopwatch->Frequency);
 }
 
 static VOID PhStopStopwatch(

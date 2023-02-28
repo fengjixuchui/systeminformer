@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     dmex    2021-2022
+ *     dmex    2021-2023
  *
  */
 
@@ -17,6 +17,7 @@
 #include <procprv.h>
 #include <settings.h>
 #include <emenu.h>
+#include <mapldr.h>
 
 #include <vdmdbg.h>
 
@@ -66,7 +67,7 @@ PVOID PhpGetVdmDbgDllBase(
         {
             if (systemFileName = PhConcatStringRefZ(&systemDirectory->sr, L"\\vdmdbg.dll"))
             {
-                if (!(imageBaseAddress = PhGetLoaderEntryStringRefDllBase(&systemFileName->sr, NULL)))
+                if (!(imageBaseAddress = PhGetLoaderEntryDllBase(&systemFileName->sr, NULL)))
                     imageBaseAddress = PhLoadLibrary(PhGetString(systemFileName));
 
                 PhDereferenceObject(systemFileName);
