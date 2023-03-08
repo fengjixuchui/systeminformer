@@ -25,23 +25,20 @@
 #include <cpysave.h>
 #include <emenu.h>
 #include <hndlinfo.h>
+#include <kphuser.h>
 #include <mapimg.h>
-#include <verify.h>
 #include <secedit.h>
 #include <settings.h>
+#include <verify.h>
 
 #include <colmgr.h>
 #include <extmgri.h>
 #include <mainwnd.h>
-#include <math.h>
 #include <phplug.h>
 #include <phsettings.h>
 #include <procprv.h>
 
-extern PPH_STRING PhGetElevationTypeString(
-    _In_ BOOLEAN IsElevated,
-    _In_ TOKEN_ELEVATION_TYPE ElevationType
-    );
+#include <math.h>
 
 typedef enum _PHP_AGGREGATE_TYPE
 {
@@ -676,7 +673,6 @@ VOID PhpRemoveProcessNode(
     PhClearReference(&ProcessNode->CpuKernelText);
     PhClearReference(&ProcessNode->CpuUserText);
     PhClearReference(&ProcessNode->GrantedAccessText);
-    PhClearReference(&ProcessNode->ElevationText);
 
     PhDeleteGraphBuffers(&ProcessNode->CpuGraphBuffers);
     PhDeleteGraphBuffers(&ProcessNode->PrivateGraphBuffers);
@@ -1540,8 +1536,12 @@ static VOID PhpUpdateProcessNodeGrantedAccess(
             HANDLE processHandle;
             ACCESS_MASK processAccess;
 
-            if (ProcessNode->ProcessItem->IsProtectedProcess)
+            if (ProcessNode->ProcessItem->IsProtectedProcess && ProcessNode->ProcessItem->Protection.Type == PsProtectedTypeProtectedLight)
                 processAccess = PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_LIMITED_INFORMATION;
+            else if (ProcessNode->ProcessItem->IsProtectedProcess && ProcessNode->ProcessItem->Protection.Type == PsProtectedTypeProtected)
+                processAccess = PROCESS_QUERY_LIMITED_INFORMATION;
+            else if (ProcessNode->ProcessItem->IsSubsystemProcess && KphLevel() != KphLevelMax)
+                processAccess = PROCESS_QUERY_LIMITED_INFORMATION;
             else
                 processAccess = MAXIMUM_ALLOWED;
 
@@ -1891,7 +1891,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(VerificationStatus)
 {
-    sortResult = intcmp(processItem1->VerifyResult, processItem2->VerifyResult);
+    sortResult = uintcmp(processItem1->VerifyResult, processItem2->VerifyResult);
 }
 END_SORT_FUNCTION
 
@@ -1933,18 +1933,8 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Elevation)
 {
-    ULONG key1 = 0;
-    ULONG key2 = 0;
-
-    if (processItem1->ElevationType)
-    {
-        key1 = (processItem1->IsElevated ? 1 : 5) + processItem1->ElevationType;
-    }
-
-    if (processItem2->ElevationType)
-    {
-        key2 = (processItem2->IsElevated ? 1 : 5) + processItem2->ElevationType;
-    }
+    ULONG key1 = (ULONG)processItem1->ElevationType + (processItem1->IsElevated ? 4 : 0);
+    ULONG key2 = (ULONG)processItem2->ElevationType + (processItem2->IsElevated ? 4 : 0);
 
     sortResult = uintcmp(key1, key2);
 }
@@ -2218,13 +2208,13 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Subprocesses)
 {
-    sortResult = int64cmp(node1->Children->Count, node2->Children->Count);
+    sortResult = uint64cmp(node1->Children->Count, node2->Children->Count);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(JobObjectId)
 {
-    sortResult = int64cmp(processItem1->JobObjectId, processItem2->JobObjectId);
+    sortResult = uint64cmp(processItem1->JobObjectId, processItem2->JobObjectId);
 }
 END_SORT_FUNCTION
 
@@ -2542,7 +2532,12 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                 getCellText->Text = PhGetStringRef(processItem->ProcessName);
                 break;
             case PHPRTLC_PID:
-                PhInitializeStringRefLongHint(&getCellText->Text, processItem->ProcessIdString);
+                {
+                    if (PH_IS_REAL_PROCESS_ID(processItem->ProcessId))
+                    {
+                        PhInitializeStringRefLongHint(&getCellText->Text, processItem->ProcessIdString);
+                    }
+                }
                 break;
             case PHPRTLC_CPU:
                 {
@@ -2926,10 +2921,7 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
 #endif
                 break;
             case PHPRTLC_ELEVATION:
-                PPH_STRING elevationText;
-                elevationText = PhGetElevationTypeString(processItem->IsElevated ? TRUE : FALSE, processItem->ElevationType);
-                PhMoveReference(&node->ElevationText, elevationText);              
-                getCellText->Text = PhGetStringRef(node->ElevationText);
+                getCellText->Text = PhGetElevationTypeStringRef(!!processItem->IsElevated, processItem->ElevationType);
                 break;
             case PHPRTLC_WINDOWTITLE:
                 PhpUpdateProcessNodeWindow(node);
@@ -3336,8 +3328,11 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                 break;
             case PHPRTLC_SUBPROCESSCOUNT:
                 {
-                    PhMoveReference(&node->SubprocessCountText, PhFormatUInt64(node->Children->Count, TRUE));
-                    getCellText->Text = node->SubprocessCountText->sr;
+                    if (node->Children && node->Children->Count != 0)
+                    {
+                        PhMoveReference(&node->SubprocessCountText, PhFormatUInt64(node->Children->Count, TRUE));
+                        getCellText->Text = node->SubprocessCountText->sr;
+                    }
                 }
                 break;
             case PHPRTLC_JOBOBJECTID:

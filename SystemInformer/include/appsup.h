@@ -474,9 +474,47 @@ PhGetApplicationIcon(
     );
 
 PHAPPAPI
+HICON
+NTAPI
+PhGetApplicationIconEx(
+    _In_ BOOLEAN SmallIcon,
+    _In_opt_ LONG WindowDpi
+    );
+
+PHAPPAPI
 VOID
 NTAPI
 PhSetApplicationWindowIcon(
+    _In_ HWND WindowHandle
+    );
+
+PHAPPAPI
+VOID
+NTAPI
+PhSetApplicationWindowIconEx(
+    _In_ HWND WindowHandle,
+    _In_opt_ LONG WindowDpi
+    );
+
+PHAPPAPI
+VOID
+NTAPI
+PhDeleteApplicationWindowIcon(
+    _In_ HWND WindowHandle
+    );
+
+PHAPPAPI
+VOID
+NTAPI
+PhSetStaticWindowIcon(
+    _In_ HWND WindowHandle,
+    _In_opt_ LONG WindowDpi
+    );
+
+PHAPPAPI
+VOID
+NTAPI
+PhDeleteStaticWindowIcon(
     _In_ HWND WindowHandle
     );
 // end_phapppub

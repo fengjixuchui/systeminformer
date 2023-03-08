@@ -120,7 +120,7 @@ INT_PTR CALLBACK PhpHandleGeneralDlgProc(
 static NTSTATUS PhpDuplicateHandleFromProcess(
     _Out_ PHANDLE Handle,
     _In_ ACCESS_MASK DesiredAccess,
-    _In_opt_ PVOID Context
+    _In_ PVOID Context
     )
 {
     PHANDLE_PROPERTIES_CONTEXT context = Context;
@@ -128,9 +128,6 @@ static NTSTATUS PhpDuplicateHandleFromProcess(
     HANDLE processHandle;
 
     *Handle = NULL;
-
-    if (!context)
-        return STATUS_UNSUCCESSFUL;
 
     if (NT_SUCCESS(status = PhOpenProcess(
         &processHandle,
@@ -2082,10 +2079,14 @@ INT_PTR CALLBACK PhpHandleGeneralDlgProc(
                 PhInitializeWindowTheme(context->ParentWindow, PhEnableThemeSupport);
             else
                 PhInitializeWindowTheme(hwndDlg, FALSE);
+
+            SetTimer(hwndDlg, 1, 1000, NULL);
         }
         break;
     case WM_DESTROY:
         {
+            KillTimer(hwndDlg, 1);
+
             PhUnregisterWindowCallback(context->ParentWindow);
 
             PhSaveWindowPlacementToSetting(L"HandlePropertiesWindowPosition", NULL, context->ParentWindow); // HACK
@@ -2099,6 +2100,11 @@ INT_PTR CALLBACK PhpHandleGeneralDlgProc(
         {
             PhLayoutManagerLayout(&context->LayoutManager);
             ExtendedListView_SetColumnWidth(context->ListViewHandle, 0, ELVSCW_AUTOSIZE_REMAININGSPACE);
+        }
+        break;
+    case WM_TIMER:
+        {
+            PhpUpdateHandleGeneral(context);
         }
         break;
     case WM_NOTIFY:
@@ -2131,14 +2137,13 @@ INT_PTR CALLBACK PhpHandleGeneralDlgProc(
                 point.y = GET_Y_LPARAM(lParam);
 
                 if (point.x == -1 && point.y == -1)
-                    PhGetListViewContextMenuPoint((HWND)wParam, &point);
+                    PhGetListViewContextMenuPoint(context->ListViewHandle, &point);
 
                 PhGetSelectedListViewItemParams(context->ListViewHandle, &listviewItems, &numberOfItems);
 
                 if (numberOfItems != 0)
                 {
                     menu = PhCreateEMenu();
-
                     PhInsertEMenuItem(menu, PhCreateEMenuItem(0, IDC_COPY, L"&Copy", NULL, NULL), ULONG_MAX);
                     PhInsertCopyListViewEMenuItem(menu, IDC_COPY, context->ListViewHandle);
 

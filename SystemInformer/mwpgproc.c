@@ -330,7 +330,7 @@ BOOLEAN PhMwpMicrosoftProcessTreeFilter(
 {
     PPH_PROCESS_NODE processNode = (PPH_PROCESS_NODE)Node;
 
-    if (PhEnableServiceQueryStage2)
+    if (PhEnableProcessQueryStage2)
     {
         if (!PhIsNullOrEmptyString(processNode->ProcessItem->VerifySignerName))
         {
@@ -644,7 +644,7 @@ VOID PhMwpInitializeProcessMenu(
         {
             PPH_PROCESS_NODE node = PhFindProcessNode(Processes[0]->ProcessId);
 
-            if (!(node->Children && node->Children->Count))
+            if (node && !(node->Children && node->Children->Count))
             {
                 PhEnableEMenuItem(Menu, ID_PROCESS_TERMINATETREE, FALSE);
                 PhEnableEMenuItem(Menu, ID_PROCESS_SUSPENDTREE, FALSE);

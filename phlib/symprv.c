@@ -1241,13 +1241,10 @@ typedef struct _PHP_LOAD_PROCESS_SYMBOLS_CONTEXT
 
 static BOOLEAN NTAPI PhpSymbolProviderEnumModulesCallback(
     _In_ PPH_MODULE_INFO Module,
-    _In_opt_ PVOID Context
+    _In_ PVOID Context
     )
 {
     PPHP_LOAD_PROCESS_SYMBOLS_CONTEXT context = Context;
-
-    if (!context)
-        return TRUE;
 
     // If we're loading kernel module symbols for a process other than
     // System, ignore modules which are in user space. This may happen
@@ -1607,29 +1604,16 @@ NTSTATUS PhpAccessCallbackFunctionTable(
 
     if (status == STATUS_OBJECT_NAME_NOT_FOUND)
     {
-        VERIFY_RESULT verifyResult;
-        PPH_STRING signerName;
+        PH_STRINGREF fileName;
 
-        // Note: .NET Core does not create a KnownFunctionTableDlls entry similar to how it doesn't create
-        // the MiniDumpAuxiliaryDlls entry: https://github.com/dotnet/runtime/issues/7675
-        // We have to load the CLR function table DLL for stack enumeration and minidump support,
-        // check the signature and load when it's valid just like windbg does. (dmex)
+        PhUnicodeStringToStringRef(OutOfProcessCallbackDllString, &fileName);
 
-        verifyResult = PhVerifyFile(
-            OutOfProcessCallbackDllString->Buffer,
-            &signerName
-            );
+        // Verify the signature is valid and the certificate chained to Microsoft (dmex)
 
-        if (!(
-            verifyResult == VrTrusted &&
-            signerName && PhEqualString2(signerName, L"Microsoft Corporation", TRUE)
-            ))
+        if (!PhVerifyFileIsChainedToMicrosoft(&fileName, FALSE))
         {
-            PhClearReference(&signerName);
             return STATUS_ACCESS_DISABLED_BY_POLICY_DEFAULT;
         }
-
-        PhClearReference(&signerName);
     }
 
     status = LdrLoadDll(NULL, NULL, OutOfProcessCallbackDllString, &dllHandle);

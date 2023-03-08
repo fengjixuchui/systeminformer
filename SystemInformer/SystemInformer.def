@@ -333,6 +333,7 @@ EXPORTS
     PhSetFileAllocationSize
     PhSetFilePosition
     PhSetFileSize
+    PhSetFirmwareEnvironmentVariable
     PhSetObjectSecurity
     PhSetThreadName
     PhSetTokenIsVirtualizationEnabled
@@ -740,6 +741,7 @@ EXPORTS
 
 ; verify
     PhVerifyFile
+    PhVerifyFileIsChainedToMicrosoft
 
 ; workqueue
     PhDeleteWorkQueue

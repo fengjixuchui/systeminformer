@@ -736,15 +736,15 @@ NTSTATUS PhGetProcessImageFileNameWin32(
             return STATUS_UNSUCCESSFUL;
         }
 
-        // Note: ProcessImageFileNameWin32 returns the NT device path
-        // instead of the Win32 path in cases were the disk volume driver
-        // hasn't registerd with the volume manager and/or ignored the
-        // mount manager ioctls (e.g. ImDisk). We workaround this issue
-        // by calling PhGetFileName and resolving the NT device prefix. (dmex)
-
         fileNameWin32 = PhCreateStringFromUnicodeString(fileName);
 
-        if (fileNameWin32->Length != 0 && fileNameWin32->Buffer[0] == OBJ_NAME_PATH_SEPARATOR)
+        // Note: ProcessImageFileNameWin32 returns the NT device path
+        // instead of the Win32 path in some cases were drivers haven't 
+        // registered with the volume manager or have ignored the mount
+        // manager (e.g. ImDisk). We workaround these issues by calling 
+        // PhGetFileName and resolving the NT device prefix. (dmex)
+
+        if (fileNameWin32->Buffer[0] == OBJ_NAME_PATH_SEPARATOR)
         {
             PhMoveReference(&fileNameWin32, PhGetFileName(fileNameWin32));
         }
@@ -5132,7 +5132,7 @@ BOOLEAN NTAPI PhpEnumProcessModulesCallback(
         }
     }
 
-    if (WindowsVersion >= WINDOWS_8)
+    if (WindowsVersion >= WINDOWS_8 && Entry->DdagNode)
     {
         LDR_DDAG_NODE ldrDagNode;
 
@@ -5519,7 +5519,7 @@ BOOLEAN NTAPI PhpEnumProcessModules32Callback(
         nativeEntry.FullDllName.Buffer = fullDllNameBuffer;
     }
 
-    if (WindowsVersion >= WINDOWS_8)
+    if (WindowsVersion >= WINDOWS_8 && Entry->DdagNode)
     {
         LDR_DDAG_NODE32 ldrDagNode32 = { 0 };
 
@@ -6804,15 +6804,12 @@ typedef struct _PHP_PIPE_NAME_HASH
 
 static BOOLEAN NTAPI PhpDotNetCorePipeHashCallback(
     _In_ PVOID Information,
-    _In_opt_ PVOID Context
+    _In_ PVOID Context
     )
 {
     PFILE_DIRECTORY_INFORMATION fileInfo = Information;
     PHP_PIPE_NAME_HASH objectPipe;
     PH_STRINGREF objectName;
-
-    if (!Context)
-        return FALSE;
 
     objectName.Length = fileInfo->FileNameLength;
     objectName.Buffer = fileInfo->FileName;
@@ -8092,15 +8089,12 @@ typedef struct _ENUM_GENERIC_PROCESS_MODULES_CONTEXT
 
 static BOOLEAN EnumGenericProcessModulesCallback(
     _In_ PLDR_DATA_TABLE_ENTRY Module,
-    _In_opt_ PVOID Context
+    _In_ PVOID Context
     )
 {
     PENUM_GENERIC_PROCESS_MODULES_CONTEXT context = Context;
     PH_MODULE_INFO moduleInfo;
     BOOLEAN cont;
-
-    if (!context)
-        return FALSE;
 
     // Check if we have a duplicate base address.
     if (PhFindEntryHashtable(context->BaseAddressHashtable, &Module->DllBase))
@@ -9395,6 +9389,27 @@ NTSTATUS PhCreateFileWin32Ex(
         0
         );
 
+    if (status == STATUS_SHARING_VIOLATION &&
+        KphLevel() >= KphLevelMed &&
+        (DesiredAccess & KPH_FILE_READ_ACCESS) == DesiredAccess &&
+        CreateDisposition == KPH_FILE_READ_DISPOSITION)
+    {
+        status = KphCreateFile(
+            &fileHandle,
+            DesiredAccess,
+            &objectAttributes,
+            &ioStatusBlock,
+            AllocationSize,
+            FileAttributes,
+            ShareAccess,
+            CreateDisposition,
+            CreateOptions,
+            NULL,
+            0,
+            IO_IGNORE_SHARE_ACCESS_CHECK
+            );
+    }
+
     RtlFreeUnicodeString(&fileName);
 
     if (NT_SUCCESS(status))
@@ -9463,6 +9478,27 @@ NTSTATUS PhCreateFileWin32ExAlt(
         sizeof(EXTENDED_CREATE_INFORMATION)
         );
 
+    if (status == STATUS_SHARING_VIOLATION &&
+        KphLevel() >= KphLevelMed &&
+        (DesiredAccess & KPH_FILE_READ_ACCESS) == DesiredAccess &&
+        CreateDisposition == KPH_FILE_READ_DISPOSITION)
+    {
+        status = KphCreateFile(
+            &fileHandle,
+            DesiredAccess,
+            &objectAttributes,
+            &ioStatusBlock,
+            AllocationSize,
+            FileAttributes,
+            ShareAccess,
+            CreateDisposition,
+            CreateOptions | FILE_CONTAINS_EXTENDED_CREATE_INFORMATION,
+            &extendedInfo,
+            sizeof(EXTENDED_CREATE_INFORMATION),
+            IO_IGNORE_SHARE_ACCESS_CHECK
+            );
+    }
+
     RtlFreeUnicodeString(&fileName);
 
     if (NT_SUCCESS(status))
@@ -9516,6 +9552,27 @@ NTSTATUS PhCreateFile(
         NULL,
         0
         );
+
+    if (status == STATUS_SHARING_VIOLATION &&
+        KphLevel() >= KphLevelMed &&
+        (DesiredAccess & KPH_FILE_READ_ACCESS) == DesiredAccess &&
+        CreateDisposition == KPH_FILE_READ_DISPOSITION)
+    {
+        status = KphCreateFile(
+            &fileHandle,
+            DesiredAccess,
+            &objectAttributes,
+            &ioStatusBlock,
+            NULL,
+            FileAttributes,
+            ShareAccess,
+            CreateDisposition,
+            CreateOptions,
+            NULL,
+            0,
+            IO_IGNORE_SHARE_ACCESS_CHECK
+            );
+    }
 
     if (NT_SUCCESS(status))
     {
@@ -9762,6 +9819,28 @@ NTSTATUS PhReOpenFile(
         NULL,
         0
         );
+
+    if (status == STATUS_SHARING_VIOLATION &&
+        KphLevel() >= KphLevelMed &&
+        (DesiredAccess & KPH_FILE_READ_ACCESS) == DesiredAccess)
+    {
+        assert(KPH_FILE_READ_DISPOSITION == FILE_OPEN);
+
+        status = KphCreateFile(
+            &fileHandle,
+            DesiredAccess,
+            &objectAttributes,
+            &ioStatusBlock,
+            NULL,
+            0,
+            ShareAccess,
+            FILE_OPEN,
+            OpenOptions,
+            NULL,
+            0,
+            IO_IGNORE_SHARE_ACCESS_CHECK
+            );
+    }
 
     if (NT_SUCCESS(status))
     {
@@ -13110,15 +13189,17 @@ BOOLEAN PhIsFirmwareSupported(
 NTSTATUS PhGetFirmwareEnvironmentVariable(
     _In_ PPH_STRINGREF VariableName,
     _In_ PPH_STRINGREF VendorGuid,
-    _Out_ PVOID* VariableValueBuffer,
-    _Out_opt_ PULONG VariableValueLength
+    _Out_writes_bytes_opt_(*ValueLength) PVOID* ValueBuffer,
+    _Out_opt_ PULONG ValueLength,
+    _Out_opt_ PULONG ValueAttributes
     )
 {
     NTSTATUS status;
     GUID vendorGuid;
     UNICODE_STRING variableName;
-    PVOID variableValueBuffer = NULL;
-    ULONG variableValueLength = 0;
+    PVOID valueBuffer;
+    ULONG valueLength = 0;
+    ULONG valueAttributes = 0;
 
     PhStringRefToUnicodeString(VariableName, &variableName);
 
@@ -13133,35 +13214,75 @@ NTSTATUS PhGetFirmwareEnvironmentVariable(
     status = NtQuerySystemEnvironmentValueEx(
         &variableName,
         &vendorGuid,
-        variableValueBuffer,
-        &variableValueLength,
-        NULL
+        NULL,
+        &valueLength,
+        &valueAttributes
         );
 
     if (status != STATUS_BUFFER_TOO_SMALL)
         return STATUS_UNSUCCESSFUL;
 
-    variableValueBuffer = PhAllocate(variableValueLength);
-    memset(variableValueBuffer, 0, variableValueLength);
+    valueBuffer = PhAllocate(valueLength);
+    memset(valueBuffer, 0, valueLength);
 
     status = NtQuerySystemEnvironmentValueEx(
         &variableName,
         &vendorGuid,
-        variableValueBuffer,
-        &variableValueLength,
-        NULL
+        valueBuffer,
+        &valueLength,
+        &valueAttributes
         );
 
     if (NT_SUCCESS(status))
     {
-        if (VariableValueLength)
-            *VariableValueLength = variableValueLength;
-        *VariableValueBuffer = variableValueBuffer;
+        if (ValueBuffer)
+            *ValueBuffer = valueBuffer;
+        else
+            PhFree(valueBuffer);
+
+        if (ValueLength)
+            *ValueLength = valueLength;
+
+        if (ValueAttributes)
+            *ValueAttributes = valueAttributes;
     }
     else
     {
-        PhFree(variableValueBuffer);
+        PhFree(valueBuffer);
     }
+
+    return status;
+}
+
+NTSTATUS PhSetFirmwareEnvironmentVariable(
+    _In_ PPH_STRINGREF VariableName,
+    _In_ PPH_STRINGREF VendorGuid,
+    _In_reads_bytes_opt_(ValueLength) PVOID ValueBuffer,
+    _In_ ULONG ValueLength,
+    _In_ ULONG Attributes
+    )
+{
+    NTSTATUS status;
+    GUID vendorGuid;
+    UNICODE_STRING variableName;
+
+    PhStringRefToUnicodeString(VariableName, &variableName);
+
+    status = PhStringToGuid(
+        VendorGuid,
+        &vendorGuid
+        );
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    status = NtSetSystemEnvironmentValueEx(
+        &variableName,
+        &vendorGuid,
+        ValueBuffer,
+        ValueLength,
+        Attributes
+        );
 
     return status;
 }

@@ -594,6 +594,33 @@ PPH_STRING PhSidToStringSid(
     }
 }
 
+NTSTATUS PhSidToStringBuffer(
+    _In_ PSID Sid,
+    _Writable_bytes_(BufferLength) PWCHAR Buffer,
+    _In_ USHORT BufferLength,
+    _Out_opt_ PUSHORT ReturnLength
+    )
+{
+    NTSTATUS status;
+    UNICODE_STRING unicodeString;
+
+    RtlInitEmptyUnicodeString(&unicodeString, Buffer, BufferLength);
+
+    status = RtlConvertSidToUnicodeString(
+        &unicodeString,
+        Sid,
+        FALSE
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        if (ReturnLength)
+            *ReturnLength = unicodeString.Length;
+    }
+
+    return status;
+}
+
 PPH_STRING PhGetTokenUserString(
     _In_ HANDLE TokenHandle,
     _In_ BOOLEAN IncludeDomain
@@ -837,15 +864,12 @@ typedef struct _PH_CAPABILITY_KEY_CALLBACK
 BOOLEAN NTAPI PhpAccessManagerEnumerateKeyCallback(
     _In_ HANDLE RootDirectory,
     _In_ PKEY_BASIC_INFORMATION Information,
-    _In_opt_ PVOID Context
+    _In_ PVOID Context
     )
 {
     HANDLE keyHandle;
     PPH_STRING guidString;
     PH_STRINGREF keyName;
-
-    if (!Context)
-        return FALSE;
 
     keyName.Buffer = Information->Name;
     keyName.Length = Information->NameLength;
@@ -878,15 +902,12 @@ BOOLEAN NTAPI PhpAccessManagerEnumerateKeyCallback(
 BOOLEAN NTAPI PhpDeviceAccessSubKeyEnumerateKeyCallback(
     _In_ HANDLE RootDirectory,
     _In_ PKEY_BASIC_INFORMATION Information,
-    _In_opt_ PVOID Context
+    _In_ PVOID Context
     )
 {
     PPH_CAPABILITY_KEY_CALLBACK context = Context;
     HANDLE keyHandle;
     PH_STRINGREF keyName;
-
-    if (!Context)
-        return FALSE;
 
     keyName.Buffer = Information->Name;
     keyName.Length = Information->NameLength;
@@ -914,7 +935,7 @@ BOOLEAN NTAPI PhpDeviceAccessSubKeyEnumerateKeyCallback(
 BOOLEAN NTAPI PhpDeviceAccessEnumerateKeyCallback(
     _In_ HANDLE RootDirectory,
     _In_ PKEY_BASIC_INFORMATION Information,
-    _In_opt_ PVOID Context
+    _In_ PVOID Context
     )
 {
     HANDLE keyHandle;

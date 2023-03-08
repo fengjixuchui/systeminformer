@@ -456,16 +456,16 @@ NTSTATUS KphHashFile(
     NT_ASSERT(algHandle);
 
     viewSize = 0;
-    status = KphMapViewOfFileInSystemProcess(FileHandle,
-                                             0,
-                                             &mappedBase,
-                                             &viewSize,
-                                             &apcState);
+    status = KphMapViewInSystem(FileHandle,
+                                0,
+                                &mappedBase,
+                                &viewSize,
+                                &apcState);
     if (!NT_SUCCESS(status))
     {
         KphTracePrint(TRACE_LEVEL_ERROR,
                       HASH,
-                      "KphMapViewOfFileInSystemProcess failed: %!STATUS!",
+                      "KphMapViewInSystem failed: %!STATUS!",
                       status);
 
         mappedBase = NULL;
@@ -584,7 +584,7 @@ Exit:
 
     if (mappedBase)
     {
-        KphUnmapViewInSystemProcess(mappedBase, &apcState);
+        KphUnmapViewInSystem(mappedBase, &apcState);
     }
 
     return status;
@@ -622,26 +622,24 @@ NTSTATUS KphHashFileByName(
                                NULL,
                                NULL);
 
-    status = IoCreateFileEx(&fileHandle,
-                            FILE_READ_ACCESS,
-                            &objectAttributes,
-                            &ioStatusBlock,
-                            NULL,
-                            FILE_ATTRIBUTE_NORMAL,
-                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                            FILE_OPEN,
-                            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
-                            NULL,
-                            0,
-                            CreateFileTypeNone,
-                            NULL,
-                            IO_IGNORE_SHARE_ACCESS_CHECK,
-                            NULL);
+    status = KphCreateFile(&fileHandle,
+                           FILE_READ_ACCESS | SYNCHRONIZE,
+                           &objectAttributes,
+                           &ioStatusBlock,
+                           NULL,
+                           FILE_ATTRIBUTE_NORMAL,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           FILE_OPEN,
+                           FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
+                           NULL,
+                           0,
+                           IO_IGNORE_SHARE_ACCESS_CHECK,
+                           KernelMode);
     if (!NT_SUCCESS(status))
     {
         KphTracePrint(TRACE_LEVEL_ERROR,
                       HASH,
-                      "IoCreateFileEx failed: %!STATUS!",
+                      "KphCreateFile failed: %!STATUS!",
                       status);
 
         fileHandle = NULL;
@@ -717,16 +715,16 @@ NTSTATUS KphGetAuthenticodeInfo(
     NT_ASSERT(KphpHashingInfra->BCryptSha256Provider);
 
     viewSize = 0;
-    status = KphMapViewOfFileInSystemProcess(FileHandle,
-                                             0,
-                                             &mappedBase,
-                                             &viewSize,
-                                             &apcState);
+    status = KphMapViewInSystem(FileHandle,
+                                0,
+                                &mappedBase,
+                                &viewSize,
+                                &apcState);
     if (!NT_SUCCESS(status))
     {
         KphTracePrint(TRACE_LEVEL_ERROR,
                       HASH,
-                      "KphMapViewOfFileInSystemProcess failed: %!STATUS!",
+                      "KphMapViewInSystem failed: %!STATUS!",
                       status);
 
         mappedBase = NULL;
@@ -734,11 +732,6 @@ NTSTATUS KphGetAuthenticodeInfo(
     }
 
     mappedEnd = Add2Ptr(mappedBase, viewSize);
-
-    //
-    // KphMapViewOfFileInSystemProcess guarantees this.
-    //
-    NT_ASSERT((mappedEnd >= mappedBase) && (mappedEnd <= MmHighestUserAddress));
 
     __try
     {
@@ -1037,7 +1030,7 @@ Exit:
 
     if (mappedBase)
     {
-        KphUnmapViewInSystemProcess(mappedBase, &apcState);
+        KphUnmapViewInSystem(mappedBase, &apcState);
     }
 
     return status;
@@ -1075,26 +1068,24 @@ NTSTATUS KphGetAuthenticodeInfoByFileName(
                                NULL,
                                NULL);
 
-    status = IoCreateFileEx(&fileHandle,
-                            FILE_READ_ACCESS,
-                            &objectAttributes,
-                            &ioStatusBlock,
-                            NULL,
-                            FILE_ATTRIBUTE_NORMAL,
-                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                            FILE_OPEN,
-                            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
-                            NULL,
-                            0,
-                            CreateFileTypeNone,
-                            NULL,
-                            IO_IGNORE_SHARE_ACCESS_CHECK,
-                            NULL);
+    status = KphCreateFile(&fileHandle,
+                           FILE_READ_ACCESS | SYNCHRONIZE,
+                           &objectAttributes,
+                           &ioStatusBlock,
+                           NULL,
+                           FILE_ATTRIBUTE_NORMAL,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           FILE_OPEN,
+                           FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
+                           NULL,
+                           0,
+                           IO_IGNORE_SHARE_ACCESS_CHECK,
+                           KernelMode);
     if (!NT_SUCCESS(status))
     {
         KphTracePrint(TRACE_LEVEL_ERROR,
                       HASH,
-                      "IoCreateFileEx failed: %!STATUS!",
+                      "KphCreateFile failed: %!STATUS!",
                       status);
 
         fileHandle = NULL;

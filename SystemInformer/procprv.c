@@ -699,7 +699,7 @@ VOID PhpProcessQueryStage1(
     // Version info
     if (!processItem->IsSubsystemProcess)
     {
-        if (!PhIsNullOrEmptyString(processItem->FileName) && PhDoesFileExist(&processItem->FileName->sr))
+        if (!PhIsNullOrEmptyString(processItem->FileName))
         {
             Data->IconEntry = PhImageListExtractIcon(
                 processItem->FileName,
@@ -1006,9 +1006,9 @@ VOID PhpProcessQueryStage2(
         }
     }
 
-    if (PhEnableLinuxSubsystemSupport && processItem->FileNameWin32 && processItem->IsSubsystemProcess)
+    if (PhEnableLinuxSubsystemSupport && processItem->FileName && processItem->IsSubsystemProcess)
     {
-        PhInitializeImageVersionInfoCached(&Data->VersionInfo, processItem->FileNameWin32, TRUE, PhEnableVersionShortText);
+        PhInitializeImageVersionInfoCached(&Data->VersionInfo, processItem->FileName, TRUE, PhEnableVersionShortText);
     }
 }
 
@@ -1262,10 +1262,7 @@ VOID PhpFillProcessItem(
     }
 
     // Token information
-    if (
-        ProcessItem->QueryHandle &&
-        ProcessItem->ProcessId != SYSTEM_PROCESS_ID // System token can't be opened (dmex)
-        )
+    if (ProcessItem->QueryHandle)
     {
         HANDLE tokenHandle;
 
@@ -1315,14 +1312,14 @@ VOID PhpFillProcessItem(
             NtClose(tokenHandle);
         }
     }
-    else
+
+    if (ProcessItem->ProcessId == SYSTEM_IDLE_PROCESS_ID ||
+        ProcessItem->ProcessId == SYSTEM_PROCESS_ID)
     {
-        if (ProcessItem->ProcessId == SYSTEM_IDLE_PROCESS_ID ||
-            ProcessItem->ProcessId == SYSTEM_PROCESS_ID) // System token can't be opened on XP (wj32)
-        {
+        if (!ProcessItem->Sid)
             ProcessItem->Sid = PhAllocateCopy(&PhSeLocalSystemSid, PhLengthSid(&PhSeLocalSystemSid));
+        if (!ProcessItem->UserName)
             ProcessItem->UserName = PhpGetSidFullNameCached(&PhSeLocalSystemSid);
-        }
     }
 
     // Known Process Type
