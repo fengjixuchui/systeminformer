@@ -3436,8 +3436,6 @@ NTSTATUS PhGetTokenIntegrityLevelRID(
         subAuthority = SECURITY_MANDATORY_UNTRUSTED_RID;
     }
 
-    //PhFree(mandatoryLabel);
-
     if (IntegrityString)
     {
         if (NT_SUCCESS(PhGetTokenIsAppContainer(TokenHandle, &tokenIsAppContainer)) && tokenIsAppContainer)
@@ -3521,9 +3519,9 @@ NTSTATUS PhGetTokenIntegrityLevel(
         case SECURITY_MANDATORY_MEDIUM_RID:
             integrityLevel = MandatoryLevelMedium;
             break;
-        //case SECURITY_MANDATORY_MEDIUM_PLUS_RID:
-        //    integrityLevel = MandatoryLevelMedium;
-        //    break;
+        case SECURITY_MANDATORY_MEDIUM_PLUS_RID:
+            integrityLevel = MandatoryLevelMedium;
+            break;
         case SECURITY_MANDATORY_HIGH_RID:
             integrityLevel = MandatoryLevelHigh;
             break;
@@ -6803,16 +6801,16 @@ typedef struct _PHP_PIPE_NAME_HASH
 } PHP_PIPE_NAME_HASH, *PPHP_PIPE_NAME_HASH;
 
 static BOOLEAN NTAPI PhpDotNetCorePipeHashCallback(
-    _In_ PVOID Information,
+    _In_ HANDLE RootDirectory,
+    _In_ PFILE_DIRECTORY_INFORMATION Information,
     _In_ PVOID Context
     )
 {
-    PFILE_DIRECTORY_INFORMATION fileInfo = Information;
     PHP_PIPE_NAME_HASH objectPipe;
     PH_STRINGREF objectName;
 
-    objectName.Length = fileInfo->FileNameLength;
-    objectName.Buffer = fileInfo->FileName;
+    objectName.Length = Information->FileNameLength;
+    objectName.Buffer = Information->FileName;
     objectPipe.Hash = PhHashStringRefEx(&objectName, TRUE, PH_STRING_HASH_X65599);
 
     PhAddItemArray(Context, &objectPipe);
@@ -7303,7 +7301,7 @@ NTSTATUS PhEnumDirectoryFileEx(
             // HACK: Use the wrong structure for the NextEntryOffset. (dmex)
             information = PTR_ADD_OFFSET(buffer, i);
 
-            if (!Callback(information, Context))
+            if (!Callback(FileHandle, information, Context))
             {
                 cont = FALSE;
                 break;
@@ -9389,27 +9387,6 @@ NTSTATUS PhCreateFileWin32Ex(
         0
         );
 
-    if (status == STATUS_SHARING_VIOLATION &&
-        KphLevel() >= KphLevelMed &&
-        (DesiredAccess & KPH_FILE_READ_ACCESS) == DesiredAccess &&
-        CreateDisposition == KPH_FILE_READ_DISPOSITION)
-    {
-        status = KphCreateFile(
-            &fileHandle,
-            DesiredAccess,
-            &objectAttributes,
-            &ioStatusBlock,
-            AllocationSize,
-            FileAttributes,
-            ShareAccess,
-            CreateDisposition,
-            CreateOptions,
-            NULL,
-            0,
-            IO_IGNORE_SHARE_ACCESS_CHECK
-            );
-    }
-
     RtlFreeUnicodeString(&fileName);
 
     if (NT_SUCCESS(status))
@@ -9478,27 +9455,6 @@ NTSTATUS PhCreateFileWin32ExAlt(
         sizeof(EXTENDED_CREATE_INFORMATION)
         );
 
-    if (status == STATUS_SHARING_VIOLATION &&
-        KphLevel() >= KphLevelMed &&
-        (DesiredAccess & KPH_FILE_READ_ACCESS) == DesiredAccess &&
-        CreateDisposition == KPH_FILE_READ_DISPOSITION)
-    {
-        status = KphCreateFile(
-            &fileHandle,
-            DesiredAccess,
-            &objectAttributes,
-            &ioStatusBlock,
-            AllocationSize,
-            FileAttributes,
-            ShareAccess,
-            CreateDisposition,
-            CreateOptions | FILE_CONTAINS_EXTENDED_CREATE_INFORMATION,
-            &extendedInfo,
-            sizeof(EXTENDED_CREATE_INFORMATION),
-            IO_IGNORE_SHARE_ACCESS_CHECK
-            );
-    }
-
     RtlFreeUnicodeString(&fileName);
 
     if (NT_SUCCESS(status))
@@ -9552,27 +9508,6 @@ NTSTATUS PhCreateFile(
         NULL,
         0
         );
-
-    if (status == STATUS_SHARING_VIOLATION &&
-        KphLevel() >= KphLevelMed &&
-        (DesiredAccess & KPH_FILE_READ_ACCESS) == DesiredAccess &&
-        CreateDisposition == KPH_FILE_READ_DISPOSITION)
-    {
-        status = KphCreateFile(
-            &fileHandle,
-            DesiredAccess,
-            &objectAttributes,
-            &ioStatusBlock,
-            NULL,
-            FileAttributes,
-            ShareAccess,
-            CreateDisposition,
-            CreateOptions,
-            NULL,
-            0,
-            IO_IGNORE_SHARE_ACCESS_CHECK
-            );
-    }
 
     if (NT_SUCCESS(status))
     {
@@ -9819,28 +9754,6 @@ NTSTATUS PhReOpenFile(
         NULL,
         0
         );
-
-    if (status == STATUS_SHARING_VIOLATION &&
-        KphLevel() >= KphLevelMed &&
-        (DesiredAccess & KPH_FILE_READ_ACCESS) == DesiredAccess)
-    {
-        assert(KPH_FILE_READ_DISPOSITION == FILE_OPEN);
-
-        status = KphCreateFile(
-            &fileHandle,
-            DesiredAccess,
-            &objectAttributes,
-            &ioStatusBlock,
-            NULL,
-            0,
-            ShareAccess,
-            FILE_OPEN,
-            OpenOptions,
-            NULL,
-            0,
-            IO_IGNORE_SHARE_ACCESS_CHECK
-            );
-    }
 
     if (NT_SUCCESS(status))
     {
@@ -10208,6 +10121,7 @@ NTSTATUS PhCreateDirectoryFullPathWin32(
 }
 
 static BOOLEAN PhpDeleteDirectoryCallback(
+    _In_ HANDLE RootDirectory,
     _In_ PFILE_DIRECTORY_INFORMATION Information,
     _In_ PVOID Context
     )
@@ -12247,7 +12161,7 @@ NTSTATUS PhQueryProcessHeapInformation(
             heapInfo.BaseAddress = heapInfoV1.BaseAddress;
         }
 
-        // go through all heap entries and compute amount of allocated and committed bytes
+        // go through all heap entries and compute amount of allocated and committed bytes (ge0rdi)
         for (ULONG e = 0; e < heapInfo.NumberOfEntries; e++)
         {
             PRTL_HEAP_ENTRY entry = &heapInfo.Entries[e];
@@ -12258,11 +12172,11 @@ NTSTATUS PhQueryProcessHeapInformation(
                 committed += entry->u.s2.CommittedSize;
         }
 
-        // sometimes computed number if commited bytes is few pages smaller than the one reported by API, lets use the higher value
+        // sometimes computed number if committed bytes is few pages smaller than the one reported by API, lets use the higher value (ge0rdi)
         if (committed < heapInfo.BytesCommitted)
             committed = heapInfo.BytesCommitted;
 
-        // make sure number of allocated bytes is not higher than number of committed bytes (as that would make no sense)
+        // make sure number of allocated bytes is not higher than number of committed bytes (as that would make no sense) (ge0rdi)
         if (allocated > committed)
             allocated = committed;
 
@@ -12579,10 +12493,12 @@ NTSTATUS PhGetProcessConsoleCodePage(
     NTSTATUS status;
     THREAD_BASIC_INFORMATION basicInformation;
     HANDLE threadHandle = NULL;
+    HANDLE powerRequestHandle = NULL;
     PVOID getConsoleCP = NULL;
     PPH_TARGET_LIBS libs;
 
     status = PhpGetProcessTargetLibs(ProcessHandle, &libs, NULL);
+
     if (!NT_SUCCESS(status))
         return status;
 
@@ -12597,6 +12513,14 @@ NTSTATUS PhGetProcessConsoleCodePage(
 
     if (!NT_SUCCESS(status))
         goto CleanupExit;
+
+    if (WindowsVersion >= WINDOWS_8)
+    {
+        status = PhCreateExecutionRequiredRequest(ProcessHandle, &powerRequestHandle);
+
+        if (!NT_SUCCESS(status))
+            return status;
+    }
 
     status = RtlCreateUserThread(
         ProcessHandle,
@@ -12630,6 +12554,11 @@ CleanupExit:
     if (threadHandle)
     {
         NtClose(threadHandle);
+    }
+
+    if (powerRequestHandle)
+    {
+        PhDestroyExecutionRequiredRequest(powerRequestHandle);
     }
 
     return status;
@@ -12688,10 +12617,16 @@ NTSTATUS PhGetProcessSystemDllInitBlock(
     NTSTATUS status = STATUS_UNSUCCESSFUL;
     PPS_SYSTEM_DLL_INIT_BLOCK ldrInitBlock;
     PVOID ldrInitBlockAddress;
+    PPH_TARGET_LIBS runtime;
 
-    status = PhGetProcedureAddressRemoteZ(
+    status = PhpGetProcessTargetLibs(ProcessHandle, &runtime, NULL);
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    status = PhGetProcedureAddressRemote(
         ProcessHandle,
-        L"\\SystemRoot\\System32\\ntdll.dll",
+        &runtime->Ntdll,
         "LdrSystemDllInitBlock",
         0,
         &ldrInitBlockAddress,
@@ -12714,7 +12649,15 @@ NTSTATUS PhGetProcessSystemDllInitBlock(
 
     if (NT_SUCCESS(status))
     {
-        *SystemDllInitBlock = ldrInitBlock;
+        if (ldrInitBlock->Size == sizeof(PS_SYSTEM_DLL_INIT_BLOCK))
+        {
+            *SystemDllInitBlock = ldrInitBlock;
+        }
+        else
+        {
+            status = STATUS_INFO_LENGTH_MISMATCH;
+            PhFree(ldrInitBlock);
+        }
     }
     else
     {
@@ -13397,32 +13340,13 @@ NTSTATUS PhCreateExecutionRequiredRequest(
 {
     NTSTATUS status;
     HANDLE powerRequestHandle = NULL;
-    PROCESS_EXTENDED_BASIC_INFORMATION basicInfo;
     COUNTED_REASON_CONTEXT powerRequestReason;
     POWER_REQUEST_ACTION powerRequestAction;
-
-    status = PhGetProcessExtendedBasicInformation(ProcessHandle, &basicInfo);
-
-    if (!NT_SUCCESS(status))
-        return status;
-
-    if (!basicInfo.IsFrozen)
-    {
-        // CreateToolhelp32Snapshot uses RtlpCreateExecutionRequiredRequest but it doesn't create an execution request
-        // when IsFrozen==false (such as when the immersive window is visible), CreateToolhelp32Snapshot proceeds to
-        // inject the debug thread but if the window closes, there's a race here where the debug thread gets frozen because
-        // RtlpCreateExecutionRequiredRequest never created the execution request. We can resolve the race condition
-        // by removing the above code checking IsFrozen but for now just copy what RtlpCreateExecutionRequiredRequest
-        // does (and copy the race condition) by returning here instead of always creating the execution request. (dmex)
-        // TODO: We should remove the check for IsFrozen if the race condition becomes an issue at some point in the future.
-        *PowerRequestHandle = NULL;
-        return STATUS_SUCCESS;
-    }
 
     memset(&powerRequestReason, 0, sizeof(COUNTED_REASON_CONTEXT));
     powerRequestReason.Version = POWER_REQUEST_CONTEXT_VERSION;
     powerRequestReason.Flags = POWER_REQUEST_CONTEXT_SIMPLE_STRING;
-    RtlInitUnicodeString(&powerRequestReason.SimpleString, L"DebugExecutionRequired request");
+    RtlInitUnicodeString(&powerRequestReason.SimpleString, L"QueryDebugInformation request");
 
     status = NtPowerInformation(
         PlmPowerRequestCreate,

@@ -65,7 +65,7 @@ typedef enum _MANDATORY_LEVEL_RID {
     MandatoryUntrustedRID = SECURITY_MANDATORY_UNTRUSTED_RID,
     MandatoryLowRID = SECURITY_MANDATORY_LOW_RID,
     MandatoryMediumRID = SECURITY_MANDATORY_MEDIUM_RID,
-    //MandatoryMediumPlusRID = SECURITY_MANDATORY_MEDIUM_PLUS_RID,
+    MandatoryMediumPlusRID = SECURITY_MANDATORY_MEDIUM_PLUS_RID,
     MandatoryHighRID = SECURITY_MANDATORY_HIGH_RID,
     MandatorySystemRID = SECURITY_MANDATORY_SYSTEM_RID,
     MandatorySecureProcessRID = SECURITY_MANDATORY_PROTECTED_PROCESS_RID
@@ -657,6 +657,21 @@ PhGetProcessPackageFullName(
     _In_ HANDLE ProcessHandle
     );
 
+// rev from RtlInitializeSid (dmex)
+FORCEINLINE
+BOOLEAN
+PhInitializeSid(
+    _In_ PSID Sid,
+    _In_ PSID_IDENTIFIER_AUTHORITY IdentifierAuthority,
+    _In_ UCHAR SubAuthorityCount
+    )
+{
+    ((PISID)Sid)->Revision = SID_REVISION;
+    ((PISID)Sid)->IdentifierAuthority = *IdentifierAuthority;
+    ((PISID)Sid)->SubAuthorityCount = SubAuthorityCount;
+    return TRUE;
+}
+
 // rev from RtlLengthSid (dmex)
 FORCEINLINE
 ULONG
@@ -677,7 +692,18 @@ PhEqualSid(
     _In_ PSID Sid2
     )
 {
-    return (BOOLEAN)RtlEqualMemory(Sid1, Sid2, PhLengthSid(Sid1));;
+    return (BOOLEAN)RtlEqualMemory(Sid1, Sid2, PhLengthSid(Sid1));
+}
+
+// rev from RtlSubAuthoritySid (dmex)
+FORCEINLINE
+PULONG
+PhSubAuthoritySid(
+    _In_ PSID Sid,
+    _In_ ULONG SubAuthority
+    )
+{
+    return &((PISID)Sid)->SubAuthority[SubAuthority];
 }
 
 PHLIBAPI
@@ -1376,7 +1402,7 @@ PhGetProcessIsDotNet(
 #define PH_CLR_VERSION_2_0 0x4
 #define PH_CLR_VERSION_4_ABOVE 0x8
 #define PH_CLR_CORE_3_0_ABOVE 0x10
-#define PH_CLR_VERSION_MASK 0x20
+#define PH_CLR_VERSION_MASK 0x1f
 
 #define PH_CLR_MSCORLIB_PRESENT 0x10000
 #define PH_CLR_CORELIB_PRESENT 0x20000
@@ -1418,6 +1444,7 @@ PhEnumDirectoryObjects(
     );
 
 typedef BOOLEAN (NTAPI *PPH_ENUM_DIRECTORY_FILE)(
+    _In_ HANDLE RootDirectory,
     _In_ PVOID Information,
     _In_opt_ PVOID Context
     );

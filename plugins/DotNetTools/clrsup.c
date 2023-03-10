@@ -1195,6 +1195,7 @@ static VOID DnCleanupDacAuxiliaryProvider(
 }
 
 static BOOLEAN DnpMscordaccoreDirectoryCallback(
+    _In_ HANDLE RootDirectory,
     _In_ PFILE_DIRECTORY_INFORMATION Information,
     _In_ PPH_LIST DirectoryList
     )
@@ -1352,9 +1353,12 @@ TryAppLocal:
                 ProcessId
                 )))
             {
-                PPH_STRING packageName = PhGetProcessPackageFullName(processHandle);
+                PROCESS_EXTENDED_BASIC_INFORMATION basicInformation;
 
-                if (!PhIsNullOrEmptyString(packageName))
+                if (
+                    NT_SUCCESS(PhGetProcessExtendedBasicInformation(processHandle, &basicInformation)) &&
+                    basicInformation.IsStronglyNamed // IsPackagedProcess
+                    )
                 {
                     if (NT_SUCCESS(PhOpenProcessToken(
                         processHandle,
@@ -1366,7 +1370,6 @@ TryAppLocal:
                     }
                 }
 
-                PhClearReference(&packageName);
                 NtClose(processHandle);
             }
 

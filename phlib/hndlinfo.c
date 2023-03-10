@@ -1027,8 +1027,7 @@ NTSTATUS PhpGetBestObjectName(
     PPH_STRING bestObjectName = NULL;
     PPH_GET_CLIENT_ID_NAME handleGetClientIdName = PhHandleGetClientIdName;
 
-    if (PhEqualString2(TypeName, L"EtwRegistration", TRUE) ||
-        PhEqualString2(TypeName, L"EtwConsumer", TRUE))
+    if (PhEqualString2(TypeName, L"EtwRegistration", TRUE))
     {
         if (KphLevel() >= KphLevelMed)
         {
@@ -1830,7 +1829,7 @@ NTSTATUS PhGetHandleInformationEx(
 {
     NTSTATUS status = STATUS_SUCCESS;
     NTSTATUS subStatus = STATUS_SUCCESS;
-    HANDLE dupHandle = NULL;
+    HANDLE objectHandle = NULL;
     PPH_STRING typeName = NULL;
     PPH_STRING objectName = NULL;
     PPH_STRING bestObjectName = NULL;
@@ -1854,7 +1853,7 @@ NTSTATUS PhGetHandleInformationEx(
                 ProcessHandle,
                 Handle,
                 NtCurrentProcess(),
-                &dupHandle,
+                &objectHandle,
                 0,
                 0,
                 0
@@ -1865,8 +1864,12 @@ NTSTATUS PhGetHandleInformationEx(
         }
         else
         {
-            dupHandle = Handle;
+            objectHandle = Handle;
         }
+    }
+    else
+    {
+        objectHandle = Handle;
     }
 
     // Get basic information.
@@ -1874,7 +1877,7 @@ NTSTATUS PhGetHandleInformationEx(
     {
         status = PhpGetObjectBasicInformation(
             ProcessHandle,
-            useKph ? Handle : dupHandle,
+            objectHandle,
             BasicInformation
             );
 
@@ -1889,7 +1892,7 @@ NTSTATUS PhGetHandleInformationEx(
     // Get the type name.
     status = PhpGetObjectTypeName(
         ProcessHandle,
-        useKph ? Handle : dupHandle,
+        objectHandle,
         ObjectTypeNumber,
         &typeName
         );
@@ -1907,12 +1910,12 @@ NTSTATUS PhGetHandleInformationEx(
     {
         status = PhpGetObjectName(
             ProcessHandle,
-            useKph ? Handle : dupHandle,
+            objectHandle,
             TRUE,
             &objectName
             );
     }
-    else if ((PhEqualString2(typeName, L"EtwRegistration", TRUE) || PhEqualString2(typeName, L"EtwConsumer", TRUE)) && useKph)
+    else if (PhEqualString2(typeName, L"EtwRegistration", TRUE) && useKph)
     {
         status = PhpGetEtwObjectName(
             ProcessHandle,
@@ -1925,7 +1928,7 @@ NTSTATUS PhGetHandleInformationEx(
         // Query the object normally.
         status = PhpGetObjectName(
             ProcessHandle,
-            useKph ? Handle : dupHandle,
+            objectHandle,
             FALSE,
             &objectName
             );
@@ -1980,8 +1983,8 @@ CleanupExit:
             PhSetReference(BestObjectName, bestObjectName);
     }
 
-    if (dupHandle && ProcessHandle != NtCurrentProcess())
-        NtClose(dupHandle);
+    if (objectHandle && ProcessHandle != NtCurrentProcess())
+        NtClose(objectHandle);
 
     PhClearReference(&typeName);
     PhClearReference(&objectName);
