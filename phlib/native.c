@@ -166,6 +166,28 @@ NTSTATUS PhOpenProcess(
     return status;
 }
 
+/** Limited API for untrusted/external code. */
+NTSTATUS PhOpenProcessPublic(
+    _Out_ PHANDLE ProcessHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ HANDLE ProcessId
+    )
+{
+    OBJECT_ATTRIBUTES objectAttributes;
+    CLIENT_ID clientId;
+
+    InitializeObjectAttributes(&objectAttributes, NULL, 0, NULL, NULL);
+    clientId.UniqueProcess = ProcessId;
+    clientId.UniqueThread = NULL;
+
+    return NtOpenProcess(
+        ProcessHandle,
+        DesiredAccess,
+        &objectAttributes,
+        &clientId
+        );
+}
+
 /**
  * Opens a thread.
  *
@@ -226,6 +248,29 @@ NTSTATUS PhOpenThread(
     }
 
     return status;
+}
+
+/** Limited API for untrusted/external code. */
+NTSTATUS PhOpenThreadPublic(
+    _Out_ PHANDLE ThreadHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ HANDLE ThreadId
+    )
+{
+    OBJECT_ATTRIBUTES objectAttributes;
+    CLIENT_ID clientId;
+
+    clientId.UniqueProcess = NULL;
+    clientId.UniqueThread = ThreadId;
+
+    InitializeObjectAttributes(&objectAttributes, NULL, 0, NULL, NULL);
+
+    return NtOpenThread(
+        ThreadHandle,
+        DesiredAccess,
+        &objectAttributes,
+        &clientId
+        );
 }
 
 NTSTATUS PhOpenThreadProcess(
@@ -312,6 +357,39 @@ NTSTATUS PhOpenProcessToken(
                 );
         }
     }
+
+    return status;
+}
+
+/** Limited API for untrusted/external code. */
+NTSTATUS PhOpenProcessTokenPublic(
+    _In_ HANDLE ProcessHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _Out_ PHANDLE TokenHandle
+    )
+{
+    return NtOpenProcessToken(
+        ProcessHandle,
+        DesiredAccess,
+        TokenHandle
+        );
+}
+
+NTSTATUS PhOpenThreadToken(
+    _In_ HANDLE ThreadHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ BOOLEAN OpenAsSelf,
+    _Out_ PHANDLE TokenHandle
+    )
+{
+    NTSTATUS status;
+
+    status = NtOpenThreadToken(
+        ThreadHandle,
+        DesiredAccess,
+        OpenAsSelf,
+        TokenHandle
+        );
 
     return status;
 }
@@ -2894,9 +2972,9 @@ NTSTATUS PhGetTokenSecurityAttribute(
     _Out_ PTOKEN_SECURITY_ATTRIBUTES_INFORMATION* SecurityAttributes
     )
 {
-    UNICODE_STRING attributeName;
     NTSTATUS status;
-    PVOID buffer;
+    UNICODE_STRING attributeName;
+    PTOKEN_SECURITY_ATTRIBUTES_INFORMATION buffer;
     ULONG bufferLength;
     ULONG returnLength;
 
@@ -2935,6 +3013,12 @@ NTSTATUS PhGetTokenSecurityAttribute(
 
     if (NT_SUCCESS(status))
     {
+        if (returnLength == sizeof(TOKEN_SECURITY_ATTRIBUTES_INFORMATION))
+        {
+            PhFree(buffer);
+            return STATUS_NOT_FOUND;
+        }
+
         *SecurityAttributes = buffer;
     }
     else
@@ -2993,7 +3077,7 @@ PTOKEN_SECURITY_ATTRIBUTE_V1 PhFindTokenSecurityAttributeName(
     return NULL;
 }
 
-BOOLEAN PhIsTokenFullTrustPackage(
+BOOLEAN PhGetTokenIsFullTrustPackage(
     _In_ HANDLE TokenHandle
     )
 {
@@ -3032,7 +3116,7 @@ NTSTATUS PhGetProcessIsStronglyNamed(
     return status;
 }
 
-BOOLEAN PhIsProcessFullTrustPackage(
+BOOLEAN PhGetProcessIsFullTrustPackage(
     _In_ HANDLE ProcessHandle
     )
 {
@@ -3532,11 +3616,11 @@ NTSTATUS PhGetTokenIntegrityLevelRID(
     if (!NT_SUCCESS(status))
         return status;
 
-    subAuthoritiesCount = *RtlSubAuthorityCountSid(mandatoryLabel->Label.Sid);
+    subAuthoritiesCount = *PhSubAuthorityCountSid(mandatoryLabel->Label.Sid);
 
     if (subAuthoritiesCount > 0)
     {
-        subAuthority = *RtlSubAuthoritySid(mandatoryLabel->Label.Sid, subAuthoritiesCount - 1);
+        subAuthority = *PhSubAuthoritySid(mandatoryLabel->Label.Sid, subAuthoritiesCount - 1);
     }
     else
     {
@@ -3670,13 +3754,15 @@ NTSTATUS PhGetTokenProcessTrustLevelRID(
     if (!trustLevel->TrustLevelSid)
         return STATUS_UNSUCCESSFUL;
 
-    subAuthoritiesCount = *RtlSubAuthorityCountSid(trustLevel->TrustLevelSid);
-    //RtlIdentifierAuthoritySid(TokenPageContext->Capabilities->Groups[i].Sid) == (BYTE[])SECURITY_PROCESS_TRUST_AUTHORITY
+    if (!PhEqualIdentifierAuthoritySid(PhIdentifierAuthoritySid(trustLevel->TrustLevelSid), &(SID_IDENTIFIER_AUTHORITY)SECURITY_PROCESS_TRUST_AUTHORITY))
+        return STATUS_INVALID_SUB_AUTHORITY;
+
+    subAuthoritiesCount = *PhSubAuthorityCountSid(trustLevel->TrustLevelSid);
 
     if (subAuthoritiesCount == SECURITY_PROCESS_TRUST_AUTHORITY_RID_COUNT)
     {
-        protectionType = *RtlSubAuthoritySid(trustLevel->TrustLevelSid, 0);
-        protectionLevel = *RtlSubAuthoritySid(trustLevel->TrustLevelSid, 1);
+        protectionType = *PhSubAuthoritySid(trustLevel->TrustLevelSid, 0);
+        protectionLevel = *PhSubAuthoritySid(trustLevel->TrustLevelSid, 1);
     }
     else
     {
@@ -6279,7 +6365,7 @@ PPH_STRING PhGetKernelFileName(
 
     if (modules->NumberOfModules >= 1)
     {
-        fileName = PhConvertMultiByteToUtf16(modules->Modules[0].FullPathName);
+        fileName = PhConvertUtf8ToUtf16(modules->Modules[0].FullPathName);
     }
 
     PhFree(modules);
@@ -6387,6 +6473,64 @@ NTSTATUS PhEnumProcessesEx(
 
     if (bufferSize <= 0x100000) initialBufferSize[classIndex] = bufferSize;
     *Processes = buffer;
+
+    return status;
+}
+
+NTSTATUS PhEnumNextProcess(
+    _In_opt_ HANDLE ProcessHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ PPH_ENUM_NEXT_PROCESS Callback,
+    _In_opt_ PVOID Context
+    )
+{
+    NTSTATUS status;
+    HANDLE processHandle = ProcessHandle;
+
+    while (NT_SUCCESS(status = NtGetNextProcess(
+        processHandle,
+        DesiredAccess,
+        0,
+        0,
+        &processHandle
+        )))
+    {
+        if (!Callback(processHandle, Context))
+            break;
+    }
+
+    if (status == STATUS_NO_MORE_ENTRIES)
+        status = STATUS_SUCCESS;
+
+    return status;
+}
+
+NTSTATUS PhEnumNextThread(
+    _In_ HANDLE ProcessHandle,
+    _In_opt_ HANDLE ThreadHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ PPH_ENUM_NEXT_THREAD Callback,
+    _In_opt_ PVOID Context
+    )
+{
+    NTSTATUS status;
+    HANDLE threadHandle = ThreadHandle;
+
+    while (NT_SUCCESS(status = NtGetNextThread(
+        ProcessHandle,
+        threadHandle,
+        DesiredAccess,
+        0,
+        0,
+        &threadHandle
+        )))
+    {
+        if (!Callback(threadHandle, Context))
+            break;
+    }
+
+    if (status == STATUS_NO_MORE_ENTRIES)
+        status = STATUS_SUCCESS;
 
     return status;
 }
@@ -7929,7 +8073,7 @@ VOID PhUpdateDosDevicePrefixes(
  * PhDereferenceObject() when you no longer need it.
  */
 PPH_STRING PhResolveDevicePrefix(
-    _In_ PPH_STRING Name
+    _In_ PPH_STRINGREF Name
     )
 {
     ULONG i;
@@ -7956,7 +8100,7 @@ PPH_STRING PhResolveDevicePrefix(
 
         if (prefix.Length != 0)
         {
-            if (PhStartsWithStringRef(&Name->sr, &prefix, TRUE))
+            if (PhStartsWithStringRef(Name, &prefix, TRUE))
             {
                 // To ensure we match the longest prefix, make sure the next character is a
                 // backslash or the path is equal to the prefix.
@@ -8000,7 +8144,7 @@ PPH_STRING PhResolveDevicePrefix(
 
             if (prefixLength != 0)
             {
-                if (PhStartsWithString(Name, PhDeviceMupPrefixes[i], TRUE))
+                if (PhStartsWithStringRef(Name, &PhDeviceMupPrefixes[i]->sr, TRUE))
                 {
                     // To ensure we match the longest prefix, make sure the next character is a
                     // backslash. Don't resolve if the name *is* the prefix. Otherwise, we will end
@@ -8099,7 +8243,7 @@ PPH_STRING PhGetFileName(
     {
         PPH_STRING resolvedName;
 
-        resolvedName = PhResolveDevicePrefix(FileName);
+        resolvedName = PhResolveDevicePrefix(&FileName->sr);
 
         if (resolvedName)
         {
@@ -8223,7 +8367,6 @@ static BOOLEAN EnumGenericProcessModulesCallback(
 
     moduleInfo.Name = PhCreateStringFromUnicodeString(&Module->BaseDllName);
     moduleInfo.FileName = PhCreateStringFromUnicodeString(&Module->FullDllName);
-    moduleInfo.FileNameWin32 = PhGetFileName(moduleInfo.FileName);
 
     if (WindowsVersion >= WINDOWS_8)
     {
@@ -8243,7 +8386,6 @@ static BOOLEAN EnumGenericProcessModulesCallback(
     cont = context->Callback(&moduleInfo, context->Context);
 
     PhDereferenceObject(moduleInfo.Name);
-    PhDereferenceObject(moduleInfo.FileNameWin32);
     PhDereferenceObject(moduleInfo.FileName);
 
     return cont;
@@ -8263,8 +8405,6 @@ VOID PhpRtlModulesToGenericModules(
 
     for (i = 0; i < Modules->NumberOfModules; i++)
     {
-        PPH_STRING fileName;
-
         module = &Modules->Modules[i];
 
         // Check if we have a duplicate base address.
@@ -8277,8 +8417,6 @@ VOID PhpRtlModulesToGenericModules(
             PhAddEntryHashtable(BaseAddressHashtable, &module->ImageBase);
         }
 
-        fileName = PhConvertMultiByteToUtf16(module->FullPathName);
-
         if ((ULONG_PTR)module->ImageBase <= PhSystemBasicInformation.MaximumUserModeAddress)
             moduleInfo.Type = PH_MODULE_TYPE_MODULE;
         else
@@ -8288,9 +8426,8 @@ VOID PhpRtlModulesToGenericModules(
         moduleInfo.Size = module->ImageSize;
         moduleInfo.EntryPoint = NULL;
         moduleInfo.Flags = module->Flags;
-        moduleInfo.Name = PhConvertMultiByteToUtf16(&module->FullPathName[module->OffsetToFileName]);
-        moduleInfo.FileNameWin32 = PhGetFileName(fileName); // convert to DOS file name
-        moduleInfo.FileName = fileName;
+        moduleInfo.Name = PhConvertUtf8ToUtf16(&module->FullPathName[module->OffsetToFileName]);
+        moduleInfo.FileName = PhConvertUtf8ToUtf16(module->FullPathName);
         moduleInfo.LoadOrderIndex = module->LoadOrderIndex;
         moduleInfo.LoadCount = module->LoadCount;
         moduleInfo.LoadReason = USHRT_MAX;
@@ -8308,13 +8445,13 @@ VOID PhpRtlModulesToGenericModules(
             // directory.
             PhGetSystemRoot(&systemRoot);
             newFileName = PhConcatStringRef3(&systemRoot, &driversString, &moduleInfo.Name->sr);
-            PhMoveReference(&moduleInfo.FileNameWin32, newFileName);
+            PhMoveReference(&newFileName, PhDosPathNameToNtPathName(&newFileName->sr));
+            PhMoveReference(&moduleInfo.FileName, newFileName);
         }
 
         cont = Callback(&moduleInfo, Context);
 
         PhDereferenceObject(moduleInfo.Name);
-        PhDereferenceObject(moduleInfo.FileNameWin32);
         PhDereferenceObject(moduleInfo.FileName);
 
         if (!cont)
@@ -8337,8 +8474,6 @@ VOID PhpRtlModulesExToGenericModules(
 
     while (module->NextOffset != 0)
     {
-        PPH_STRING fileName;
-
         // Check if we have a duplicate base address.
         if (PhFindEntryHashtable(BaseAddressHashtable, &module->BaseInfo.ImageBase))
         {
@@ -8349,8 +8484,6 @@ VOID PhpRtlModulesExToGenericModules(
             PhAddEntryHashtable(BaseAddressHashtable, &module->BaseInfo.ImageBase);
         }
 
-        fileName = PhConvertMultiByteToUtf16(module->BaseInfo.FullPathName);
-
         if ((ULONG_PTR)module->BaseInfo.ImageBase <= PhSystemBasicInformation.MaximumUserModeAddress)
             moduleInfo.Type = PH_MODULE_TYPE_MODULE;
         else
@@ -8360,9 +8493,8 @@ VOID PhpRtlModulesExToGenericModules(
         moduleInfo.Size = module->BaseInfo.ImageSize;
         moduleInfo.EntryPoint = NULL;
         moduleInfo.Flags = module->BaseInfo.Flags;
-        moduleInfo.Name = PhConvertMultiByteToUtf16(&module->BaseInfo.FullPathName[module->BaseInfo.OffsetToFileName]);
-        moduleInfo.FileNameWin32 = PhGetFileName(fileName); // convert to DOS file name
-        moduleInfo.FileName = fileName;
+        moduleInfo.Name = PhConvertUtf8ToUtf16(&module->BaseInfo.FullPathName[module->BaseInfo.OffsetToFileName]);
+        moduleInfo.FileName = PhConvertUtf8ToUtf16(module->BaseInfo.FullPathName);
         moduleInfo.LoadOrderIndex = module->BaseInfo.LoadOrderIndex;
         moduleInfo.LoadCount = module->BaseInfo.LoadCount;
         moduleInfo.LoadReason = USHRT_MAX;
@@ -8373,7 +8505,6 @@ VOID PhpRtlModulesExToGenericModules(
         cont = Callback(&moduleInfo, Context);
 
         PhDereferenceObject(moduleInfo.Name);
-        PhDereferenceObject(moduleInfo.FileNameWin32);
         PhDereferenceObject(moduleInfo.FileName);
 
         if (!cont)
@@ -8401,9 +8532,8 @@ BOOLEAN PhpCallbackMappedFileOrImage(
     moduleInfo.Size = (ULONG)AllocationSize;
     moduleInfo.EntryPoint = NULL;
     moduleInfo.Flags = 0;
-    moduleInfo.FileNameWin32 = PhGetFileName(FileName);
     moduleInfo.FileName = FileName;
-    moduleInfo.Name = PhGetBaseName(moduleInfo.FileNameWin32);
+    moduleInfo.Name = PhGetBaseName(moduleInfo.FileName);
     moduleInfo.LoadOrderIndex = USHRT_MAX;
     moduleInfo.LoadCount = USHRT_MAX;
     moduleInfo.LoadReason = USHRT_MAX;
@@ -8413,7 +8543,6 @@ BOOLEAN PhpCallbackMappedFileOrImage(
 
     cont = Callback(&moduleInfo, Context);
 
-    PhDereferenceObject(moduleInfo.FileNameWin32);
     PhDereferenceObject(moduleInfo.FileName);
     PhDereferenceObject(moduleInfo.Name);
 
@@ -12013,6 +12142,49 @@ NTSTATUS PhGetThreadLastSystemCall(
     }
 }
 
+NTSTATUS PhCreateImpersonationToken(
+    _In_ HANDLE ThreadHandle,
+    _Out_ PHANDLE TokenHandle
+    )
+{
+    NTSTATUS status;
+    HANDLE tokenHandle;
+    SECURITY_QUALITY_OF_SERVICE securityService;
+
+    status = PhRevertImpersonationToken(ThreadHandle);
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    securityService.Length = sizeof(SECURITY_QUALITY_OF_SERVICE);
+    securityService.ImpersonationLevel = SecurityImpersonation;
+    securityService.ContextTrackingMode = SECURITY_DYNAMIC_TRACKING;
+    securityService.EffectiveOnly = FALSE;
+
+    status = NtImpersonateThread(
+        ThreadHandle,
+        ThreadHandle,
+        &securityService
+        );
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    status = PhOpenThreadToken(
+        ThreadHandle, 
+        TOKEN_DUPLICATE | TOKEN_IMPERSONATE,
+        FALSE, 
+        &tokenHandle
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        *TokenHandle = tokenHandle;
+    }
+
+    return status;
+}
+
 NTSTATUS PhImpersonateToken(
     _In_ HANDLE ThreadHandle,
     _In_ HANDLE TokenHandle
@@ -13972,6 +14144,19 @@ NTSTATUS PhGetSystemLogicalProcessorInformation(
     *BufferLength = bufferSize;
 
     return status;
+}
+
+// based on RtlIsProcessorFeaturePresent (dmex)
+BOOLEAN PhIsProcessorFeaturePresent(
+    _In_ ULONG ProcessorFeature
+    )
+{
+    if (WindowsVersion < WINDOWS_NEW && ProcessorFeature < PROCESSOR_FEATURE_MAX)
+    {
+        return USER_SHARED_DATA->ProcessorFeatures[ProcessorFeature];
+    }
+
+    return !!IsProcessorFeaturePresent(ProcessorFeature); // RtlIsProcessorFeaturePresent
 }
 
 // based on GetActiveProcessorCount (dmex)

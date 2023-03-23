@@ -22,6 +22,7 @@
 #include <winsta.h>
 
 #include <kphuser.h>
+#include <ksisup.h>
 #include <secedit.h>
 #include <secwmi.h>
 #include <settings.h>
@@ -319,7 +320,7 @@ BOOLEAN PhpStartPhSvcProcess(
             hWnd,
             L"-phsvc",
             SW_HIDE,
-            PH_SHELL_EXECUTE_ADMIN | PH_SHELL_EXECUTE_NOZONECHECKS,
+            PH_SHELL_EXECUTE_ADMIN,
             PH_SHELL_APP_PROPAGATE_PARAMETERS,
             0,
             NULL
@@ -373,7 +374,7 @@ BOOLEAN PhpStartPhSvcProcess(
                         fileName->Buffer,
                         L"-phsvc",
                         SW_HIDE,
-                        PH_SHELL_EXECUTE_NOZONECHECKS,
+                        PH_SHELL_EXECUTE_DEFAULT,
                         PH_SHELL_APP_PROPAGATE_PARAMETERS,
                         0,
                         NULL
@@ -2252,6 +2253,9 @@ BOOLEAN PhUiRestartProcess(
 {
     NTSTATUS status;
     BOOLEAN cont = FALSE;
+    BOOLEAN tokenIsStronglyNamed = FALSE;
+    BOOLEAN tokenIsUIAccessEnabled = FALSE;
+    BOOLEAN tokenRevertImpersonation = FALSE;
     HANDLE processHandle = NULL;
     HANDLE newProcessHandle = NULL;
     PPH_STRING commandLine;
@@ -2259,7 +2263,6 @@ BOOLEAN PhUiRestartProcess(
     STARTUPINFOEX startupInfo;
     PSECURITY_DESCRIPTOR processSecurityDescriptor = NULL;
     PSECURITY_DESCRIPTOR tokenSecurityDescriptor = NULL;
-    BOOLEAN appContainerRevertToken = FALSE;
     PVOID environment = NULL;
     HANDLE tokenHandle = NULL;
     ULONG flags = 0;
@@ -2310,12 +2313,14 @@ BOOLEAN PhUiRestartProcess(
 
     PH_AUTO(commandLine);
 
-    if (!NT_SUCCESS(status = PhGetProcessPebString(
+    if (!NT_SUCCESS(status = PhGetProcessCurrentDirectory(
         processHandle,
-        PhpoCurrentDirectory,
+        !!Process->IsWow64,
         &currentDirectory
         )))
+    {
         goto CleanupExit;
+    }
 
     PH_AUTO(currentDirectory);
 
@@ -2328,7 +2333,7 @@ BOOLEAN PhUiRestartProcess(
 
     status = PhOpenProcess(
         &processHandle,
-        PROCESS_CREATE_PROCESS | (PhGetOwnTokenAttributes().Elevated ? PROCESS_QUERY_LIMITED_INFORMATION | READ_CONTROL : 0) | PROCESS_TERMINATE,
+        PROCESS_CREATE_PROCESS | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | (PhGetOwnTokenAttributes().Elevated ? READ_CONTROL : 0),
         Process->ProcessId
         );
 
@@ -2350,6 +2355,31 @@ BOOLEAN PhUiRestartProcess(
     if (!NT_SUCCESS(status))
         goto CleanupExit;
 
+    status = PhOpenProcessToken(
+        processHandle,
+        TOKEN_ASSIGN_PRIMARY | TOKEN_DUPLICATE | TOKEN_IMPERSONATE | TOKEN_QUERY | (PhGetOwnTokenAttributes().Elevated ? READ_CONTROL : 0),
+        &tokenHandle
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        status = PhGetTokenIsUIAccessEnabled(tokenHandle, &tokenIsUIAccessEnabled);
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+    }
+    else
+    {
+        status = PhOpenProcessToken(
+            processHandle,
+            TOKEN_QUERY | (PhGetOwnTokenAttributes().Elevated ? READ_CONTROL : 0),
+            &tokenHandle
+            );
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+    }
+
     if (PhGetOwnTokenAttributes().Elevated)
     {
         PhGetObjectSecurity(
@@ -2357,51 +2387,21 @@ BOOLEAN PhUiRestartProcess(
             OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION,
             &processSecurityDescriptor
             );
+        PhGetObjectSecurity(
+            tokenHandle,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION,
+            &tokenSecurityDescriptor
+            );
     }
 
-    if (NT_SUCCESS(PhOpenProcessToken(
-        processHandle,
-        TOKEN_QUERY | (PhGetOwnTokenAttributes().Elevated ? READ_CONTROL : 0),
-        &tokenHandle
-        )))
+    if (CreateEnvironmentBlock_Import() && CreateEnvironmentBlock_Import()(&environment, tokenHandle, FALSE))
     {
-        if (PhGetOwnTokenAttributes().Elevated)
-        {
-            PhGetObjectSecurity(
-                tokenHandle,
-                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION,
-                &tokenSecurityDescriptor
-                );
-        }
+        flags |= PH_CREATE_PROCESS_UNICODE_ENVIRONMENT;
+    }
 
-        if (CreateEnvironmentBlock_Import() && CreateEnvironmentBlock_Import()(&environment, tokenHandle, FALSE))
-        {
-            flags |= PH_CREATE_PROCESS_UNICODE_ENVIRONMENT;
-        }
-
-        // CreateProcess returns access_denied when restarting full-trust immersive/store processes since appcontainer information
-        // is located in the current user registry hive. This is especially noticeable when we're running elevated with a
-        // different user on the same desktop session via UAC over-the-shoulder elevation and try to restart notepad.exe
-        // so we're required to impersonate the token before restarting full-trust immersive/store processes... sigh. (dmex)
-        if (PhIsTokenFullTrustPackage(tokenHandle))
-        {
-            NtClose(tokenHandle);
-            tokenHandle = NULL;
-
-            if (NT_SUCCESS(PhOpenProcessToken(
-                processHandle,
-                TOKEN_QUERY | TOKEN_IMPERSONATE | TOKEN_DUPLICATE,
-                &tokenHandle
-                )))
-            {
-                appContainerRevertToken = NT_SUCCESS(PhImpersonateToken(NtCurrentThread(), tokenHandle));
-            }
-        }
-        else
-        {
-            NtClose(tokenHandle);
-            tokenHandle = NULL;
-        }
+    if (NT_SUCCESS(PhGetProcessIsStronglyNamed(processHandle, &tokenIsStronglyNamed)) && tokenIsStronglyNamed)
+    {
+        tokenRevertImpersonation = NT_SUCCESS(PhImpersonateToken(NtCurrentThread(), tokenHandle));
     }
 
     status = PhCreateProcessWin32Ex(
@@ -2411,17 +2411,15 @@ BOOLEAN PhUiRestartProcess(
         PhGetString(currentDirectory),
         &startupInfo.StartupInfo,
         PH_CREATE_PROCESS_SUSPENDED | PH_CREATE_PROCESS_NEW_CONSOLE | PH_CREATE_PROCESS_EXTENDED_STARTUPINFO | PH_CREATE_PROCESS_DEFAULT_ERROR_MODE | flags,
-        NULL,
+        tokenHandle,
         NULL,
         &newProcessHandle,
         NULL
         );
 
-    if (tokenHandle)
+    if (tokenRevertImpersonation)
     {
-        if (appContainerRevertToken)
-            PhRevertImpersonationToken(NtCurrentThread());
-        NtClose(tokenHandle);
+        PhRevertImpersonationToken(NtCurrentThread());
     }
 
     if (NT_SUCCESS(status))
@@ -2431,8 +2429,10 @@ BOOLEAN PhUiRestartProcess(
         // See runas.c for a description of the Windows issue with PROC_THREAD_ATTRIBUTE_PARENT_PROCESS
         // requiring the reset of the security descriptor. (dmex)
 
-        if (PhGetOwnTokenAttributes().Elevated)
+        if (PhGetOwnTokenAttributes().Elevated && !tokenIsUIAccessEnabled) // Skip processes with UIAccess (dmex)
         {
+            HANDLE tokenWriteHandle = NULL;
+
             if (processSecurityDescriptor)
             {
                 PhSetObjectSecurity(
@@ -2445,15 +2445,15 @@ BOOLEAN PhUiRestartProcess(
             if (tokenSecurityDescriptor && NT_SUCCESS(PhOpenProcessToken(
                 newProcessHandle,
                 WRITE_DAC | WRITE_OWNER,
-                &tokenHandle
+                &tokenWriteHandle
                 )))
             {
                 PhSetObjectSecurity(
-                    tokenHandle,
+                    tokenWriteHandle,
                     OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION,
                     tokenSecurityDescriptor
                     );
-                NtClose(tokenHandle);
+                NtClose(tokenWriteHandle);
             }
         }
 
@@ -2491,6 +2491,11 @@ CleanupExit:
     if (startupInfo.lpAttributeList)
     {
         PhDeleteProcThreadAttributeList(startupInfo.lpAttributeList);
+    }
+
+    if (tokenHandle)
+    {
+        NtClose(tokenHandle);
     }
 
     if (newProcessHandle)
@@ -4606,9 +4611,22 @@ BOOLEAN PhUiUnloadModule(
     case PH_MODULE_TYPE_MODULE:
     case PH_MODULE_TYPE_WOW64_MODULE:
         {
-            // Windows 8 requires ALL_ACCESS for PLM execution requests. (dmex)
-            if (WindowsVersion >= WINDOWS_8 && WindowsVersion <= WINDOWS_8_1)
+            if (WindowsVersion < WINDOWS_8)
             {
+                // Windows 7 requires QUERY_INFORMATION for MemoryMappedFileName. (dmex)
+
+                status = PhOpenProcess(
+                    &processHandle,
+                    PROCESS_QUERY_INFORMATION | PROCESS_SET_LIMITED_INFORMATION |
+                    PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION |
+                    PROCESS_VM_READ | PROCESS_VM_WRITE,
+                    ProcessId
+                    );
+            }
+            else if (WindowsVersion < WINDOWS_10)
+            {
+                // Windows 8 requires ALL_ACCESS for PLM execution requests. (dmex)
+
                 status = PhOpenProcess(
                     &processHandle,
                     PROCESS_ALL_ACCESS,
@@ -4616,9 +4634,10 @@ BOOLEAN PhUiUnloadModule(
                     );
             }
 
-            // Windows 10 and above require SET_LIMITED for PLM execution requests. (dmex)
             if (!NT_SUCCESS(status))
             {
+                // Windows 10 and above require SET_LIMITED for PLM execution requests. (dmex)
+
                 status = PhOpenProcess(
                     &processHandle,
                     PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_LIMITED_INFORMATION |
@@ -5035,7 +5054,10 @@ BOOLEAN PhUiSetAttributesHandle(
 
     if (KphLevel() < KphLevelMax)
     {
-        PhShowError2(hWnd, PH_KPH_ERROR_TITLE, L"%s", PH_KPH_ERROR_MESSAGE);
+        PhShowKsiNotConnected(
+            hWnd,
+            L"Setting handle attributes requires a connection to the kernel driver."
+            );
         return FALSE;
     }
 

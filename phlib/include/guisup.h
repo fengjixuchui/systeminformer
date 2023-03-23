@@ -235,6 +235,26 @@ FORCEINLINE PVOID PhSetWindowProcedure(
     return (PVOID)SetWindowLongPtr(WindowHandle, GWLP_WNDPROC, (LONG_PTR)SubclassProcedure);
 }
 
+FORCEINLINE UINT_PTR PhSetTimer(
+    _In_ HWND WindowHandle,
+    _In_ UINT_PTR TimerID,
+    _In_ UINT Elapse,
+    _In_opt_ TIMERPROC TimerProcedure
+    )
+{
+    assert(WindowHandle);
+    return SetTimer(WindowHandle, TimerID, Elapse, TimerProcedure);
+}
+
+FORCEINLINE BOOL PhKillTimer(
+    _In_ HWND WindowHandle,
+    _In_ UINT_PTR TimerID
+    )
+{
+    assert(WindowHandle);
+    return KillTimer(WindowHandle, TimerID);
+}
+
 #ifndef WM_REFLECT
 #define WM_REFLECT 0x2000
 #endif
@@ -518,12 +538,12 @@ VOID PhGetStockApplicationIcon(
     _Out_opt_ HICON *LargeIcon
     );
 
-PHLIBAPI
-HICON PhGetFileShellIcon(
-    _In_opt_ PWSTR FileName,
-    _In_opt_ PWSTR DefaultExtension,
-    _In_ BOOLEAN LargeIcon
-    );
+//PHLIBAPI
+//HICON PhGetFileShellIcon(
+//    _In_opt_ PWSTR FileName,
+//    _In_opt_ PWSTR DefaultExtension,
+//    _In_ BOOLEAN LargeIcon
+//    );
 
 PHLIBAPI
 VOID PhSetClipboardString(
@@ -1152,6 +1172,36 @@ PhIsImmersiveProcess(
     _In_ HANDLE ProcessHandle
     );
 
+typedef enum _PROCESS_UICONTEXT
+{
+    PROCESS_UICONTEXT_DESKTOP,
+    PROCESS_UICONTEXT_IMMERSIVE,
+    PROCESS_UICONTEXT_IMMERSIVE_BROKER,
+    PROCESS_UICONTEXT_IMMERSIVE_BROWSER
+} PROCESS_UICONTEXT;
+
+typedef enum _PROCESS_UI_FLAGS
+{
+    PROCESS_UIF_NONE,
+    PROCESS_UIF_AUTHORING_MODE,
+    PROCESS_UIF_RESTRICTIONS_DISABLED
+} PROCESS_UI_FLAGS;
+
+typedef struct _PROCESS_UICONTEXT_INFORMATION
+{
+    PROCESS_UICONTEXT ProcessUIContext;
+    PROCESS_UI_FLAGS Flags;
+} PROCESS_UICONTEXT_INFORMATION, *PPROCESS_UICONTEXT_INFORMATION;
+
+_Success_(return)
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhGetProcessUIContextInformation(
+    _In_ HANDLE ProcessHandle,
+    _Out_ PPROCESS_UICONTEXT_INFORMATION UIContext
+    );
+
 typedef enum _PH_PROCESS_DPI_AWARENESS
 {
     PH_PROCESS_DPI_AWARENESS_UNAWARE = 0,
@@ -1203,7 +1253,7 @@ PHLIBAPI
 BOOLEAN
 NTAPI
 PhExtractIconEx(
-    _In_ PPH_STRING FileName,
+    _In_ PPH_STRINGREF FileName,
     _In_ BOOLEAN NativeFileName,
     _In_ INT32 IconIndex,
     _Out_opt_ HICON *IconLarge,
@@ -1228,7 +1278,7 @@ PHLIBAPI
 BOOLEAN
 NTAPI
 PhImageListDestroy(
-    _In_ HIMAGELIST ImageListHandle
+    _In_opt_ HIMAGELIST ImageListHandle
     );
 
 PHLIBAPI

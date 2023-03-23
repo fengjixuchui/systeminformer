@@ -6,15 +6,13 @@
  * Authors:
  *
  *     wj32    2015-2016
- *     dmex    2017-2020
+ *     dmex    2017-2023
  *
  */
 
 #include <phapp.h>
 #include <miniinfo.h>
 #include <miniinfop.h>
-
-#include <shellapi.h>
 
 #include <actions.h>
 #include <mainwnd.h>
@@ -70,13 +68,21 @@ VOID PhPinMiniInformation(
     if (PinDelayMs && PinCount < 0)
     {
         PhMipDelayedPinAdjustments[PinType] = PinCount;
-        SetTimer(PhMipContainerWindow, (UINT_PTR)MIP_TIMER_PIN_FIRST + PinType, PinDelayMs, NULL);
+
+        if (PhMipContainerWindow)
+        {
+            PhSetTimer(PhMipContainerWindow, (UINT_PTR)MIP_TIMER_PIN_FIRST + PinType, PinDelayMs, NULL);
+        }
         return;
     }
     else
     {
         PhMipDelayedPinAdjustments[PinType] = 0;
-        KillTimer(PhMipContainerWindow, (UINT_PTR)MIP_TIMER_PIN_FIRST + PinType);
+
+        if (PhMipContainerWindow)
+        {
+            PhKillTimer(PhMipContainerWindow, (UINT_PTR)MIP_TIMER_PIN_FIRST + PinType);
+        }
     }
 
     adjustPinResult = PhMipAdjustPin(PinType, PinCount);
@@ -174,7 +180,7 @@ VOID PhPinMiniInformation(
     }
     else
     {
-        if ((Flags & PH_MINIINFO_ACTIVATE_WINDOW) && IsWindowVisible(PhMipContainerWindow))
+        if ((Flags & PH_MINIINFO_ACTIVATE_WINDOW) && PhMipContainerWindow && IsWindowVisible(PhMipContainerWindow))
             SetActiveWindow(PhMipContainerWindow);
     }
 
@@ -1345,8 +1351,10 @@ INT_PTR CALLBACK PhMipListSectionDialogProc(
             PhSetControlTheme(listSection->TreeNewHandle, L"explorer");
             TreeNew_SetCallback(listSection->TreeNewHandle, PhMipListSectionTreeNewCallback, listSection);
             TreeNew_SetRowHeight(listSection->TreeNewHandle, PhMipCalculateRowHeight(hwndDlg));
+            TreeNew_SetRedraw(listSection->TreeNewHandle, FALSE);
             PhAddTreeNewColumnEx2(listSection->TreeNewHandle, MIP_SINGLE_COLUMN_ID, TRUE, L"Process", 1,
                 PH_ALIGN_LEFT, 0, 0, TN_COLUMN_FLAG_CUSTOMDRAW);
+            TreeNew_SetRedraw(listSection->TreeNewHandle, TRUE);
 
             listSection->Callback(listSection, MiListSectionDialogCreated, hwndDlg, NULL);
             PhMipTickListSection(listSection);

@@ -6,12 +6,23 @@
  * Authors:
  *
  *     wj32    2010-2013
- *     dmex    2011-2022
+ *     dmex    2011-2023
  *
  */
 
 #include "toolstatus.h"
 #include <verify.h>
+
+typedef enum _FILTER_RESULT_TYPE
+{
+    FILTER_RESULT_NOT_FOUND,
+    FILTER_RESULT_FOUND,
+    FILTER_RESULT_FOUND_NAME
+} FILTER_RESULT_TYPE;
+
+static PPH_STRING SearchboxTextCache = NULL;
+static PPH_STRING SearchboxFullTextCache = NULL;
+static PPH_STRING SearchboxParentTextCache = NULL;
 
 BOOLEAN WordMatchStringRef(
     _In_ PPH_STRINGREF Text
@@ -20,92 +31,93 @@ BOOLEAN WordMatchStringRef(
     return PhWordMatchStringRef(&SearchboxText->sr, Text);
 }
 
-BOOLEAN ProcessTreeFilterCallback(
+FILTER_RESULT_TYPE ProcessTreeFilterMatchTypeCallback(
     _In_ PPH_TREENEW_NODE Node,
-    _In_opt_ PVOID Context
+    _In_opt_ PVOID Context,
+    _In_opt_ PPH_STRING SearchboxText
     )
 {
     PPH_PROCESS_NODE processNode = (PPH_PROCESS_NODE)Node;
 
     if (PhIsNullOrEmptyString(SearchboxText))
-        return TRUE;
+        return FILTER_RESULT_FOUND;
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->ProcessName))
     {
         if (PhWordMatchStringRef(&SearchboxText->sr, &processNode->ProcessItem->ProcessName->sr))
-            return TRUE;
+            return FILTER_RESULT_FOUND_NAME;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->FileNameWin32))
     {
         if (PhWordMatchStringRef(&SearchboxText->sr, &processNode->ProcessItem->FileNameWin32->sr))
-            return TRUE;
+            return FILTER_RESULT_FOUND;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->FileName))
     {
         if (PhWordMatchStringRef(&SearchboxText->sr, &processNode->ProcessItem->FileName->sr))
-            return TRUE;
+            return FILTER_RESULT_FOUND;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->CommandLine))
     {
         if (PhWordMatchStringRef(&SearchboxText->sr, &processNode->ProcessItem->CommandLine->sr))
-            return TRUE;
+            return FILTER_RESULT_FOUND;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->VersionInfo.CompanyName))
     {
         if (PhWordMatchStringRef(&SearchboxText->sr, &processNode->ProcessItem->VersionInfo.CompanyName->sr))
-            return TRUE;
+            return FILTER_RESULT_FOUND;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->VersionInfo.FileDescription))
     {
         if (PhWordMatchStringRef(&SearchboxText->sr, &processNode->ProcessItem->VersionInfo.FileDescription->sr))
-            return TRUE;
+            return FILTER_RESULT_FOUND;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->VersionInfo.FileVersion))
     {
         if (PhWordMatchStringRef(&SearchboxText->sr, &processNode->ProcessItem->VersionInfo.FileVersion->sr))
-            return TRUE;
+            return FILTER_RESULT_FOUND;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->VersionInfo.ProductName))
     {
         if (PhWordMatchStringRef(&SearchboxText->sr, &processNode->ProcessItem->VersionInfo.ProductName->sr))
-            return TRUE;
+            return FILTER_RESULT_FOUND;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->UserName))
     {
         if (PhWordMatchStringRef(&SearchboxText->sr, &processNode->ProcessItem->UserName->sr))
-            return TRUE;
+            return FILTER_RESULT_FOUND;
     }
 
     if (processNode->ProcessItem->IntegrityString)
     {
-        if (PhWordMatchStringZ(SearchboxText, processNode->ProcessItem->IntegrityString))
-            return TRUE;
+        if (PhWordMatchStringLongHintZ(SearchboxText, processNode->ProcessItem->IntegrityString))
+            return FILTER_RESULT_FOUND;
     }
 
     //if (!PhIsNullOrEmptyString(processNode->ProcessItem->JobName))
     //{
     //    if (PhWordMatchStringZ(SearchboxText, &processNode->ProcessItem->JobName->sr))
-    //        return TRUE;
+    //        return Matched;
     //}
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->VerifySignerName))
     {
         if (PhWordMatchStringRef(&SearchboxText->sr, &processNode->ProcessItem->VerifySignerName->sr))
-            return TRUE;
+            return FILTER_RESULT_FOUND;
     }
 
     if (PH_IS_REAL_PROCESS_ID(processNode->ProcessItem->ProcessId) && processNode->ProcessItem->ProcessIdString[0])
     {
-        if (PhWordMatchStringZ(SearchboxText, processNode->ProcessItem->ProcessIdString))
-            return TRUE;
+        if (PhWordMatchStringLongHintZ(SearchboxText, processNode->ProcessItem->ProcessIdString))
+            return FILTER_RESULT_FOUND_NAME;
 
          // HACK PidHexText from PH_PROCESS_NODE is not exported (dmex)
         {
@@ -122,32 +134,39 @@ BOOLEAN ProcessTreeFilterCallback(
                 processIdHex.Length = returnLength - sizeof(UNICODE_NULL);
 
                 if (PhWordMatchStringRef(&SearchboxText->sr, &processIdHex))
-                    return TRUE;
+                    return FILTER_RESULT_FOUND_NAME;
             }
         }
     }
 
     //if (processNode->ProcessItem->ParentProcessIdString[0])
     //{
-    //    if (PhWordMatchStringZ(SearchboxText, processNode->ProcessItem->ParentProcessIdString))
-    //        return TRUE;
+    //    if (PhWordMatchStringLongHintZ(SearchboxText, processNode->ProcessItem->ParentProcessIdString))
+    //        return Matched;
     //}
 
     //if (processNode->ProcessItem->SessionIdString[0])
     //{
-    //    if (PhWordMatchStringZ(SearchboxText, processNode->ProcessItem->SessionIdString))
-    //        return TRUE;
+    //    if (PhWordMatchStringLongHintZ(SearchboxText, processNode->ProcessItem->SessionIdString))
+    //        return Matched;
     //}
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->PackageFullName))
     {
         if (PhWordMatchStringRef(&SearchboxText->sr, &processNode->ProcessItem->PackageFullName->sr))
-            return TRUE;
+            return FILTER_RESULT_FOUND;
     }
 
-    if (PhWordMatchStringZ(SearchboxText, PhGetProcessPriorityClassString(processNode->ProcessItem->PriorityClass)))
     {
-        return TRUE;
+        PPH_STRINGREF value;
+
+        if (value = PhGetProcessPriorityClassString(processNode->ProcessItem->PriorityClass))
+        {
+            if (PhWordMatchStringRef(&SearchboxText->sr, value))
+            {
+                return FILTER_RESULT_FOUND;
+            }
+        }
     }
 
     if (processNode->ProcessItem->VerifyResult != VrUnknown)
@@ -156,35 +175,35 @@ BOOLEAN ProcessTreeFilterCallback(
         {
         case VrNoSignature:
             if (PhWordMatchStringZ(SearchboxText, L"NoSignature"))
-                return TRUE;
+                return FILTER_RESULT_FOUND;
             break;
         case VrTrusted:
             if (PhWordMatchStringZ(SearchboxText, L"Trusted"))
-                return TRUE;
+                return FILTER_RESULT_FOUND;
             break;
         case VrExpired:
             if (PhWordMatchStringZ(SearchboxText, L"Expired"))
-                return TRUE;
+                return FILTER_RESULT_FOUND;
             break;
         case VrRevoked:
             if (PhWordMatchStringZ(SearchboxText, L"Revoked"))
-                return TRUE;
+                return FILTER_RESULT_FOUND;
             break;
         case VrDistrust:
             if (PhWordMatchStringZ(SearchboxText, L"Distrust"))
-                return TRUE;
+                return FILTER_RESULT_FOUND;
             break;
         case VrSecuritySettings:
             if (PhWordMatchStringZ(SearchboxText, L"SecuritySettings"))
-                return TRUE;
+                return FILTER_RESULT_FOUND;
             break;
         case VrBadSignature:
             if (PhWordMatchStringZ(SearchboxText, L"BadSignature"))
-                return TRUE;
+                return FILTER_RESULT_FOUND;
             break;
         default:
             if (PhWordMatchStringZ(SearchboxText, L"Unknown"))
-                return TRUE;
+                return FILTER_RESULT_FOUND;
             break;
         }
     }
@@ -195,77 +214,82 @@ BOOLEAN ProcessTreeFilterCallback(
         {
         case TokenElevationTypeLimited:
             if (PhWordMatchStringZ(SearchboxText, L"Limited"))
-                return TRUE;
+                return FILTER_RESULT_FOUND;
             break;
         case TokenElevationTypeFull:
             if (PhWordMatchStringZ(SearchboxText, L"Full"))
-                return TRUE;
+                return FILTER_RESULT_FOUND;
             break;
         default:
             if (PhWordMatchStringZ(SearchboxText, L"Unknown"))
-                return TRUE;
+                return FILTER_RESULT_FOUND;
             break;
         }
     }
 
-    if (PhWordMatchStringZ(SearchboxText, L"IsBeingDebugged") && processNode->ProcessItem->IsBeingDebugged)
+    if (processNode->ProcessItem->IsBeingDebugged && PhWordMatchStringZ(SearchboxText, L"IsBeingDebugged"))
     {
-        return TRUE;
+        return FILTER_RESULT_FOUND;
     }
 
-    if (PhWordMatchStringZ(SearchboxText, L"IsDotNet") && processNode->ProcessItem->IsDotNet)
+    if (processNode->ProcessItem->IsDotNet && PhWordMatchStringZ(SearchboxText, L"IsDotNet"))
     {
-        return TRUE;
+        return FILTER_RESULT_FOUND;
     }
 
-    if (PhWordMatchStringZ(SearchboxText, L"IsElevated") && processNode->ProcessItem->IsElevated)
+    if (processNode->ProcessItem->IsElevated && PhWordMatchStringZ(SearchboxText, L"IsElevated"))
     {
-        return TRUE;
+        return FILTER_RESULT_FOUND;
     }
 
-    if (PhWordMatchStringZ(SearchboxText, L"IsInJob") && processNode->ProcessItem->IsInJob)
+    if (processNode->ProcessItem->IsInJob && PhWordMatchStringZ(SearchboxText, L"IsInJob"))
     {
-        return TRUE;
+        return FILTER_RESULT_FOUND;
     }
 
-    if (PhWordMatchStringZ(SearchboxText, L"IsInSignificantJob") && processNode->ProcessItem->IsInSignificantJob)
+    if (processNode->ProcessItem->IsInSignificantJob && PhWordMatchStringZ(SearchboxText, L"IsInSignificantJob"))
     {
-        return TRUE;
+        return FILTER_RESULT_FOUND;
     }
 
-    if (PhWordMatchStringZ(SearchboxText, L"IsPacked") && processNode->ProcessItem->IsPacked)
+    if (processNode->ProcessItem->IsPacked && PhWordMatchStringZ(SearchboxText, L"IsPacked"))
     {
-        return TRUE;
+        return FILTER_RESULT_FOUND;
     }
 
-    if (PhWordMatchStringZ(SearchboxText, L"IsSuspended") && processNode->ProcessItem->IsSuspended)
+    if (processNode->ProcessItem->IsSuspended && PhWordMatchStringZ(SearchboxText, L"IsSuspended"))
     {
-        return TRUE;
+        return FILTER_RESULT_FOUND;
     }
 
-    if (PhWordMatchStringZ(SearchboxText, L"IsWow64") && processNode->ProcessItem->IsWow64)
+    if (processNode->ProcessItem->IsWow64 && PhWordMatchStringZ(SearchboxText, L"IsWow64"))
     {
-        return TRUE;
+        return FILTER_RESULT_FOUND;
     }
 
-    if (PhWordMatchStringZ(SearchboxText, L"IsImmersive") && processNode->ProcessItem->IsImmersive)
+    if (processNode->ProcessItem->IsImmersive && PhWordMatchStringZ(SearchboxText, L"IsImmersive"))
     {
-        return TRUE;
+        return FILTER_RESULT_FOUND;
     }
 
-    if (PhWordMatchStringZ(SearchboxText, L"IsProtectedProcess") && processNode->ProcessItem->IsProtectedProcess)
+    if (processNode->ProcessItem->IsPackagedProcess && PhWordMatchStringZ(SearchboxText, L"IsPackagedProcess"))
     {
-        return TRUE;
+        return FILTER_RESULT_FOUND;
     }
 
-    if (PhWordMatchStringZ(SearchboxText, L"IsSecureProcess") && processNode->ProcessItem->IsSecureProcess)
+    if (processNode->ProcessItem->IsProtectedProcess && PhWordMatchStringZ(SearchboxText, L"IsProtectedProcess"))
     {
-        return TRUE;
+        return FILTER_RESULT_FOUND;
     }
 
-    if (PhWordMatchStringZ(SearchboxText, L"IsPicoProcess") && processNode->ProcessItem->IsSubsystemProcess)
+    if (processNode->ProcessItem->IsSecureProcess && PhWordMatchStringZ(SearchboxText, L"IsSecureProcess"))
     {
-        return TRUE;
+        return FILTER_RESULT_FOUND;
+    }
+
+    if (processNode->ProcessItem->IsSubsystemProcess && PhWordMatchStringZ(SearchboxText, L"IsPicoProcess"))
+    {
+        return FILTER_RESULT_FOUND;
     }
 
     if (processNode->ProcessItem->ServiceList && processNode->ProcessItem->ServiceList->Count)
@@ -317,7 +341,7 @@ BOOLEAN ProcessTreeFilterCallback(
 
             if (serviceItem->ProcessId)
             {
-                if (PhWordMatchStringZ(SearchboxText, serviceItem->ProcessIdString))
+                if (PhWordMatchStringLongHintZ(SearchboxText, serviceItem->ProcessIdString))
                 {
                     matched = TRUE;
                     break;
@@ -349,10 +373,126 @@ BOOLEAN ProcessTreeFilterCallback(
         PhDereferenceObject(serviceList);
 
         if (matched)
-            return TRUE;
+            return FILTER_RESULT_FOUND;
     }
 
-    return FALSE;
+    return FILTER_RESULT_NOT_FOUND;
+}
+
+BOOLEAN ProcessTreeFilterCallback(
+    _In_ PPH_TREENEW_NODE Node,
+    _In_opt_ PVOID Context
+    )
+{
+    if (EnableChildWildcardSearch)
+    {
+        if (SearchboxTextCache && (PhIsNullOrEmptyString(SearchboxText) || PhCompareString(SearchboxText, SearchboxTextCache, TRUE)))
+        {
+            // clear cache (gmit3)
+            if (SearchboxTextCache)
+            {
+                PhDereferenceObject(SearchboxTextCache);
+                SearchboxTextCache = NULL;
+            }
+            if (SearchboxFullTextCache)
+            {
+                PhDereferenceObject(SearchboxFullTextCache);
+                SearchboxFullTextCache = NULL;
+            }
+            if (SearchboxParentTextCache)
+            {
+                PhDereferenceObject(SearchboxParentTextCache);
+                SearchboxParentTextCache = NULL;
+            }
+        }
+
+        if (!SearchboxTextCache && !PhIsNullOrEmptyString(SearchboxText))
+        {
+            static PH_STRINGREF includeChildrenWildcard = PH_STRINGREF_INIT(L"*");
+
+            // process SearchboxText:
+            //    fullSearchboxText will contain full search string stripped of '*' markers to perform as before (gmit3)
+            //    parentSearchBoxText will contain only search string parts marked with '*' to search through parents (gmit3)
+
+            SearchboxTextCache = PhReferenceObject(SearchboxText);
+
+            if (PhFindStringInStringRef(&SearchboxText->sr, &includeChildrenWildcard, FALSE) != SIZE_MAX)
+            {
+                PH_STRING_BUILDER fullSearchboxBuilder;
+                PH_STRING_BUILDER parentSearchboxBuilder;
+                PH_STRINGREF part;
+                PH_STRINGREF remainingPart;
+
+                remainingPart = SearchboxText->sr;
+                PhInitializeStringBuilder(&fullSearchboxBuilder, 100);
+                PhInitializeStringBuilder(&parentSearchboxBuilder, 100);
+
+                while (remainingPart.Length)
+                {
+                    PhSplitStringRefAtChar(&remainingPart, L'|', &part, &remainingPart);
+
+                    if (part.Length)
+                    {
+                        BOOLEAN withChildren = PhEndsWithStringRef(&part, &includeChildrenWildcard, FALSE);
+
+                        if (withChildren)
+                        {
+                            PhTrimStringRef(&part, &includeChildrenWildcard, PH_TRIM_END_ONLY);
+
+                            if (parentSearchboxBuilder.String->Length)
+                                PhAppendCharStringBuilder(&parentSearchboxBuilder, L'|');
+                            PhAppendStringBuilder(&parentSearchboxBuilder, &part);
+                        }
+
+                        if (fullSearchboxBuilder.String->Length)
+                            PhAppendCharStringBuilder(&fullSearchboxBuilder, L'|');
+                        PhAppendStringBuilder(&fullSearchboxBuilder, &part);
+                    }
+                }
+
+                PhMoveReference(&SearchboxFullTextCache, PhFinalStringBuilderString(&fullSearchboxBuilder));
+                PhMoveReference(&SearchboxParentTextCache, PhFinalStringBuilderString(&parentSearchboxBuilder));
+            }
+        }
+
+        {
+            FILTER_RESULT_TYPE result;
+
+            result = ProcessTreeFilterMatchTypeCallback(
+                Node,
+                Context,
+                !PhIsNullOrEmptyString(SearchboxFullTextCache) ? SearchboxFullTextCache : SearchboxText
+                );
+
+            if (result == FILTER_RESULT_NOT_FOUND && !PhIsNullOrEmptyString(SearchboxParentTextCache))
+            {
+                PPH_PROCESS_NODE processNode = (PPH_PROCESS_NODE)Node;
+
+                for (PPH_PROCESS_NODE parentNode = processNode->Parent; result == FILTER_RESULT_NOT_FOUND && parentNode; parentNode = parentNode->Parent)
+                {
+                    if (ProcessTreeFilterMatchTypeCallback(&parentNode->Node, Context, SearchboxParentTextCache) == FILTER_RESULT_FOUND_NAME)
+                    {
+                        result = FILTER_RESULT_FOUND_NAME;
+                        break;
+                    }
+                }
+            }
+
+            return result != FILTER_RESULT_NOT_FOUND;
+        }
+    }
+    else
+    {
+        FILTER_RESULT_TYPE result;
+
+        result = ProcessTreeFilterMatchTypeCallback(
+            Node,
+            Context,
+            SearchboxText
+            );
+
+        return result != FILTER_RESULT_NOT_FOUND;
+    }
 }
 
 BOOLEAN ServiceTreeFilterCallback(
@@ -429,7 +569,7 @@ BOOLEAN ServiceTreeFilterCallback(
     {
         PPH_PROCESS_NODE processNode;
 
-        if (PhWordMatchStringZ(SearchboxText, serviceNode->ServiceItem->ProcessIdString))
+        if (PhWordMatchStringLongHintZ(SearchboxText, serviceNode->ServiceItem->ProcessIdString))
             return TRUE;
 
         // Search the process node
@@ -518,13 +658,13 @@ BOOLEAN NetworkTreeFilterCallback(
 
     if (networkNode->NetworkItem->LocalAddressString[0])
     {
-        if (PhWordMatchStringZ(SearchboxText, networkNode->NetworkItem->LocalAddressString))
+        if (PhWordMatchStringLongHintZ(SearchboxText, networkNode->NetworkItem->LocalAddressString))
             return TRUE;
     }
 
     if (networkNode->NetworkItem->LocalPortString[0])
     {
-        if (PhWordMatchStringZ(SearchboxText, networkNode->NetworkItem->LocalPortString))
+        if (PhWordMatchStringLongHintZ(SearchboxText, networkNode->NetworkItem->LocalPortString))
             return TRUE;
     }
 
@@ -536,13 +676,13 @@ BOOLEAN NetworkTreeFilterCallback(
 
     if (networkNode->NetworkItem->RemoteAddressString[0])
     {
-        if (PhWordMatchStringZ(SearchboxText, networkNode->NetworkItem->RemoteAddressString))
+        if (PhWordMatchStringLongHintZ(SearchboxText, networkNode->NetworkItem->RemoteAddressString))
             return TRUE;
     }
 
     if (networkNode->NetworkItem->RemotePortString[0])
     {
-        if (PhWordMatchStringZ(SearchboxText, networkNode->NetworkItem->RemotePortString))
+        if (PhWordMatchStringLongHintZ(SearchboxText, networkNode->NetworkItem->RemotePortString))
             return TRUE;
     }
 

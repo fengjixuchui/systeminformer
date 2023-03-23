@@ -238,12 +238,6 @@ BOOLEAN PhpModulesTreeFilterCallback(
             return TRUE;
     }
 
-    if (!PhIsNullOrEmptyString(moduleItem->FileNameWin32))
-    {
-        if (PhWordMatchStringRef(&Context->SearchboxText->sr, &moduleItem->FileNameWin32->sr))
-            return TRUE;
-    }
-
     if (!PhIsNullOrEmptyString(moduleItem->VerifySignerName))
     {
         if (PhWordMatchStringRef(&Context->SearchboxText->sr, &moduleItem->VerifySignerName->sr))
@@ -282,13 +276,13 @@ BOOLEAN PhpModulesTreeFilterCallback(
 
     if (moduleItem->EntryPointAddressString[0])
     {
-        if (PhWordMatchStringZ(Context->SearchboxText, moduleItem->EntryPointAddressString))
+        if (PhWordMatchStringLongHintZ(Context->SearchboxText, moduleItem->EntryPointAddressString))
             return TRUE;
     }
 
     if (moduleItem->ParentBaseAddressString[0])
     {
-        if (PhWordMatchStringZ(Context->SearchboxText, moduleItem->ParentBaseAddressString))
+        if (PhWordMatchStringLongHintZ(Context->SearchboxText, moduleItem->ParentBaseAddressString))
             return TRUE;
     }
 
@@ -781,10 +775,12 @@ INT_PTR CALLBACK PhpProcessModulesDlgProc(
 
                     if (moduleItem)
                     {
+                        PPH_STRING fileNameWin32 = PH_AUTO(PhGetFileName(moduleItem->FileName));
+
                         PhShellExecuteUserString(
                             hwndDlg,
                             L"FileBrowseExecutable",
-                            moduleItem->FileNameWin32->Buffer,
+                            PhGetString(fileNameWin32),
                             FALSE,
                             L"Make sure the Explorer executable file is present."
                             );
@@ -797,10 +793,12 @@ INT_PTR CALLBACK PhpProcessModulesDlgProc(
 
                     if (moduleItem)
                     {
+                        PPH_STRING fileNameWin32 = PH_AUTO(PhGetFileName(moduleItem->FileName));
+
                         PhShellExecuteUserString(
                             hwndDlg,
                             L"ProgramInspectExecutables",
-                            moduleItem->FileNameWin32->Buffer,
+                            PhGetString(fileNameWin32),
                             FALSE,
                             L"Make sure the PE Viewer executable file is present."
                             );

@@ -230,7 +230,7 @@ HRESULT PhAppResolverActivateAppId(
 
     if (SUCCEEDED(status))
     {
-        //CoAllowSetForegroundWindow((IUnknown*)applicationActivationManager, NULL);
+        CoAllowSetForegroundWindow((IUnknown*)applicationActivationManager, NULL);
 
         status = IApplicationActivationManager_ActivateApplication(
             applicationActivationManager,
@@ -246,6 +246,33 @@ HRESULT PhAppResolverActivateAppId(
     if (SUCCEEDED(status))
     {
         if (ProcessId) *ProcessId = UlongToHandle(processId);
+    }
+
+    return status;
+}
+
+HRESULT PhAppResolverPackageTerminateProcess(
+    _In_ PPH_STRING PackageFullName
+    )
+{
+    HRESULT status;
+    IPackageDebugSettings* packageDebugSettings;
+
+    status = PhGetClassObject(
+        L"twinapi.appcore.dll",
+        &CLSID_PackageDebugSettings,
+        &IID_IPackageDebugSettings,
+        &packageDebugSettings
+        );
+
+    if (SUCCEEDED(status))
+    {
+        status = IPackageDebugSettings_TerminateAllProcesses(
+            packageDebugSettings,
+            PhGetString(PackageFullName)
+            );
+
+        IPackageDebugSettings_Release(packageDebugSettings);
     }
 
     return status;
@@ -514,7 +541,7 @@ PPH_STRING PhGetAppContainerSidFromName(
     {
         packageSidString = PhSidToStringSid(appContainerSid);
 
-        RtlFreeSid(appContainerSid);
+        PhFreeSid(appContainerSid);
     }
 
     return packageSidString;
@@ -626,7 +653,7 @@ PPH_STRING PhGetPackageAppDataPath(
 
     if (NT_SUCCESS(PhOpenProcessToken(ProcessHandle, TOKEN_QUERY, &tokenHandle)))
     {
-        if (NT_SUCCESS(PhGetTokenSecurityAttributes(tokenHandle, &info)))
+        if (NT_SUCCESS(PhGetTokenSecurityAttribute(tokenHandle, &attributeName, &info)))
         {
             for (ULONG i = 0; i < info->AttributeCount; i++)
             {
@@ -672,8 +699,8 @@ BOOLEAN PhIsPackageCapabilitySid(
     for (ULONG i = 1; i < SECURITY_APP_PACKAGE_RID_COUNT - 1; i++)
     {
         if (
-            *RtlSubAuthoritySid(AppContainerSid, i) !=
-            *RtlSubAuthoritySid(Sid, i)
+            *PhSubAuthoritySid(AppContainerSid, i) !=
+            *PhSubAuthoritySid(Sid, i)
             )
         {
             isPackageCapability = FALSE;
@@ -992,13 +1019,20 @@ static BOOLEAN PhParseStartMenuAppShellItem(
         packageLongDisplayName)
     {
         PPH_APPUSERMODELID_ENUM_ENTRY entry;
+        PWSTR imagePath = NULL;
 
         entry = PhAllocateZero(sizeof(PH_APPUSERMODELID_ENUM_ENTRY));
         entry->AppUserModelId = PhCreateString(packageAppUserModelID);
         entry->DisplayName = PhCreateString(packageLongDisplayName);
         entry->PackageInstallPath = PhCreateString(packageInstallPath);
         entry->PackageFullName = PhCreateString(packageFullName);
-        entry->SmallLogoPath = PhCreateString(packageSmallLogoPath);
+
+        if (SUCCEEDED(PhAppResolverGetPackageResourceFilePath(packageFullName, packageSmallLogoPath, &imagePath)))
+        {
+            entry->SmallLogoPath = PhCreateString(imagePath);
+            CoTaskMemFree(imagePath);
+        }
+
         PhAddItemList(List, entry);
 
         return TRUE;
@@ -1089,8 +1123,8 @@ CleanupExit:
 }
 
 HRESULT PhAppResolverGetPackageResourceFilePath(
-    _In_ PPH_STRING PackageFullName,
-    _In_ PWSTR Key,
+    _In_ PCWSTR PackageFullName,
+    _In_ PCWSTR Key,
     _Out_ PWSTR* FilePath
     )
 {
@@ -1109,7 +1143,7 @@ HRESULT PhAppResolverGetPackageResourceFilePath(
     if (FAILED(status))
         goto CleanupExit;
 
-    status = IMrtResourceManager_InitializeForPackage(resourceManager, PhGetString(PackageFullName));
+    status = IMrtResourceManager_InitializeForPackage(resourceManager, PackageFullName);
 
     if (FAILED(status))
         goto CleanupExit;
@@ -1204,7 +1238,7 @@ BOOLEAN PhAppResolverGetPackageIcon(
         goto CleanupExit;
     //if (FAILED(IPropertyStore_GetValue(propertyStore, &PKEY_Tile_Background, &propertyColorValue)))
     //    goto CleanupExit;
-    if (FAILED(PhAppResolverGetPackageResourceFilePath(PackageFullName, V_BSTR(&propertyKeyValue), &imagePath)))
+    if (FAILED(PhAppResolverGetPackageResourceFilePath(PhGetString(PackageFullName), V_BSTR(&propertyKeyValue), &imagePath)))
         goto CleanupExit;
 
     {

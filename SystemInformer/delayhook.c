@@ -40,6 +40,23 @@ LRESULT CALLBACK PhMenuWindowHookProcedure(
 {
     switch (WindowMessage)
     {
+    case WM_NCCREATE:
+        {
+            //CREATESTRUCT* createStruct = (CREATESTRUCT*)lParam;
+
+            if (PhEnableThemeSupport)
+            {
+                HFONT fontHandle;
+                LONG windowDpi = PhGetWindowDpi(WindowHandle);
+
+                if (fontHandle = PhCreateMessageFont(windowDpi))
+                {
+                    PhSetWindowContext(WindowHandle, (ULONG)'font', fontHandle);
+                    SetWindowFont(WindowHandle, fontHandle, TRUE);
+                }
+            }
+        }
+        break;
     case WM_CREATE:
         {
             //CREATESTRUCT* createStruct = (CREATESTRUCT*)lParam;
@@ -52,17 +69,9 @@ LRESULT CALLBACK PhMenuWindowHookProcedure(
 
             if (PhEnableThemeSupport)
             {
-                HFONT fontHandle;
-                LONG windowDpi = PhGetWindowDpi(WindowHandle);
-
-                if (fontHandle = PhCreateMessageFont(windowDpi))
-                {
-                    PhSetWindowContext(WindowHandle, (ULONG)'font', fontHandle);
-                    SetWindowFont(WindowHandle, fontHandle, TRUE);
-                }
-
                 if (PhEnableThemeAcrylicSupport)
-                {
+                { 
+                    // Note: DWM crashes if called from WM_NCCREATE (dmex)
                     PhSetWindowAcrylicCompositionColor(WindowHandle, MakeABGRFromCOLORREF(0, RGB(10, 10, 10)));
                 }
             }
@@ -113,6 +122,7 @@ LRESULT CALLBACK PhDialogWindowHookProcedure(
 
                 if (PhEnableThemeSupport && PhDefaultEnableThemeAcrylicWindowSupport)
                 {
+                    // Note: DWM crashes if called from WM_NCCREATE (dmex)
                     PhSetWindowAcrylicCompositionColor(WindowHandle, MakeABGRFromCOLORREF(0, RGB(10, 10, 10)));
                 }
             }
@@ -158,7 +168,7 @@ LRESULT CALLBACK PhComboBoxWindowHookProcedure(
 
     switch (WindowMessage)
     {
-    case WM_CREATE:
+    case WM_NCCREATE:
         {
             //CREATESTRUCT* createStruct = (CREATESTRUCT*)lParam;
             COMBOBOXINFO info = { sizeof(COMBOBOXINFO) };
@@ -187,7 +197,7 @@ LRESULT CALLBACK PhStaticWindowHookProcedure(
 {
     switch (WindowMessage)
     {
-    case WM_CREATE:
+    case WM_NCCREATE:
         {
             LONG_PTR style = PhGetWindowStyle(WindowHandle);
 
@@ -199,6 +209,9 @@ LRESULT CALLBACK PhStaticWindowHookProcedure(
         break;
     case WM_NCDESTROY:
         {
+            if (!PhGetWindowContext(WindowHandle, SCHAR_MAX))
+                break;
+
             PhRemoveWindowContext(WindowHandle, SCHAR_MAX);
         }
         break;
@@ -456,7 +469,7 @@ LRESULT CALLBACK PhStatusBarWindowHookProcedure(
 {
     PPHP_THEME_WINDOW_STATUSBAR_CONTEXT context = NULL;
 
-    if (WindowMessage == WM_CREATE)
+    if (WindowMessage == WM_NCCREATE)
     {
         context = PhAllocateZero(sizeof(PHP_THEME_WINDOW_STATUSBAR_CONTEXT));
         context->ThemeHandle = PhOpenThemeData(WindowHandle, VSCLASS_STATUS, PhGetWindowDpi(WindowHandle));
@@ -835,7 +848,7 @@ LRESULT CALLBACK PhHeaderWindowHookProcedure(
 {
     PPHP_THEME_WINDOW_HEADER_CONTEXT context = NULL;
 
-    if (WindowMessage == WM_CREATE)
+    if (WindowMessage == WM_NCCREATE)
     {
         CREATESTRUCT* createStruct = (CREATESTRUCT*)lParam;
 
@@ -852,6 +865,8 @@ LRESULT CALLBACK PhHeaderWindowHookProcedure(
 
                 if (BooleanFlagOn(windowStyle, TN_STYLE_CUSTOM_HEADERDRAW))
                 {
+                    PhSetControlTheme(WindowHandle, L"DarkMode_ItemsView");
+
                     return CallWindowProc(PhDefaultHeaderWindowProcedure, WindowHandle, WindowMessage, wParam, lParam);
                 }
             }
@@ -1513,6 +1528,29 @@ CleanupExit:
     }
 }
 
+BOOLEAN PhIsThemeTransparencyEnabled(
+    VOID
+    )
+{
+    static PH_STRINGREF themesKeyName = PH_STRINGREF_INIT(L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+    BOOLEAN themesEnableTransparency = FALSE;
+    HANDLE keyHandle;
+
+    if (NT_SUCCESS(PhOpenKey(
+        &keyHandle,
+        KEY_QUERY_VALUE,
+        PH_KEY_CURRENT_USER,
+        &themesKeyName,
+        0
+        )))
+    {
+        themesEnableTransparency = !!PhQueryRegistryUlongZ(keyHandle, L"EnableTransparency");
+        NtClose(keyHandle);
+    }
+
+    return themesEnableTransparency;
+}
+
 VOID PhInitializeSuperclassControls(
     VOID
     )
@@ -1521,6 +1559,8 @@ VOID PhInitializeSuperclassControls(
 
     if (PhEnableThemeAcrylicSupport && !PhEnableThemeSupport)
         PhEnableThemeAcrylicSupport = FALSE;
+    if (PhEnableThemeAcrylicSupport)
+        PhEnableThemeAcrylicSupport = PhIsThemeTransparencyEnabled();
 
     if (PhEnableThemeSupport || PhDefaultEnableStreamerMode)
     {

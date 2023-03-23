@@ -330,30 +330,6 @@ PPH_STRING PhGetClientIdNameEx(
     return name;
 }
 
-PWSTR PhGetProcessPriorityClassString(
-    _In_ ULONG PriorityClass
-    )
-{
-    switch (PriorityClass)
-    {
-    case PROCESS_PRIORITY_CLASS_REALTIME:
-        return L"Real time";
-    case PROCESS_PRIORITY_CLASS_HIGH:
-        return L"High";
-    case PROCESS_PRIORITY_CLASS_ABOVE_NORMAL:
-        return L"Above normal";
-    case PROCESS_PRIORITY_CLASS_NORMAL:
-        return L"Normal";
-    case PROCESS_PRIORITY_CLASS_BELOW_NORMAL:
-        return L"Below normal";
-    case PROCESS_PRIORITY_CLASS_IDLE:
-        return L"Idle";
-    case PROCESS_PRIORITY_CLASS_UNKNOWN:
-    default:
-        return L"Unknown";
-    }
-}
-
 /**
  * Creates a process item.
  */
@@ -1159,7 +1135,6 @@ VOID PhpFillProcessItem(
             ProcessItem->IsSubsystemProcess = basicInfo.IsSubsystemProcess;
             ProcessItem->IsWow64 = basicInfo.IsWow64Process;
             ProcessItem->IsPackagedProcess = basicInfo.IsStronglyNamed;
-            ProcessItem->IsWow64Valid = TRUE;
         }
     }
 
@@ -1219,6 +1194,7 @@ VOID PhpFillProcessItem(
             PH_TOKEN_USER tokenUser;
             TOKEN_ELEVATION_TYPE elevationType;
             BOOLEAN isElevated;
+            BOOLEAN tokenIsUIAccessEnabled;
             MANDATORY_LEVEL integrityLevel;
             PWSTR integrityString;
 
@@ -1245,6 +1221,12 @@ VOID PhpFillProcessItem(
             {
                 ProcessItem->IntegrityLevel = integrityLevel;
                 ProcessItem->IntegrityString = integrityString;
+            }
+
+            // UIAccess
+            if (NT_SUCCESS(PhGetTokenIsUIAccessEnabled(tokenHandle, &tokenIsUIAccessEnabled)))
+            {
+                ProcessItem->IsUIAccessEnabled = !!tokenIsUIAccessEnabled;
             }
 
             // Package name
@@ -3594,7 +3576,7 @@ PPH_IMAGELIST_ITEM PhImageListExtractIcon(
             ))
         {
             PhExtractIconEx(
-                FileName,
+                &FileName->sr,
                 NativeFileName,
                 0,
                 &largeIcon,
@@ -3606,7 +3588,7 @@ PPH_IMAGELIST_ITEM PhImageListExtractIcon(
     else
     {
         PhExtractIconEx(
-            FileName,
+            &FileName->sr,
             NativeFileName,
             0,
             &largeIcon,

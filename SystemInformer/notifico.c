@@ -49,6 +49,8 @@ static HANDLE PhpTrayIconEventHandle = NULL;
 #ifdef PH_NF_ENABLE_WORKQUEUE
 static SLIST_HEADER PhpTrayIconWorkQueueListHead;
 #endif
+static ULONG PopupIconIndex = ULONG_MAX; // Win11 workaround (dmex)
+static PPH_NF_ICON PopupRegisteredIcon = NULL; // Win11 workaround (dmex)
 
 VOID PhNfLoadStage1(
     VOID
@@ -408,10 +410,10 @@ VOID PhNfUninitialization(
     {
         PPH_NF_ICON icon = PhTrayIconItemList->Items[i];
 
-        if (!BooleanFlagOn(icon->Flags, PH_NF_ICON_ENABLED))
+        if (!BooleanFlagOn(icon->Flags, PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE))
             continue;
 
-        if (RtlInterlockedClearBits(&icon->Flags, PH_NF_ICON_ENABLED) == PH_NF_ICON_ENABLED)
+        if (RtlInterlockedClearBits(&icon->Flags, PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE) == (PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE))
         {
             PhNfpRemoveNotifyIcon(icon);
         }
@@ -500,11 +502,11 @@ VOID PhNfForwardMessage(
                         IconClickShowMiniInfoSectionData.SectionName = PhDuplicateStringZ(showMiniInfoSectionData.SectionName);
                     }
 
-                    SetTimer(WindowHandle, TIMER_ICON_CLICK_ACTIVATE, GetDoubleClickTime() + NFP_ICON_CLICK_ACTIVATE_DELAY, PhNfpIconClickActivateTimerProc);
+                    PhSetTimer(WindowHandle, TIMER_ICON_CLICK_ACTIVATE, GetDoubleClickTime() + NFP_ICON_CLICK_ACTIVATE_DELAY, PhNfpIconClickActivateTimerProc);
                 }
                 else
                 {
-                    KillTimer(WindowHandle, TIMER_ICON_CLICK_ACTIVATE);
+                    PhKillTimer(WindowHandle, TIMER_ICON_CLICK_ACTIVATE);
                 }
             }
         }
@@ -517,7 +519,7 @@ VOID PhNfForwardMessage(
                 {
                     // We will get another WM_LBUTTONUP message corresponding to the double-click,
                     // and we need to make sure that it doesn't start the activation timer again.
-                    KillTimer(WindowHandle, TIMER_ICON_CLICK_ACTIVATE);
+                    PhKillTimer(WindowHandle, TIMER_ICON_CLICK_ACTIVATE);
                     IconClickUpDueToDown = FALSE;
                     PhNfpDisableHover();
                 }
@@ -532,7 +534,9 @@ VOID PhNfForwardMessage(
             POINT location;
 
             if (!PhGetIntegerSetting(L"IconSingleClick") && PhNfMiniInfoEnabled)
-                KillTimer(WindowHandle, TIMER_ICON_CLICK_ACTIVATE);
+                PhKillTimer(WindowHandle, TIMER_ICON_CLICK_ACTIVATE);
+
+            PhNfpIconDisablePopupHoverWin11Workaround();
 
             PhPinMiniInformation(MiniInfoIconPinType, -1, 0, 0, NULL, NULL);
             GetCursorPos(&location);
@@ -550,19 +554,40 @@ VOID PhNfForwardMessage(
         break;
     case NIN_POPUPOPEN:
         {
-            PH_NF_MSG_SHOWMINIINFOSECTION_DATA showMiniInfoSectionData;
-            POINT location;
-
-            if (PhNfMiniInfoEnabled && !IconDisableHover && PhNfpGetShowMiniInfoSectionData(iconIndex, registeredIcon, &showMiniInfoSectionData))
+            if (WindowsVersion >= WINDOWS_11_22H1)
             {
-                GetCursorPos(&location);
-                PhPinMiniInformation(MiniInfoIconPinType, 1, 0, PH_MINIINFO_DONT_CHANGE_SECTION_IF_PINNED,
-                    showMiniInfoSectionData.SectionName, &location);
+                // NIN_POPUPOPEN is sent when the user hovers the cursor over an icon BUT Windows 11 either blocks the notification
+                // or ignores the hover time and displays the popup instantly. We try and workaround the missing hover time by using 
+                // a timer to delay the popup for 1 second. If we get a NIN_POPUPCLOSE then cancel the timer and the popup. 
+                // Note: We only workaround the missing hover time not the blocked/missing NIN_POPUPOPEN notifications. If we want to workaround 
+                // the broken NIN_POPUPOPEN notifications on Win11 the tray icons also send WM_MOUSEMOSE and before NIN_POPUPOPEN existed 
+                // XP applications would compare the cursor position in a timer callback to show or hide the popup. (dmex)
+
+                PopupIconIndex = iconIndex;
+                PopupRegisteredIcon = registeredIcon;
+
+                PhSetTimer(PhMainWndHandle, TIMER_ICON_POPUPOPEN, NFP_ICON_RESTORE_HOVER_DELAY, PhNfpIconShowPopupHoverTimerProc);
+            }
+            else
+            {
+                PH_NF_MSG_SHOWMINIINFOSECTION_DATA showMiniInfoSectionData;
+                POINT location;
+
+                if (PhNfMiniInfoEnabled && !IconDisableHover && PhNfpGetShowMiniInfoSectionData(iconIndex, registeredIcon, &showMiniInfoSectionData))
+                {
+                    GetCursorPos(&location);
+                    PhPinMiniInformation(MiniInfoIconPinType, 1, 0, PH_MINIINFO_DONT_CHANGE_SECTION_IF_PINNED,
+                        showMiniInfoSectionData.SectionName, &location);
+                }
             }
         }
         break;
     case NIN_POPUPCLOSE:
-        PhPinMiniInformation(MiniInfoIconPinType, -1, 350, 0, NULL, NULL);
+        {
+            PhNfpIconDisablePopupHoverWin11Workaround();
+
+            PhPinMiniInformation(MiniInfoIconPinType, -1, 350, 0, NULL, NULL);
+        }
         break;
     }
 }
@@ -1118,10 +1143,10 @@ NTSTATUS PhNfpTrayIconUpdateThread(
     {
         PPH_NF_ICON icon = PhTrayIconItemList->Items[i];
 
-        if (!BooleanFlagOn(icon->Flags, PH_NF_ICON_ENABLED))
+        if (!BooleanFlagOn(icon->Flags, PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE))
             continue;
 
-        if (RtlInterlockedClearBits(&icon->Flags, PH_NF_ICON_ENABLED) == PH_NF_ICON_ENABLED)
+        if (RtlInterlockedClearBits(&icon->Flags, PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE) == (PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE))
         {
             PhNfpRemoveNotifyIcon(icon);
         }
@@ -2214,7 +2239,7 @@ VOID PhNfpIconClickActivateTimerProc(
     PhPinMiniInformation(MiniInfoActivePinType, 1, 0,
         PH_MINIINFO_ACTIVATE_WINDOW | PH_MINIINFO_DONT_CHANGE_SECTION_IF_PINNED,
         IconClickShowMiniInfoSectionData.SectionName, &IconClickLocation);
-    KillTimer(PhMainWndHandle, TIMER_ICON_CLICK_ACTIVATE);
+    PhKillTimer(PhMainWndHandle, TIMER_ICON_CLICK_ACTIVATE);
 }
 
 VOID PhNfpDisableHover(
@@ -2222,7 +2247,7 @@ VOID PhNfpDisableHover(
     )
 {
     IconDisableHover = TRUE;
-    SetTimer(PhMainWndHandle, TIMER_ICON_RESTORE_HOVER, NFP_ICON_RESTORE_HOVER_DELAY, PhNfpIconRestoreHoverTimerProc);
+    PhSetTimer(PhMainWndHandle, TIMER_ICON_RESTORE_HOVER, NFP_ICON_RESTORE_HOVER_DELAY, PhNfpIconRestoreHoverTimerProc);
 }
 
 VOID PhNfpIconRestoreHoverTimerProc(
@@ -2233,5 +2258,40 @@ VOID PhNfpIconRestoreHoverTimerProc(
     )
 {
     IconDisableHover = FALSE;
-    KillTimer(PhMainWndHandle, TIMER_ICON_RESTORE_HOVER);
+    PhKillTimer(PhMainWndHandle, TIMER_ICON_RESTORE_HOVER);
+}
+
+VOID PhNfpIconDisablePopupHoverWin11Workaround(
+    VOID
+    )
+{
+    if (WindowsVersion >= WINDOWS_11_22H1)
+    {
+        PopupIconIndex = ULONG_MAX;
+        PopupRegisteredIcon = NULL;
+
+        PhKillTimer(PhMainWndHandle, TIMER_ICON_POPUPOPEN);
+    }
+}
+
+VOID PhNfpIconShowPopupHoverTimerProc(
+    _In_ HWND hwnd,
+    _In_ UINT uMsg,
+    _In_ UINT_PTR idEvent,
+    _In_ ULONG dwTime
+    )
+{
+    PH_NF_MSG_SHOWMINIINFOSECTION_DATA showMiniInfoSectionData;
+    POINT location;
+
+    if (
+        PhNfMiniInfoEnabled && !IconDisableHover && 
+        PopupIconIndex != ULONG_MAX && PopupRegisteredIcon && 
+        PhNfpGetShowMiniInfoSectionData(PopupIconIndex, PopupRegisteredIcon, &showMiniInfoSectionData)
+        )
+    {
+        GetCursorPos(&location);
+        PhPinMiniInformation(MiniInfoIconPinType, 1, 0, PH_MINIINFO_DONT_CHANGE_SECTION_IF_PINNED,
+            showMiniInfoSectionData.SectionName, &location);
+    }
 }

@@ -57,6 +57,7 @@
 #include <objbase.h>
 
 #include <phintrnl.h>
+#include <phnative.h>
 
 #define PH_VECTOR_LEVEL_NONE 0
 #define PH_VECTOR_LEVEL_SSE2 1
@@ -137,7 +138,7 @@ BOOLEAN PhBaseInitialization(
     else if (USER_SHARED_DATA->ProcessorFeatures[PF_XMMI64_INSTRUCTIONS_AVAILABLE])
         PhpVectorLevel = PH_VECTOR_LEVEL_SSE2;*/
 
-    if (IsProcessorFeaturePresent(PF_XMMI64_INSTRUCTIONS_AVAILABLE))
+    if (PhIsProcessorFeaturePresent(PF_XMMI64_INSTRUCTIONS_AVAILABLE))
         PhpVectorLevel = PH_VECTOR_LEVEL_SSE2;
 
     PhStringType = PhCreateObjectType(L"String", 0, NULL);
@@ -1044,6 +1045,84 @@ BOOLEAN PhCopyStringZFromMultiByte(
         {
             // RtlMultiByteToUnicodeN doesn't null terminate the string.
             *(PWCHAR)PTR_ADD_OFFSET(OutputBuffer, unicodeBytes) = UNICODE_NULL;
+            copied = TRUE;
+        }
+        else
+        {
+            copied = FALSE;
+        }
+    }
+    else
+    {
+        copied = FALSE;
+    }
+
+    if (ReturnCount)
+        *ReturnCount = unicodeBytes / sizeof(WCHAR) + sizeof(UNICODE_NULL);
+
+    return copied;
+}
+
+_Success_(return)
+BOOLEAN PhCopyStringZFromUtf8(
+    _In_ PSTR InputBuffer,
+    _In_ SIZE_T InputCount,
+    _Out_writes_opt_z_(OutputCount) PWSTR OutputBuffer,
+    _In_ SIZE_T OutputCount,
+    _Out_opt_ PSIZE_T ReturnCount
+    )
+{
+    NTSTATUS status;
+    SIZE_T i;
+    ULONG unicodeBytes;
+    BOOLEAN copied;
+
+    // Determine the length of the input string.
+
+    if (InputCount != SIZE_MAX)
+    {
+        i = 0;
+
+        while (i < InputCount && InputBuffer[i])
+            i++;
+    }
+    else
+    {
+        i = strlen(InputBuffer);
+    }
+
+    // Determine the length of the output string.
+
+    status = RtlUTF8ToUnicodeN(
+        NULL,
+        0,
+        &unicodeBytes,
+        InputBuffer,
+        (ULONG)i
+        );
+
+    if (!NT_SUCCESS(status))
+    {
+        if (ReturnCount)
+            *ReturnCount = SIZE_MAX;
+
+        return FALSE;
+    }
+
+    // Convert the string to Unicode if there is enough room.
+
+    if (OutputBuffer && OutputCount >= unicodeBytes / sizeof(WCHAR) + sizeof(UNICODE_NULL))
+    {
+        status = RtlUTF8ToUnicodeN(
+            OutputBuffer,
+            unicodeBytes,
+            NULL,
+            InputBuffer,
+            (ULONG)i
+            );
+
+        if (NT_SUCCESS(status))
+        {
             copied = TRUE;
         }
         else

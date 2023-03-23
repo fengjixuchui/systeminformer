@@ -236,7 +236,6 @@ INT WINAPI wWinMain(
     }
 
     if (PhGetIntegerSetting(L"EnableKph") &&
-        PhGetIntegerSetting(L"EnableKphWarnings") &&
         !PhStartupParameters.NoKph &&
         !PhIsExecutingInWow64())
     {
@@ -598,13 +597,12 @@ VOID PhpCreateUnhandledExceptionCrashDump(
     _In_ BOOLEAN MoreInfoDump
     )
 {
-    static PH_STRINGREF dumpFilePath = PH_STRINGREF_INIT(L"%USERPROFILE%\\Desktop\\");
     HANDLE fileHandle;
     PPH_STRING dumpDirectory;
     PPH_STRING dumpFileName;
     WCHAR alphastring[16] = L"";
 
-    dumpDirectory = PhExpandEnvironmentStrings(&dumpFilePath);
+    dumpDirectory = PhExpandEnvironmentStringsZ(L"%USERPROFILE%\\Desktop\\");
     PhGenerateRandomAlphaString(alphastring, RTL_NUMBER_OF(alphastring));
 
     dumpFileName = PhConcatStrings(
@@ -617,10 +615,10 @@ VOID PhpCreateUnhandledExceptionCrashDump(
 
     if (NT_SUCCESS(PhCreateFileWin32(
         &fileHandle,
-        dumpFileName->Buffer,
+        PhGetString(dumpFileName),
         FILE_GENERIC_WRITE,
         FILE_ATTRIBUTE_NORMAL,
-        FILE_SHARE_READ | FILE_SHARE_DELETE,
+        FILE_SHARE_WRITE,
         FILE_OVERWRITE_IF,
         FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
         )))
@@ -629,7 +627,7 @@ VOID PhpCreateUnhandledExceptionCrashDump(
 
         exceptionInfo.ThreadId = HandleToUlong(NtCurrentThreadId());
         exceptionInfo.ExceptionPointers = ExceptionInfo;
-        exceptionInfo.ClientPointers = FALSE;
+        exceptionInfo.ClientPointers = TRUE;
 
         if (MoreInfoDump)
         {
@@ -650,7 +648,7 @@ VOID PhpCreateUnhandledExceptionCrashDump(
                 NtCurrentProcess(),
                 NtCurrentProcessId(),
                 fileHandle,
-                MiniDumpNormal,
+                MiniDumpNormal | MiniDumpWithDataSegs,
                 &exceptionInfo,
                 NULL,
                 NULL
@@ -723,7 +721,7 @@ ULONG CALLBACK PhpUnhandledExceptionCallback(
                         NULL,
                         NULL,
                         SW_SHOW,
-                        PH_SHELL_EXECUTE_NOASYNC,
+                        PH_SHELL_EXECUTE_DEFAULT,
                         PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
                         0,
                         NULL
@@ -755,7 +753,7 @@ ULONG CALLBACK PhpUnhandledExceptionCallback(
             NULL,
             NULL,
             SW_SHOW,
-            PH_SHELL_EXECUTE_NOASYNC,
+            PH_SHELL_EXECUTE_DEFAULT,
             PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
             0,
             NULL
@@ -763,9 +761,6 @@ ULONG CALLBACK PhpUnhandledExceptionCallback(
     }
 
     PhExitApplication(ExceptionInfo->ExceptionRecord->ExceptionCode);
-
-    PhDereferenceObject(message);
-    PhDereferenceObject(errorMessage);
 
     return EXCEPTION_EXECUTE_HANDLER;
 }
@@ -776,13 +771,14 @@ BOOLEAN PhInitializeExceptionPolicy(
     )
 {
 #ifndef DEBUG
-    ULONG errorMode;
-
-    if (NT_SUCCESS(PhGetProcessErrorMode(NtCurrentProcess(), &errorMode)))
-    {
-        ClearFlag(errorMode, SEM_NOOPENFILEERRORBOX | SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
-        PhSetProcessErrorMode(NtCurrentProcess(), errorMode);
-    }
+    //ULONG errorMode;
+    //
+    //if (NT_SUCCESS(PhGetProcessErrorMode(NtCurrentProcess(), &errorMode)))
+    //{
+    //    ClearFlag(errorMode, SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+    //    PhSetProcessErrorMode(NtCurrentProcess(), errorMode);
+    //}
+    PhSetProcessErrorMode(NtCurrentProcess(), 0);
 
     RtlSetUnhandledExceptionFilter(PhpUnhandledExceptionCallback);
 #endif
@@ -991,20 +987,30 @@ BOOLEAN PhInitializeComPolicy(
     )
 {
 #ifdef PH_COM_SVC
-    static SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
+    #include <cguid.h>
+    IGlobalOptions* globalOptions;
+    UCHAR securityDescriptorBuffer[SECURITY_DESCRIPTOR_MIN_LENGTH + 0x300];
+    PSECURITY_DESCRIPTOR securityDescriptor = (PSECURITY_DESCRIPTOR)securityDescriptorBuffer;
+    PSID administratorsSid = PhSeAdministratorsSid();
     ULONG securityDescriptorAllocationLength;
-    PSECURITY_DESCRIPTOR securityDescriptor;
-    UCHAR administratorsSidBuffer[FIELD_OFFSET(SID, SubAuthority) + sizeof(ULONG) * 2];
-    PSID administratorsSid;
     PACL dacl;
 
     if (!SUCCEEDED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)))
         return TRUE; // Continue without COM support. (dmex)
 
-    administratorsSid = (PSID)administratorsSidBuffer;
-    RtlInitializeSid(administratorsSid, &ntAuthority, 2);
-    *RtlSubAuthoritySid(administratorsSid, 0) = SECURITY_BUILTIN_DOMAIN_RID;
-    *RtlSubAuthoritySid(administratorsSid, 1) = DOMAIN_ALIAS_RID_ADMINS;
+    if (SUCCEEDED(PhGetClassObject(L"combase.dll", &CLSID_GlobalOptions, &IID_IGlobalOptions, &globalOptions)))
+    {
+        #define COMGLB_PROPERTIES_EXPLICIT_WINSTA_DESKTOP COMGLB_PROPERTIES_RESERVED1
+        #define COMGLB_PROCESS_MITIGATION_POLICY_BLOB COMGLB_PROPERTIES_RESERVED2
+        #define COMGLB_ENABLE_AGILE_OOP_PROXIES COMGLB_RESERVED1
+        #define COMGLB_ENABLE_WAKE_ON_RPC_SUPPRESSION COMGLB_RESERVED2
+        #define COMGLB_ADD_RESTRICTEDCODE_SID_TO_COM_CALLPERMISSIONS COMGLB_RESERVED3
+        #define HKLM_ONLY_CLASSIC_COM_CATALOG COMGLB_RESERVED5
+
+        IGlobalOptions_Set(globalOptions, COMGLB_EXCEPTION_HANDLING, COMGLB_EXCEPTION_DONOT_HANDLE_ANY);
+        IGlobalOptions_Set(globalOptions, COMGLB_RO_SETTINGS, COMGLB_FAST_RUNDOWN | COMGLB_ENABLE_AGILE_OOP_PROXIES | HKLM_ONLY_CLASSIC_COM_CATALOG);
+        IGlobalOptions_Release(globalOptions);
+    }
 
     securityDescriptorAllocationLength = SECURITY_DESCRIPTOR_MIN_LENGTH +
         (ULONG)sizeof(ACL) +
@@ -1015,7 +1021,6 @@ BOOLEAN PhInitializeComPolicy(
         (ULONG)sizeof(ACCESS_ALLOWED_ACE) +
         PhLengthSid(&administratorsSid);
 
-    securityDescriptor = PhAllocate(securityDescriptorAllocationLength);
     dacl = PTR_ADD_OFFSET(securityDescriptor, SECURITY_DESCRIPTOR_MIN_LENGTH);
     RtlCreateSecurityDescriptor(securityDescriptor, SECURITY_DESCRIPTOR_REVISION);
     RtlCreateAcl(dacl, securityDescriptorAllocationLength - SECURITY_DESCRIPTOR_MIN_LENGTH, ACL_REVISION);
@@ -1041,7 +1046,11 @@ BOOLEAN PhInitializeComPolicy(
         NOTHING;
     }
 
-    PhFree(securityDescriptor);
+#ifdef DEBUG
+    assert(securityDescriptorAllocationLength < sizeof(securityDescriptorBuffer));
+    assert(RtlLengthSecurityDescriptor(securityDescriptor) < sizeof(securityDescriptorBuffer));
+#endif
+
     return TRUE;
 #else
     if (!SUCCEEDED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)))
@@ -1450,7 +1459,7 @@ VOID PhpProcessStartupParameters(
             NULL,
             NULL,
             SW_SHOW,
-            PH_SHELL_EXECUTE_ADMIN | PH_SHELL_EXECUTE_NOASYNC,
+            PH_SHELL_EXECUTE_ADMIN,
             PH_SHELL_APP_PROPAGATE_PARAMETERS,
             0,
             NULL

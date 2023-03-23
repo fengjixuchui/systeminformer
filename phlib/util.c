@@ -21,6 +21,7 @@
 #include <winsta.h>
 
 #include <apiimport.h>
+#include <appresolver.h>
 #include <mapimg.h>
 #include <mapldr.h>
 #include <lsasup.h>
@@ -834,17 +835,70 @@ PPH_STRING PhGetWin32Message(
     message = PhGetMessage(PhGetLoaderEntryDllBaseZ(L"kernel32.dll"), 0xb, PhGetUserDefaultLangID(), Result);
 
     if (message)
+    {
+        ULONG_PTR index;
+
         PhTrimToNullTerminatorString(message);
 
-    // Remove any trailing newline.
-    if (message && message->Length >= 2 * sizeof(WCHAR) &&
-        message->Buffer[message->Length / sizeof(WCHAR) - 2] == L'\r' &&
-        message->Buffer[message->Length / sizeof(WCHAR) - 1] == L'\n')
+        // Remove any trailing newline.
+        //if (message && message->Length >= 2 * sizeof(WCHAR) &&
+        //    message->Buffer[message->Length / sizeof(WCHAR) - 2] == L'\r' &&
+        //    message->Buffer[message->Length / sizeof(WCHAR) - 1] == L'\n')
+        //{
+        //    PhMoveReference(&message, PhCreateStringEx(message->Buffer, message->Length - 2 * sizeof(WCHAR)));
+        //}
+
+        if ((index = PhFindStringInStringRefZ(&message->sr, L"\r\n", FALSE)) != SIZE_MAX)
+        {
+            PhMoveReference(&message, PhCreateStringEx(message->Buffer, index * sizeof(WCHAR)));
+        }
+    }
+    else
     {
-        PhMoveReference(&message, PhCreateStringEx(message->Buffer, message->Length - 2 * sizeof(WCHAR)));
+        message = PhGetWin32FormatMessage(Result);
     }
 
     return message;
+}
+
+PPH_STRING PhGetWin32FormatMessage(
+    _In_ ULONG Result
+    )
+{
+    PPH_STRING messageString = NULL;
+    ULONG messageLength = 0;
+    PWSTR messageBuffer = NULL;
+
+    messageLength = FormatMessage(
+        FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL,
+        Result,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        (PWSTR)&messageBuffer,
+        0,
+        NULL
+        );
+
+    if (messageBuffer)
+    {
+        if (messageLength)
+        {
+            ULONG_PTR index;
+            PH_STRINGREF string;
+
+            string.Buffer = messageBuffer;
+            string.Length = messageLength * sizeof(WCHAR);
+
+            if ((index = PhFindStringInStringRefZ(&string, L"\r\n", FALSE)) != SIZE_MAX)
+                messageString = PhCreateStringEx(messageBuffer, index * sizeof(WCHAR));
+            else
+                messageString = PhCreateStringEx(messageBuffer, messageLength * sizeof(WCHAR));
+        }
+
+        LocalFree(messageBuffer);
+    }
+
+    return messageString;
 }
 
 /**
@@ -880,6 +934,16 @@ INT PhShowMessage(
     return result;
 }
 
+static const PH_FLAG_MAPPING PhShowMessageTaskDialogButtonFlagMappings[] =
+{
+    { PH_SHOW_MESSAGE_FLAG_OK_BUTTON, TDCBF_OK_BUTTON },
+    { PH_SHOW_MESSAGE_FLAG_YES_BUTTON, TDCBF_YES_BUTTON },
+    { PH_SHOW_MESSAGE_FLAG_NO_BUTTON, TDCBF_NO_BUTTON },
+    { PH_SHOW_MESSAGE_FLAG_CANCEL_BUTTON, TDCBF_CANCEL_BUTTON },
+    { PH_SHOW_MESSAGE_FLAG_RETRY_BUTTON, TDCBF_RETRY_BUTTON },
+    { PH_SHOW_MESSAGE_FLAG_CLOSE_BUTTON, TDCBF_CLOSE_BUTTON },
+};
+
 INT PhShowMessage2(
     _In_opt_ HWND hWnd,
     _In_ ULONG Buttons,
@@ -893,16 +957,25 @@ INT PhShowMessage2(
     va_list argptr;
     PPH_STRING message;
     TASKDIALOGCONFIG config = { sizeof(TASKDIALOGCONFIG) };
+    ULONG buttonsFlags;
 
     va_start(argptr, Format);
     message = PhFormatString_V(Format, argptr);
     va_end(argptr);
 
     if (!message)
-        return -1;
+        return INT_ERROR;
+
+    buttonsFlags = 0;
+    PhMapFlags1(
+        &buttonsFlags, 
+        Buttons, 
+        PhShowMessageTaskDialogButtonFlagMappings,
+        ARRAYSIZE(PhShowMessageTaskDialogButtonFlagMappings)
+        );
 
     config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | ((hWnd && IsWindowVisible(hWnd) && !IsMinimized(hWnd)) ? TDF_POSITION_RELATIVE_TO_WINDOW : 0);
-    config.dwCommonButtons = Buttons;
+    config.dwCommonButtons = buttonsFlags;
     config.hwndParent = hWnd;
     config.pszWindowTitle = PhApplicationName;
     config.pszMainIcon = Icon;
@@ -922,7 +995,7 @@ INT PhShowMessage2(
     else
     {
         PhDereferenceObject(message);
-        return -1;
+        return INT_ERROR;
     }
 }
 
@@ -4765,8 +4838,8 @@ NTSTATUS PhFilterTokenForLimitedUser(
     // Set the integrity level to Low if we're on Vista and above.
     {
         lowMandatoryLevelSid = (PSID)lowMandatoryLevelSidBuffer;
-        RtlInitializeSid(lowMandatoryLevelSid, &mandatoryLabelAuthority, 1);
-        *RtlSubAuthoritySid(lowMandatoryLevelSid, 0) = SECURITY_MANDATORY_LOW_RID;
+        PhInitializeSid(lowMandatoryLevelSid, &mandatoryLabelAuthority, 1);
+        *PhSubAuthoritySid(lowMandatoryLevelSid, 0) = SECURITY_MANDATORY_LOW_RID;
 
         mandatoryLabel.Label.Sid = lowMandatoryLevelSid;
         mandatoryLabel.Label.Attributes = SE_GROUP_INTEGRITY;
@@ -4991,16 +5064,12 @@ BOOLEAN PhShellExecuteEx(
     info.lpFile = FileName;
     info.lpParameters = Parameters;
     info.lpDirectory = Directory;
-    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC | SEE_MASK_NOZONECHECKS;
     info.nShow = ShowWindowType;
     info.hwnd = hWnd;
 
     if (Flags & PH_SHELL_EXECUTE_ADMIN)
         info.lpVerb = L"runas";
-    if (Flags & PH_SHELL_EXECUTE_NOZONECHECKS)
-        info.fMask |= SEE_MASK_NOZONECHECKS;
-    if (Flags & PH_SHELL_EXECUTE_NOASYNC)
-        info.fMask |= SEE_MASK_NOASYNC;
 
     if (ShellExecuteEx(&info))
     {
@@ -6666,6 +6735,27 @@ BOOLEAN PhParseCommandLineFuzzy(
     return FALSE;
 }
 
+PPH_LIST PhCommandLineToList(
+    _In_ PCWSTR CommandLine
+    )
+{
+    PPH_LIST commandLineList = NULL;
+    INT32 commandLineCount;
+    PWSTR* commandLineArray;
+
+    if (commandLineArray = CommandLineToArgvW(CommandLine, &commandLineCount))
+    {
+        commandLineList = PhCreateList(commandLineCount);
+
+        for (INT32 i = 0; i < commandLineCount; i++)
+            PhAddItemList(commandLineList, PhCreateString(commandLineArray[i]));
+
+        LocalFree(commandLineArray);
+    }
+
+    return commandLineList;
+}
+
 PPH_STRING PhSearchFilePath(
     _In_ PWSTR FileName,
     _In_opt_ PWSTR Extension
@@ -6974,7 +7064,6 @@ PVOID PhFileReadAllTextWin32(
     return string;
 }
 
-_Success_(return == S_OK)
 HRESULT PhGetClassObjectDllBase(
     _In_ PVOID DllBase,
     _In_ REFCLSID Rclsid,
@@ -7009,23 +7098,231 @@ HRESULT PhGetClassObjectDllBase(
     return status;
 }
 
-_Success_(return == S_OK)
 HRESULT PhGetClassObject(
-    _In_ PWSTR DllName,
+    _In_ PCWSTR DllName,
     _In_ REFCLSID Rclsid,
     _In_ REFIID Riid,
     _Out_ PVOID* Ppv
     )
 {
+#if (PH_NATIVE_COM_CLASS_FACTORY)
+    HRESULT status;
+    IClassFactory* classFactory;
+
+    status = CoGetClassObject(
+        Rclsid,
+        CLSCTX_INPROC_SERVER,
+        NULL,
+        &IID_IClassFactory,
+        &classFactory
+        );
+
+    if (SUCCEEDED(status))
+    {
+        status = IClassFactory_CreateInstance(
+            classFactory,
+            NULL,
+            Riid,
+            Ppv
+            );
+        IClassFactory_Release(classFactory);
+    }
+
+    return status;
+#else
     PVOID baseAddress;
 
-    if (!(baseAddress = PhGetLoaderEntryDllBaseZ(DllName)))
+    if (!(baseAddress = PhGetLoaderEntryDllBaseZ((PWSTR)DllName)))
     {
         if (!(baseAddress = PhLoadLibrary(DllName)))
             return HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND);
     }
 
     return PhGetClassObjectDllBase(baseAddress, Rclsid, Riid, Ppv);
+#endif
+}
+
+HRESULT PhGetActivationFactoryDllBase(
+    _In_ PVOID DllBase,
+    _In_ PCWSTR RuntimeClass,
+    _In_ REFIID Riid,
+    _Out_ PVOID* Ppv
+    )
+{
+    HRESULT (WINAPI* DllGetActivationFactory_I)(_In_ HSTRING RuntimeClassId, _Out_ PVOID* ActivationFactory);
+    HRESULT status;
+    HSTRING_REFERENCE string;
+    IActivationFactory* activationFactory;
+
+    PhCreateWindowsRuntimeStringReference(RuntimeClass, &string);
+
+    if (!(DllGetActivationFactory_I = PhGetDllBaseProcedureAddress(DllBase, "DllGetActivationFactory", 0)))
+        return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+
+    status = DllGetActivationFactory_I(
+        HSTRING_FROM_STRING(string),
+        &activationFactory
+        );
+
+    if (SUCCEEDED(status))
+    {
+        status = IActivationFactory_QueryInterface(
+            activationFactory,
+            Riid,
+            Ppv
+            );
+        IActivationFactory_Release(activationFactory);
+    }
+
+    return status;
+}
+
+// rev from RoGetActivationFactory (dmex)
+HRESULT PhGetActivationFactory(
+    _In_ PCWSTR DllName,
+    _In_ PCWSTR RuntimeClass,
+    _In_ REFIID Riid,
+    _Out_ PVOID* Ppv
+    )
+{
+#if (PH_NATIVE_COM_CLASS_FACTORY || PH_BUILD_MSIX)
+    #include <roapi.h>
+    #include <winstring.h>
+    HRESULT status;
+    HSTRING runtimeClassStringHandle = NULL;
+    HSTRING_HEADER runtimeClassStringHeader;
+
+    status = WindowsCreateStringReference(
+        RuntimeClass, 
+        (UINT32)PhCountStringZ((PWSTR)RuntimeClass), 
+        &runtimeClassStringHeader,
+        &runtimeClassStringHandle
+        );
+
+    if (SUCCEEDED(status))
+    {
+        status = RoGetActivationFactory(
+            runtimeClassStringHandle,
+            Riid,
+            Ppv
+            );
+    }
+
+    return status;
+#else
+    PVOID baseAddress;
+
+    if (!(baseAddress = PhGetLoaderEntryDllBaseZ((PWSTR)DllName)))
+    {
+        if (!(baseAddress = PhLoadLibrary(DllName)))
+            return HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND);
+    }
+
+    return PhGetActivationFactoryDllBase(baseAddress, RuntimeClass, Riid, Ppv);
+#endif
+}
+
+HRESULT PhActivateInstanceDllBase(
+    _In_ PVOID DllBase,
+    _In_ PCWSTR RuntimeClass,
+    _In_ REFIID Riid,
+    _Out_ PVOID* Ppv
+    )
+{
+    HRESULT (WINAPI* DllGetActivationFactory_I)(_In_ HSTRING RuntimeClassId, _Out_ PVOID * ActivationFactory);
+    HRESULT status;
+    HSTRING_REFERENCE string;
+    IActivationFactory* activationFactory;
+    IInspectable* inspectableObject;
+
+    if (FAILED(status = PhCreateWindowsRuntimeStringReference(RuntimeClass, &string)))
+        return status;
+
+    if (!(DllGetActivationFactory_I = PhGetDllBaseProcedureAddress(DllBase, "DllGetActivationFactory", 0)))
+        return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+
+    status = DllGetActivationFactory_I(
+        HSTRING_FROM_STRING(string),
+        &activationFactory
+        );
+
+    if (SUCCEEDED(status))
+    {
+        status = IActivationFactory_ActivateInstance(
+            activationFactory,
+            &inspectableObject
+            );
+
+        if (SUCCEEDED(status))
+        {
+            status = IInspectable_QueryInterface(
+                inspectableObject,
+                Riid,
+                Ppv
+                );
+
+            IInspectable_Release(inspectableObject);
+        }
+
+        IActivationFactory_Release(activationFactory);
+    }
+
+    return status;
+}
+
+// rev from RoActivateInstance (dmex)
+HRESULT PhActivateInstance(
+    _In_ PCWSTR DllName,
+    _In_ PCWSTR RuntimeClass,
+    _In_ REFIID Riid,
+    _Out_ PVOID* Ppv
+    )
+{
+#if (PH_NATIVE_COM_CLASS_FACTORY || PH_BUILD_MSIX)
+    #include <roapi.h>
+    #include <winstring.h>
+    HRESULT status;
+    HSTRING runtimeClassStringHandle = NULL;
+    HSTRING_HEADER runtimeClassStringHeader;
+    IInspectable* inspectableObject;
+
+    status = WindowsCreateStringReference(
+        RuntimeClass,
+        (UINT32)PhCountStringZ((PWSTR)RuntimeClass),
+        &runtimeClassStringHeader,
+        &runtimeClassStringHandle
+        );
+
+    if (SUCCEEDED(status))
+    {
+        status = RoActivateInstance(
+            runtimeClassStringHandle,
+            &inspectableObject
+            );
+
+        if (SUCCEEDED(status))
+        {
+            status = IInspectable_QueryInterface(
+                inspectableObject,
+                Riid,
+                Ppv
+                );
+            IInspectable_Release(inspectableObject);
+        }
+    }
+
+    return status;
+#else
+    PVOID baseAddress;
+
+    if (!(baseAddress = PhGetLoaderEntryDllBaseZ((PWSTR)DllName)))
+    {
+        if (!(baseAddress = PhLoadLibrary(DllName)))
+            return HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND);
+    }
+
+    return PhActivateInstanceDllBase(baseAddress, RuntimeClass, Riid, Ppv);
+#endif
 }
 
 #if (PH_NATIVE_RING_BUFFER)
@@ -7201,7 +7498,7 @@ CleanupExit:
 
 NTSTATUS PhDelayExecutionEx(
     _In_ BOOLEAN Alertable,
-    _In_opt_ PLARGE_INTEGER DelayInterval
+    _In_ PLARGE_INTEGER DelayInterval
     )
 {
     static PH_INITONCE initOnce = PH_INITONCE_INIT;

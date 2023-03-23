@@ -40,6 +40,13 @@ NTAPI
 PhIsProcessBackground(
     _In_ ULONG PriorityClass
     );
+
+PHAPPAPI
+PPH_STRINGREF
+NTAPI
+PhGetProcessPriorityClassString(
+    _In_ ULONG PriorityClass
+    );
 // end_phapppub
 
 NTSTATUS PhGetProcessSwitchContext(
@@ -547,6 +554,21 @@ FORCEINLINE
 BOOLEAN
 NTAPI
 PhWordMatchStringZ(
+    _In_ PPH_STRING SearchText,
+    _In_ PWSTR Text
+    )
+{
+    PH_STRINGREF text;
+
+    PhInitializeStringRef(&text, Text);
+
+    return PhWordMatchStringRef(&SearchText->sr, &text);
+}
+
+FORCEINLINE
+BOOLEAN
+NTAPI
+PhWordMatchStringLongHintZ(
     _In_ PPH_STRING SearchText,
     _In_ PWSTR Text
     )

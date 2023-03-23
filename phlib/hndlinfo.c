@@ -1051,7 +1051,7 @@ NTSTATUS PhpGetBestObjectName(
     else if (PhEqualString2(TypeName, L"File", TRUE))
     {
         // Convert the file name to a DOS file name.
-        bestObjectName = PhResolveDevicePrefix(ObjectName);
+        bestObjectName = PhResolveDevicePrefix(&ObjectName->sr);
 
         if (!bestObjectName)
         {
@@ -1281,7 +1281,7 @@ NTSTATUS PhpGetBestObjectName(
 
         if (NT_SUCCESS(status))
         {
-            bestObjectName = PhResolveDevicePrefix(fileName);
+            bestObjectName = PhResolveDevicePrefix(&fileName->sr);
             PhDereferenceObject(fileName);
         }
         else
@@ -1983,7 +1983,7 @@ CleanupExit:
             PhSetReference(BestObjectName, bestObjectName);
     }
 
-    if (objectHandle && ProcessHandle != NtCurrentProcess())
+    if (!useKph && objectHandle && ProcessHandle != NtCurrentProcess())
         NtClose(objectHandle);
 
     PhClearReference(&typeName);

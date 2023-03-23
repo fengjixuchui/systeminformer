@@ -406,7 +406,7 @@ INT_PTR CALLBACK PhOptionsDialogProc(
                             PhMainWndHandle,
                             L"-v -newinstance",
                             SW_SHOW,
-                            PH_SHELL_EXECUTE_NOASYNC,
+                            PH_SHELL_EXECUTE_DEFAULT,
                             PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
                             0,
                             NULL
@@ -1560,7 +1560,7 @@ static VOID PhpOptionsNotifyChangeCallback(
                 PhMainWndHandle,
                 L"-v -newinstance",
                 SW_SHOW,
-                PH_SHELL_EXECUTE_NOASYNC,
+                PH_SHELL_EXECUTE_DEFAULT,
                 PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
                 0,
                 NULL
@@ -1588,7 +1588,7 @@ VOID PhShowOptionsRestartRequired(
             WindowHandle,
             L"-v -newinstance",
             SW_SHOW,
-            PH_SHELL_EXECUTE_NOASYNC,
+            PH_SHELL_EXECUTE_DEFAULT,
             PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
             0,
             NULL
@@ -2883,10 +2883,14 @@ VOID InitializeOptionsAdvancedTree(
 
     TreeNew_SetCallback(Context->TreeNewHandle, OptionsAdvancedTreeNewCallback, Context);
 
+    TreeNew_SetRedraw(Context->TreeNewHandle, FALSE);
+
     PhAddTreeNewColumnEx(Context->TreeNewHandle, PH_OPTIONS_ADVANCED_COLUMN_ITEM_NAME, TRUE, L"Name", 200, PH_ALIGN_LEFT, 0, 0, TRUE);
     PhAddTreeNewColumnEx(Context->TreeNewHandle, PH_OPTIONS_ADVANCED_COLUMN_ITEM_TYPE, TRUE, L"Type", 100, PH_ALIGN_LEFT, 1, 0, TRUE);
     PhAddTreeNewColumnEx(Context->TreeNewHandle, PH_OPTIONS_ADVANCED_COLUMN_ITEM_VALUE, TRUE, L"Value", 200, PH_ALIGN_LEFT, 2, 0, TRUE);
     PhAddTreeNewColumnEx(Context->TreeNewHandle, PH_OPTIONS_ADVANCED_COLUMN_ITEM_DEFAULT, TRUE, L"Default", 200, PH_ALIGN_LEFT, 3, 0, TRUE);
+
+    TreeNew_SetRedraw(Context->TreeNewHandle, TRUE);
 
     TreeNew_SetTriState(Context->TreeNewHandle, TRUE);
 
@@ -3320,6 +3324,7 @@ static COLOR_ITEM ColorItems[] =
 #endif
     COLOR_ITEM(L"ColorDebuggedProcesses", L"Debugged processes", L"Processes that are currently being debugged."),
     COLOR_ITEM(L"ColorElevatedProcesses", L"Elevated processes", L"Processes with full privileges on a system with UAC enabled."),
+    COLOR_ITEM(L"ColorUIAccessProcesses", L"UIAccess processes", L"Processes with UIAccess privileges."),
     COLOR_ITEM(L"ColorPicoProcesses", L"Pico processes", L"Processes that belong to the Windows subsystem for Linux."),
     COLOR_ITEM(L"ColorImmersiveProcesses", L"Immersive processes and DLLs", L"Processes and DLLs that belong to a Modern UI app."),
     COLOR_ITEM(L"ColorSuspended", L"Suspended processes and threads", L"Processes and threads that are suspended from execution."),

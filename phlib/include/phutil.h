@@ -300,6 +300,13 @@ PhGetWin32Message(
     );
 
 PHLIBAPI
+PPH_STRING
+NTAPI
+PhGetWin32FormatMessage(
+    _In_ ULONG Result
+    );
+
+PHLIBAPI
 INT
 NTAPI
 PhShowMessage(
@@ -325,9 +332,29 @@ PhShowMessage2(
     ...
     );
 
-#define PhShowError2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, TDCBF_CLOSE_BUTTON, TD_ERROR_ICON, Title, Format, __VA_ARGS__)
-#define PhShowWarning2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, TDCBF_CLOSE_BUTTON, TD_WARNING_ICON, Title, Format, __VA_ARGS__)
-#define PhShowInformation2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, TDCBF_CLOSE_BUTTON, TD_INFORMATION_ICON, Title, Format, __VA_ARGS__)
+#define PH_SHOW_MESSAGE_FLAG_OK_BUTTON      0x0001
+#define PH_SHOW_MESSAGE_FLAG_YES_BUTTON     0x0002
+#define PH_SHOW_MESSAGE_FLAG_NO_BUTTON      0x0004
+#define PH_SHOW_MESSAGE_FLAG_CANCEL_BUTTON  0x0008
+#define PH_SHOW_MESSAGE_FLAG_RETRY_BUTTON   0x0010
+#define PH_SHOW_MESSAGE_FLAG_CLOSE_BUTTON   0x0020
+
+#ifndef TD_WARNING_ICON
+#define TD_WARNING_ICON         MAKEINTRESOURCEW(-1)
+#endif
+#ifndef TD_ERROR_ICON
+#define TD_ERROR_ICON           MAKEINTRESOURCEW(-2)
+#endif
+#ifndef TD_INFORMATION_ICON
+#define TD_INFORMATION_ICON     MAKEINTRESOURCEW(-3)
+#endif
+#ifndef TD_SHIELD_ICON
+#define TD_SHIELD_ICON          MAKEINTRESOURCEW(-4)
+#endif
+
+#define PhShowError2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, PH_SHOW_MESSAGE_FLAG_CLOSE_BUTTON, TD_ERROR_ICON, Title, Format, __VA_ARGS__)
+#define PhShowWarning2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, PH_SHOW_MESSAGE_FLAG_CLOSE_BUTTON, TD_WARNING_ICON, Title, Format, __VA_ARGS__)
+#define PhShowInformation2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, PH_SHOW_MESSAGE_FLAG_CLOSE_BUTTON, TD_INFORMATION_ICON, Title, Format, __VA_ARGS__)
 
 PHLIBAPI
 BOOLEAN
@@ -1182,10 +1209,9 @@ PhShellExecute(
     _In_opt_ PWSTR Parameters
     );
 
+#define PH_SHELL_EXECUTE_DEFAULT 0x0
 #define PH_SHELL_EXECUTE_ADMIN 0x1
 #define PH_SHELL_EXECUTE_PUMP_MESSAGES 0x2
-#define PH_SHELL_EXECUTE_NOZONECHECKS 0x4
-#define PH_SHELL_EXECUTE_NOASYNC 0x8
 
 PHLIBAPI
 _Success_(return)
@@ -1591,6 +1617,13 @@ PhParseCommandLineFuzzy(
     );
 
 PHLIBAPI
+PPH_LIST
+NTAPI
+PhCommandLineToList(
+    _In_ PCWSTR CommandLine
+    );
+
+PHLIBAPI
 PPH_STRING
 NTAPI
 PhSearchFilePath(
@@ -1650,7 +1683,6 @@ PhFileReadAllTextWin32(
     _In_ BOOLEAN Unicode
     );
 
-_Success_(return == S_OK)
 PHLIBAPI
 HRESULT
 NTAPI
@@ -1661,13 +1693,32 @@ PhGetClassObjectDllBase(
     _Out_ PVOID * Ppv
     );
 
-_Success_(return == S_OK)
 PHLIBAPI
 HRESULT
 NTAPI
 PhGetClassObject(
-    _In_ PWSTR DllName,
+    _In_ PCWSTR DllName,
     _In_ REFCLSID Rclsid,
+    _In_ REFIID Riid,
+    _Out_ PVOID* Ppv
+    );
+
+PHLIBAPI
+HRESULT
+NTAPI
+PhGetActivationFactory(
+    _In_ PCWSTR DllName,
+    _In_ PCWSTR RuntimeClass,
+    _In_ REFIID Riid,
+    _Out_ PVOID* Ppv
+    );
+
+PHLIBAPI
+HRESULT
+NTAPI
+PhActivateInstance(
+    _In_ PCWSTR DllName,
+    _In_ PCWSTR RuntimeClass,
     _In_ REFIID Riid,
     _Out_ PVOID* Ppv
     );

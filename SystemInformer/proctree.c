@@ -1943,10 +1943,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Bits)
 {
-    sortResult = intcmp(processItem1->IsWow64Valid, processItem2->IsWow64Valid);
-
-    if (sortResult == 0)
-        sortResult = intcmp(processItem1->IsWow64, processItem2->IsWow64);
+    sortResult = intcmp(processItem1->IsWow64, processItem2->IsWow64);
 }
 END_SORT_FUNCTION
 
@@ -2359,6 +2356,18 @@ BEGIN_SORT_FUNCTION(CpuAverage)
 }
 END_SORT_FUNCTION
 
+BEGIN_SORT_FUNCTION(CpuKernel)
+{
+    sortResult = singlecmp(processItem1->CpuKernelUsage, processItem2->CpuKernelUsage);
+}
+END_SORT_FUNCTION
+
+BEGIN_SORT_FUNCTION(CpuUser)
+{
+    sortResult = singlecmp(processItem1->CpuUserUsage, processItem2->CpuUserUsage);
+}
+END_SORT_FUNCTION
+
 BEGIN_SORT_FUNCTION(GrantedAccess)
 {
     PhpUpdateProcessNodeGrantedAccess(node1);
@@ -2505,8 +2514,8 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                         SORT_FUNCTION(SharedCommit),
                         SORT_FUNCTION(PriorityBoost),
                         SORT_FUNCTION(CpuAverage),
-                        SORT_FUNCTION(Cpu), // CPU Kernel
-                        SORT_FUNCTION(Cpu), // CPU User
+                        SORT_FUNCTION(CpuKernel),
+                        SORT_FUNCTION(CpuUser),
                         SORT_FUNCTION(GrantedAccess),
                     };
                     int (__cdecl *sortFunction)(const void *, const void *);
@@ -2732,7 +2741,13 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                 {
                     if (processItem->PriorityClass != PROCESS_PRIORITY_CLASS_UNKNOWN)
                     {
-                        PhInitializeStringRefLongHint(&getCellText->Text, PhGetProcessPriorityClassString(processItem->PriorityClass));
+                        PPH_STRINGREF string;
+
+                        if (string = PhGetProcessPriorityClassString(processItem->PriorityClass))
+                        {
+                            getCellText->Text.Length = string->Length;
+                            getCellText->Text.Buffer = string->Buffer;
+                        }
                     }
                 }
                 break;
@@ -2944,8 +2959,7 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                 break;
             case PHPRTLC_BITS:
 #ifdef _WIN64
-                if (processItem->IsWow64Valid)
-                    PhInitializeStringRef(&getCellText->Text, processItem->IsWow64 ? L"32" : L"64");
+                PhInitializeStringRef(&getCellText->Text, processItem->IsWow64 ? L"32" : L"64");
 #else
                 PhInitializeStringRef(&getCellText->Text, L"32");
 #endif
@@ -3726,6 +3740,8 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                 getNodeColor->BackColor = PhCsColorHandleFiltered;
             else if (PhCsUseColorElevatedProcesses && processItem->IsElevated && processItem->ElevationType == TokenElevationTypeFull)
                 getNodeColor->BackColor = PhCsColorElevatedProcesses;
+            else if (PhCsUseColorUIAccessProcesses && processItem->IsUIAccessEnabled)
+                getNodeColor->BackColor = PhCsColorUIAccessProcesses;
             else if (PhCsUseColorPicoProcesses && processItem->IsSubsystemProcess)
                 getNodeColor->BackColor = PhCsColorPicoProcesses;
             else if (PhCsUseColorImmersiveProcesses && processItem->IsImmersive)
@@ -4684,6 +4700,55 @@ VOID PhGetSelectedProcessNodes(
 
     *NumberOfNodes = (ULONG)array.Count;
     *Nodes = PhFinalArrayItems(&array);
+}
+
+static VOID PhpAddAndPropagateProcessItems(
+    _In_ PPH_ARRAY ProcessesArray,
+    _In_ PPH_PROCESS_NODE ProcessNode
+    )
+{
+    for (ULONG i = 0; i < ProcessNode->Children->Count; i++)
+    {
+        PPH_PROCESS_NODE child = ProcessNode->Children->Items[i];
+
+        if (child->Children)
+        {
+            PhpAddAndPropagateProcessItems(ProcessesArray, child);
+        }
+    }
+
+    PhAddItemArray(ProcessesArray, &ProcessNode->ProcessItem);
+}
+
+VOID PhGetSelectedAndPropagateProcessItems(
+    _Out_ PPH_PROCESS_ITEM **Processes,
+    _Out_ PULONG NumberOfProcesses
+    )
+{
+    PH_ARRAY array;
+    ULONG i;
+
+    PhInitializeArray(&array, sizeof(PVOID), 2);
+
+    for (i = 0; i < ProcessNodeList->Count; i++)
+    {
+        PPH_PROCESS_NODE node = ProcessNodeList->Items[i];
+
+        if (node->Node.Visible && node->Node.Selected)
+        {
+            if (PhCsPropagateCpuUsage && !node->Node.Expanded)
+            {
+                PhpAddAndPropagateProcessItems(&array, node);
+            }
+            else
+            {
+                PhAddItemArray(&array, &node->ProcessItem);
+            }
+        }
+    }
+
+    *NumberOfProcesses = (ULONG)array.Count;
+    *Processes = PhFinalArrayItems(&array);
 }
 
 VOID PhDeselectAllProcessNodes(

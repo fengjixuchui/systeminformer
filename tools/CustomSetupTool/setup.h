@@ -25,7 +25,6 @@
 #include <netlistmgr.h>
 #include <propvarutil.h>
 #include <propkey.h>
-#include <shellapi.h>
 #include <shlwapi.h>
 #include <shlobj.h>
 #include <sddl.h>
@@ -199,22 +198,23 @@ NTSTATUS SetupDeleteUninstallKey(
     VOID
     );
 
-VOID SetupSetWindowsOptions(
+VOID SetupCreateWindowsOptions(
     _In_ PPH_SETUP_CONTEXT Context
     );
-
 VOID SetupDeleteWindowsOptions(
     _In_ PPH_SETUP_CONTEXT Context
     );
 
-VOID SetupChangeNotifyShortcuts(
+VOID SetupCreateShortcuts(
+    _In_ PPH_SETUP_CONTEXT Context
+    );
+VOID SetupDeleteShortcuts(
     _In_ PPH_SETUP_CONTEXT Context
     );
 
 BOOLEAN SetupCreateUninstallFile(
     _In_ PPH_SETUP_CONTEXT Context
     );
-
 VOID SetupDeleteUninstallFile(
     _In_ PPH_SETUP_CONTEXT Context
     );

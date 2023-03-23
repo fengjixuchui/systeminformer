@@ -90,7 +90,25 @@ PhOpenProcess(
 PHLIBAPI
 NTSTATUS
 NTAPI
+PhOpenProcessPublic(
+    _Out_ PHANDLE ProcessHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ HANDLE ProcessId
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
 PhOpenThread(
+    _Out_ PHANDLE ThreadHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ HANDLE ThreadId
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhOpenThreadPublic(
     _Out_ PHANDLE ThreadHandle,
     _In_ ACCESS_MASK DesiredAccess,
     _In_ HANDLE ThreadId
@@ -111,6 +129,25 @@ NTAPI
 PhOpenProcessToken(
     _In_ HANDLE ProcessHandle,
     _In_ ACCESS_MASK DesiredAccess,
+    _Out_ PHANDLE TokenHandle
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhOpenProcessTokenPublic(
+    _In_ HANDLE ProcessHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _Out_ PHANDLE TokenHandle
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhOpenThreadToken(
+    _In_ HANDLE ThreadHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ BOOLEAN OpenAsSelf,
     _Out_ PHANDLE TokenHandle
     );
 
@@ -639,7 +676,7 @@ PhDoesTokenSecurityAttributeExist(
 PHLIBAPI
 BOOLEAN
 NTAPI
-PhIsTokenFullTrustPackage(
+PhGetTokenIsFullTrustPackage(
     _In_ HANDLE TokenHandle
     );
 
@@ -668,6 +705,21 @@ PhGetTokenPackageFullName(
     );
 
 PHLIBAPI
+NTSTATUS
+NTAPI
+PhGetProcessIsStronglyNamed(
+    _In_ HANDLE ProcessHandle,
+    _Out_ PBOOLEAN IsStronglyNamed
+    );
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhGetProcessIsFullTrustPackage(
+    _In_ HANDLE ProcessHandle
+    );
+
+PHLIBAPI
 PPH_STRING
 NTAPI
 PhGetProcessPackageFullName(
@@ -677,8 +729,9 @@ PhGetProcessPackageFullName(
 // rev from RtlInitializeSid (dmex)
 FORCEINLINE
 BOOLEAN
+NTAPI
 PhInitializeSid(
-    _In_ PSID Sid,
+    _Out_ PSID Sid,
     _In_ PSID_IDENTIFIER_AUTHORITY IdentifierAuthority,
     _In_ UCHAR SubAuthorityCount
     )
@@ -686,6 +739,12 @@ PhInitializeSid(
     ((PISID)Sid)->Revision = SID_REVISION;
     ((PISID)Sid)->IdentifierAuthority = *IdentifierAuthority;
     ((PISID)Sid)->SubAuthorityCount = SubAuthorityCount;
+
+    for (UCHAR i = 0; i < SubAuthorityCount; i++)
+    {
+        ((PISID)Sid)->SubAuthority[i] = 0;
+    }
+
     return TRUE;
 }
 
@@ -701,9 +760,21 @@ PhLengthSid(
     return UFIELD_OFFSET(SID, SubAuthority[((PISID)Sid)->SubAuthorityCount]);
 }
 
+// rev from RtlLengthRequiredSid (dmex)
+FORCEINLINE
+ULONG
+NTAPI
+PhLengthRequiredSid(
+    _In_ ULONG SubAuthorityCount
+    )
+{
+    return UFIELD_OFFSET(SID, SubAuthority[SubAuthorityCount]);
+}
+
 // rev from RtlEqualSid (dmex)
 FORCEINLINE
 BOOLEAN
+NTAPI
 PhEqualSid(
     _In_ PSID Sid1,
     _In_ PSID Sid2
@@ -712,15 +783,95 @@ PhEqualSid(
     return (BOOLEAN)RtlEqualMemory(Sid1, Sid2, PhLengthSid(Sid1));
 }
 
+// rev from RtlValidSid (dmex)
+FORCEINLINE
+BOOLEAN
+NTAPI
+PhValidSid(
+    _In_ PSID Sid
+    )
+{
+    if (
+        ((PISID)Sid) &&
+        ((PISID)Sid)->Revision == SID_REVISION &&
+        ((PISID)Sid)->SubAuthorityCount <= SID_MAX_SUB_AUTHORITIES
+        )
+    {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 // rev from RtlSubAuthoritySid (dmex)
 FORCEINLINE
 PULONG
+NTAPI
 PhSubAuthoritySid(
     _In_ PSID Sid,
     _In_ ULONG SubAuthority
     )
 {
     return &((PISID)Sid)->SubAuthority[SubAuthority];
+}
+
+// rev from RtlSubAuthorityCountSid (dmex)
+FORCEINLINE
+PUCHAR
+NTAPI
+PhSubAuthorityCountSid(
+    _In_ PSID Sid
+    )
+{
+    return &((PISID)Sid)->SubAuthorityCount;
+}
+
+// rev from RtlIdentifierAuthoritySid (dmex)
+FORCEINLINE
+PSID_IDENTIFIER_AUTHORITY
+NTAPI
+PhIdentifierAuthoritySid(
+    _In_ PSID Sid
+    )
+{
+    return &((PISID)Sid)->IdentifierAuthority;
+}
+
+FORCEINLINE
+BOOLEAN
+NTAPI
+PhEqualIdentifierAuthoritySid(
+    _In_ PSID_IDENTIFIER_AUTHORITY IdentifierAuthoritySid1,
+    _In_ PSID_IDENTIFIER_AUTHORITY IdentifierAuthoritySid2
+    )
+{
+    return (BOOLEAN)RtlEqualMemory(IdentifierAuthoritySid1, IdentifierAuthoritySid2, sizeof(SID_IDENTIFIER_AUTHORITY));
+}
+
+// rev from RtlFreeSid (dmex)
+FORCEINLINE
+BOOLEAN
+NTAPI
+PhFreeSid(
+    _In_ _Post_invalid_ PSID Sid
+    )
+{
+    return !!RtlFreeHeap(RtlProcessHeap(), 0, Sid);
+}
+
+// rev from RtlFreeUnicodeString (dmex)
+FORCEINLINE
+VOID
+NTAPI
+PhFreeUnicodeString(
+    _Inout_ _At_(UnicodeString->Buffer, _Frees_ptr_opt_ _Post_invalid_) PUNICODE_STRING UnicodeString
+    )
+{
+#ifdef PHNT_INLINE_FREE_UNICODE_STRING
+    RtlFreeUnicodeString(UnicodeString);
+#else
+    RtlFreeHeap(RtlProcessHeap(), 0, UnicodeString->Buffer);
+#endif
 }
 
 PHLIBAPI
@@ -1316,6 +1467,37 @@ PhEnumProcessesEx(
     _In_ SYSTEM_INFORMATION_CLASS SystemInformationClass
     );
 
+typedef BOOLEAN (NTAPI *PPH_ENUM_NEXT_PROCESS)(
+    _In_ HANDLE ProcessHandle,
+    _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhEnumNextProcess(
+    _In_opt_ HANDLE ProcessHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ PPH_ENUM_NEXT_PROCESS Callback,
+    _In_opt_ PVOID Context
+    );
+
+typedef BOOLEAN (NTAPI *PPH_ENUM_NEXT_THREAD)(
+    _In_ HANDLE ThreadHandle,
+    _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhEnumNextThread(
+    _In_ HANDLE ProcessHandle,
+    _In_opt_ HANDLE ThreadHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ PPH_ENUM_NEXT_THREAD Callback,
+    _In_opt_ PVOID Context
+    );
+
 PHLIBAPI
 NTSTATUS
 NTAPI
@@ -1620,7 +1802,7 @@ PHLIBAPI
 PPH_STRING
 NTAPI
 PhResolveDevicePrefix(
-    _In_ PPH_STRING Name
+    _In_ PPH_STRINGREF Name
     );
 
 PHLIBAPI
@@ -1670,7 +1852,6 @@ typedef struct _PH_MODULE_INFO
     PVOID EntryPoint;
     ULONG Flags;
     PPH_STRING Name;
-    PPH_STRING FileNameWin32;
     PPH_STRING FileName;
 
     USHORT LoadOrderIndex; // -1 if N/A
@@ -2299,6 +2480,14 @@ PhGetThreadLastSystemCall(
 PHLIBAPI
 NTSTATUS
 NTAPI
+PhCreateImpersonationToken(
+    _In_ HANDLE ThreadHandle,
+    _Out_ PHANDLE TokenHandle
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
 PhImpersonateToken(
     _In_ HANDLE ThreadHandle,
     _In_ HANDLE TokenHandle
@@ -2635,6 +2824,13 @@ PhGetSystemLogicalProcessorInformation(
     _In_ LOGICAL_PROCESSOR_RELATIONSHIP RelationshipType,
     _Out_ PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX* Buffer,
     _Out_ PULONG BufferLength
+    );
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhIsProcessorFeaturePresent(
+    _In_ ULONG ProcessorFeature
     );
 
 PHLIBAPI
