@@ -413,7 +413,7 @@ VOID PhNfUninitialization(
         if (!BooleanFlagOn(icon->Flags, PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE))
             continue;
 
-        if (RtlInterlockedClearBits(&icon->Flags, PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE) == (PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE))
+        if (RtlInterlockedClearBits(&icon->Flags, PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE))
         {
             PhNfpRemoveNotifyIcon(icon);
         }
@@ -1146,7 +1146,7 @@ NTSTATUS PhNfpTrayIconUpdateThread(
         if (!BooleanFlagOn(icon->Flags, PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE))
             continue;
 
-        if (RtlInterlockedClearBits(&icon->Flags, PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE) == (PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE))
+        if (RtlInterlockedClearBits(&icon->Flags, PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE))
         {
             PhNfpRemoveNotifyIcon(icon);
         }
@@ -1163,8 +1163,8 @@ VOID PhNfpProcessesUpdatedHandler(
 {
     static ULONG processesUpdatedCount = 0;
 
-    // Update the tray icons on a separate thread so we don't block the main GUI or
-    // the provider threads when explorer is not responding.
+    // Update the icons on a separate thread so we don't block the main window 
+    // or provider threads when explorer is not responding. (dmex)
 
     if (processesUpdatedCount != 3)
     {

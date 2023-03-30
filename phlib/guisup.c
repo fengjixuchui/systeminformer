@@ -2538,11 +2538,10 @@ BOOLEAN PhGetSystemResourcesFileName(
     PH_STRINGREF directoryPart;
     PH_STRINGREF fileNamePart;
     PH_STRINGREF directoryBasePart;
-    PH_STRINGREF fileNameBasePart;
 
     if (WindowsVersion < WINDOWS_10_19H1)
         return FALSE;
-    if (PhDetermineDosPathNameType(PhGetStringRefZ(FileName)) == RtlPathTypeUncAbsolute)
+    if (PhDetermineDosPathNameType(FileName) == RtlPathTypeUncAbsolute)
         return FALSE;
 
     // 19H1 and above relocated binary resources into the \SystemResources\ directory.
@@ -2560,12 +2559,12 @@ BOOLEAN PhGetSystemResourcesFileName(
     //
     // The below code has the same logic and semantics. (dmex)
 
-    if (!PhSplitStringRefAtLastChar(FileName, OBJ_NAME_PATH_SEPARATOR, &directoryPart, &fileNamePart))
+    if (!PhGetBasePath(FileName, &directoryPart, &fileNamePart))
         return FALSE;
 
     if (directoryPart.Length && fileNamePart.Length)
     {
-        if (!PhSplitStringRefAtLastChar(&directoryPart, OBJ_NAME_PATH_SEPARATOR, &directoryBasePart, &fileNameBasePart))
+        if (!PhGetBasePath(&directoryPart, &directoryBasePart, NULL))
             return FALSE;
 
         PhMoveReference(&fileName, PhConcatStringRef3(&directoryBasePart, &systemResourcesPath, &fileNamePart));

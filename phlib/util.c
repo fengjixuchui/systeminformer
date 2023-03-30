@@ -936,12 +936,12 @@ INT PhShowMessage(
 
 static const PH_FLAG_MAPPING PhShowMessageTaskDialogButtonFlagMappings[] =
 {
-    { PH_SHOW_MESSAGE_FLAG_OK_BUTTON, TDCBF_OK_BUTTON },
-    { PH_SHOW_MESSAGE_FLAG_YES_BUTTON, TDCBF_YES_BUTTON },
-    { PH_SHOW_MESSAGE_FLAG_NO_BUTTON, TDCBF_NO_BUTTON },
-    { PH_SHOW_MESSAGE_FLAG_CANCEL_BUTTON, TDCBF_CANCEL_BUTTON },
-    { PH_SHOW_MESSAGE_FLAG_RETRY_BUTTON, TDCBF_RETRY_BUTTON },
-    { PH_SHOW_MESSAGE_FLAG_CLOSE_BUTTON, TDCBF_CLOSE_BUTTON },
+    { TD_OK_BUTTON, TDCBF_OK_BUTTON },
+    { TD_YES_BUTTON, TDCBF_YES_BUTTON },
+    { TD_NO_BUTTON, TDCBF_NO_BUTTON },
+    { TD_CANCEL_BUTTON, TDCBF_CANCEL_BUTTON },
+    { TD_RETRY_BUTTON, TDCBF_RETRY_BUTTON },
+    { TD_CLOSE_BUTTON, TDCBF_CLOSE_BUTTON },
 };
 
 INT PhShowMessage2(
@@ -1147,13 +1147,13 @@ BOOLEAN PhShowContinueStatus(
     statusMessage = PhGetStatusMessage(Status, Win32Result);
 
     if (Message && statusMessage)
-        result = PhShowMessage2(hWnd, TDCBF_OK_BUTTON | TDCBF_CLOSE_BUTTON, TD_ERROR_ICON, Message, L"%s", statusMessage->Buffer);
+        result = PhShowMessage2(hWnd, TD_OK_BUTTON | TD_CLOSE_BUTTON, TD_ERROR_ICON, Message, L"%s", PhGetString(statusMessage));
     else if (Message)
-        result = PhShowMessage2(hWnd, TDCBF_OK_BUTTON | TDCBF_CANCEL_BUTTON, TD_ERROR_ICON, L"", L"%s", Message);
+        result = PhShowMessage2(hWnd, TD_OK_BUTTON | TD_CANCEL_BUTTON, TD_ERROR_ICON, L"", L"%s", Message);
     else if (statusMessage)
-        result = PhShowMessage2(hWnd, TDCBF_OK_BUTTON | TDCBF_CANCEL_BUTTON, TD_ERROR_ICON, L"", L"%s", statusMessage->Buffer);
+        result = PhShowMessage2(hWnd, TD_OK_BUTTON | TD_CANCEL_BUTTON, TD_ERROR_ICON, L"", L"%s", PhGetString(statusMessage));
     else
-        result = PhShowMessage2(hWnd, TDCBF_OK_BUTTON | TDCBF_CANCEL_BUTTON, TD_ERROR_ICON, L"Unable to perform the operation.", L"%s", L"");
+        result = PhShowMessage2(hWnd, TD_OK_BUTTON | TD_CANCEL_BUTTON, TD_ERROR_ICON, L"Unable to perform the operation.", L"%s", L"");
 
     if (statusMessage) PhDereferenceObject(statusMessage);
 
@@ -1366,6 +1366,26 @@ VOID PhGenerateGuid(
     ((PGUID_EX)Guid)->s2.Variant |= GUID_VARIANT_STANDARD;
 }
 
+// rev from kernelbase (dmex)
+//VOID PhGenerateGuid2(
+//    _Out_ PGUID Guid
+//    )
+//{
+//    LARGE_INTEGER seed;
+//    PUSHORT buffer;
+//    ULONG count;
+//
+//    PhQuerySystemTime(&seed);
+//    buffer = (PUSHORT)Guid;
+//    count = 8;
+//
+//    do
+//    {
+//        *buffer = (USHORT)RtlRandomEx(&seed.LowPart);
+//        buffer = PTR_ADD_OFFSET(buffer, sizeof(USHORT));
+//    } while (--count);
+//}
+
 /**
  * Creates a name-based (type 3 or 5) UUID.
  *
@@ -1471,6 +1491,50 @@ ULONG64 PhGenerateRandomNumber64(
     PhQueryPerformanceCounter(&seed);
 
     return (ULONG64)RtlRandomEx(&seed.LowPart) | ((ULONG64)RtlRandomEx(&seed.LowPart) << 31);
+}
+
+BOOLEAN PhGenerateRandomNumber(
+    _Out_ PLARGE_INTEGER Number
+    )
+{
+    memset(Number, 0, sizeof(LARGE_INTEGER));
+
+#ifndef _M_ARM64
+    if (PhIsProcessorFeaturePresent(PF_RDRAND_INSTRUCTION_AVAILABLE))
+    {
+#if defined(_M_X64)
+        if (_rdrand64_step(&Number->QuadPart))
+            return TRUE;
+#endif
+        if (_rdrand32_step(&Number->LowPart))
+            return TRUE;
+    }
+#endif
+
+    Number->QuadPart = PhGenerateRandomNumber64();
+    return TRUE;
+}
+
+BOOLEAN PhGenerateRandomSeed(
+    _Out_ PLARGE_INTEGER Seed
+    )
+{
+    memset(Seed, 0, sizeof(LARGE_INTEGER));
+
+#ifndef _M_ARM64
+    if (PhIsProcessorFeaturePresent(PF_RDRAND_INSTRUCTION_AVAILABLE))
+    {
+#if defined(_M_X64)
+        if (_rdseed64_step(&Seed->QuadPart))
+            return TRUE;
+#else
+        if (_rdseed32_step(&Seed->LowPart))
+            return TRUE;
+#endif
+    }
+#endif
+
+    return PhQueryPerformanceCounter(Seed);
 }
 
 /**
@@ -3233,7 +3297,7 @@ PPH_STRING PhGetBaseNameChangeExtension(
 }
 
 _Success_(return)
-BOOLEAN PhGetBaseNameComponents(
+BOOLEAN PhGetBasePath(
     _In_ PPH_STRINGREF FileName,
     _Out_opt_ PPH_STRINGREF BasePathName,
     _Out_opt_ PPH_STRINGREF BaseFileName
@@ -3245,19 +3309,36 @@ BOOLEAN PhGetBaseNameComponents(
     if (!PhSplitStringRefAtLastChar(FileName, OBJ_NAME_PATH_SEPARATOR, &basePathPart, &baseNamePart))
         return FALSE;
 
-    if (BasePathName)
+    if (BasePathName && BaseFileName)
+    {
+        if (basePathPart.Length && baseNamePart.Length)
+        {
+            BasePathName->Length = basePathPart.Length;
+            BasePathName->Buffer = basePathPart.Buffer;
+
+            BaseFileName->Length = baseNamePart.Length;
+            BaseFileName->Buffer = baseNamePart.Buffer;
+            return TRUE;
+        }
+
+        return FALSE;
+    }
+
+    if (BasePathName && basePathPart.Length)
     {
         BasePathName->Length = basePathPart.Length;
         BasePathName->Buffer = basePathPart.Buffer;
+        return TRUE;
     }
 
-    if (BaseFileName)
+    if (BaseFileName && baseNamePart.Length)
     {
         BaseFileName->Length = baseNamePart.Length;
         BaseFileName->Buffer = baseNamePart.Buffer;
+        return TRUE;
     }
 
-    return TRUE;
+    return FALSE;
 }
 
 /**
@@ -3409,16 +3490,21 @@ PPH_STRING PhGetApplicationFileNameWin32(
     //    }
     //}
 
-    if (!NT_SUCCESS(PhGetProcessImageFileNameWin32(NtCurrentProcess(), &fileName)))
+    //if (!NT_SUCCESS(PhGetProcessImageFileNameWin32(NtCurrentProcess(), &fileName)))
+    //{
+    //    if (NT_SUCCESS(PhGetProcessImageFileNameByProcessId(NtCurrentProcessId(), &fileName)))
+    //    {
+    //        PhMoveReference(&fileName, PhGetFileName(fileName));
+    //    }
+    //    else if (NT_SUCCESS(PhGetProcessMappedFileName(NtCurrentProcess(), PhInstanceHandle, &fileName)))
+    //    {
+    //        PhMoveReference(&fileName, PhGetFileName(fileName));
+    //    }
+    //}
+
+    if (fileName = PhGetApplicationFileName())
     {
-        if (NT_SUCCESS(PhGetProcessImageFileNameByProcessId(NtCurrentProcessId(), &fileName)))
-        {
-            PhMoveReference(&fileName, PhGetFileName(fileName));
-        }
-        else if (NT_SUCCESS(PhGetProcessMappedFileName(NtCurrentProcess(), PhInstanceHandle, &fileName)))
-        {
-            PhMoveReference(&fileName, PhGetFileName(fileName));
-        }
+        PhMoveReference(&fileName, PhGetFileName(fileName));
     }
 
     if (!InterlockedCompareExchangePointer(
@@ -6948,13 +7034,13 @@ HWND PhHungWindowFromGhostWindow(
     return HungWindowFromGhostWindow_I(WindowHandle);
 }
 
-PVOID PhGetFileText(
+NTSTATUS PhGetFileData(
     _In_ HANDLE FileHandle,
-    _In_ BOOLEAN Unicode
+    _Out_ PVOID* Buffer,
+    _Out_ PULONG BufferLength
     )
 {
-    PVOID string = NULL;
-    PSTR data;
+    PSTR data = NULL;
     ULONG allocatedLength;
     ULONG dataLength;
     ULONG returnLength;
@@ -7003,13 +7089,40 @@ PVOID PhGetFileText(
     {
         data[dataLength] = ANSI_NULL;
 
+        *Buffer = data;
+        *BufferLength = dataLength;
+
+        return STATUS_SUCCESS;
+    }
+    else
+    {
+        *Buffer = NULL;
+        *BufferLength = 0;
+
+        PhFree(data);
+
+        return STATUS_UNSUCCESSFUL;
+    }
+}
+
+PVOID PhGetFileText(
+    _In_ HANDLE FileHandle,
+    _In_ BOOLEAN Unicode
+    )
+{
+    PVOID string = NULL;
+    ULONG dataLength;
+    PSTR data;
+
+    if (NT_SUCCESS(PhGetFileData(FileHandle, &data, &dataLength)))
+    {
         if (Unicode)
             string = PhConvertUtf8ToUtf16Ex(data, dataLength);
         else
             string = PhCreateBytesEx(data, dataLength);
-    }
 
-    PhFree(data);
+        PhFree(data);
+    }
 
     return string;
 }
@@ -7154,7 +7267,8 @@ HRESULT PhGetActivationFactoryDllBase(
     HSTRING_REFERENCE string;
     IActivationFactory* activationFactory;
 
-    PhCreateWindowsRuntimeStringReference(RuntimeClass, &string);
+    if (FAILED(status = PhCreateWindowsRuntimeStringReference(RuntimeClass, &string)))
+        return status;
 
     if (!(DllGetActivationFactory_I = PhGetDllBaseProcedureAddress(DllBase, "DllGetActivationFactory", 0)))
         return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);

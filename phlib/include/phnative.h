@@ -416,6 +416,15 @@ PhGetProcessMappedFileName(
 PHLIBAPI
 NTSTATUS
 NTAPI
+PhGetProcessMappedImageInformation(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID BaseAddress,
+    _Out_ PMEMORY_IMAGE_INFORMATION ImageInformation
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
 PhGetProcessWorkingSetInformation(
     _In_ HANDLE ProcessHandle,
     _Out_ PMEMORY_WORKING_SET_INFORMATION *WorkingSetInformation
@@ -2220,7 +2229,7 @@ PHLIBAPI
 RTL_PATH_TYPE
 NTAPI
 PhDetermineDosPathNameType(
-    _In_ PWSTR FileName
+    _In_ PPH_STRINGREF FileName
     );
 
 PHLIBAPI
@@ -2642,6 +2651,15 @@ PhGetProcessSystemDllInitBlock(
 PHLIBAPI
 NTSTATUS
 NTAPI
+PhGetProcessTlsBitMapCounters(
+    _In_ HANDLE ProcessHandle,
+    _Out_ PULONG TlsBitMapCount,
+    _Out_ PULONG TlsExpansionBitMapCount
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
 PhGetThreadLastStatusValue(
     _In_ HANDLE ThreadHandle,
     _In_opt_ HANDLE ProcessHandle,
@@ -2831,6 +2849,13 @@ BOOLEAN
 NTAPI
 PhIsProcessorFeaturePresent(
     _In_ ULONG ProcessorFeature
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhGetCurrentProcessorNumber(
+    _Out_ PPROCESSOR_NUMBER ProcessorNumber
     );
 
 PHLIBAPI

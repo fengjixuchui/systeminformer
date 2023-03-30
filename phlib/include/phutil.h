@@ -332,12 +332,12 @@ PhShowMessage2(
     ...
     );
 
-#define PH_SHOW_MESSAGE_FLAG_OK_BUTTON      0x0001
-#define PH_SHOW_MESSAGE_FLAG_YES_BUTTON     0x0002
-#define PH_SHOW_MESSAGE_FLAG_NO_BUTTON      0x0004
-#define PH_SHOW_MESSAGE_FLAG_CANCEL_BUTTON  0x0008
-#define PH_SHOW_MESSAGE_FLAG_RETRY_BUTTON   0x0010
-#define PH_SHOW_MESSAGE_FLAG_CLOSE_BUTTON   0x0020
+#define TD_OK_BUTTON      0x0001
+#define TD_YES_BUTTON     0x0002
+#define TD_NO_BUTTON      0x0004
+#define TD_CANCEL_BUTTON  0x0008
+#define TD_RETRY_BUTTON   0x0010
+#define TD_CLOSE_BUTTON   0x0020
 
 #ifndef TD_WARNING_ICON
 #define TD_WARNING_ICON         MAKEINTRESOURCEW(-1)
@@ -352,9 +352,9 @@ PhShowMessage2(
 #define TD_SHIELD_ICON          MAKEINTRESOURCEW(-4)
 #endif
 
-#define PhShowError2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, PH_SHOW_MESSAGE_FLAG_CLOSE_BUTTON, TD_ERROR_ICON, Title, Format, __VA_ARGS__)
-#define PhShowWarning2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, PH_SHOW_MESSAGE_FLAG_CLOSE_BUTTON, TD_WARNING_ICON, Title, Format, __VA_ARGS__)
-#define PhShowInformation2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, PH_SHOW_MESSAGE_FLAG_CLOSE_BUTTON, TD_INFORMATION_ICON, Title, Format, __VA_ARGS__)
+#define PhShowError2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, TD_CLOSE_BUTTON, TD_ERROR_ICON, Title, Format, __VA_ARGS__)
+#define PhShowWarning2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, TD_CLOSE_BUTTON, TD_WARNING_ICON, Title, Format, __VA_ARGS__)
+#define PhShowInformation2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, TD_CLOSE_BUTTON, TD_INFORMATION_ICON, Title, Format, __VA_ARGS__)
 
 PHLIBAPI
 BOOLEAN
@@ -528,6 +528,20 @@ ULONG64
 NTAPI
 PhGenerateRandomNumber64(
     VOID
+    );
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhGenerateRandomNumber(
+    _Out_ PLARGE_INTEGER Number
+    );
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhGenerateRandomSeed(
+    _Out_ PLARGE_INTEGER Seed
     );
 
 PHLIBAPI
@@ -858,6 +872,16 @@ NTAPI
 PhGetBaseNameChangeExtension(
     _In_ PPH_STRINGREF FileName,
     _In_ PPH_STRINGREF FileExtension
+    );
+
+_Success_(return)
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhGetBasePath(
+    _In_ PPH_STRINGREF FileName,
+    _Out_opt_ PPH_STRINGREF BasePathName,
+    _Out_opt_ PPH_STRINGREF BaseFileName
     );
 
 PHLIBAPI

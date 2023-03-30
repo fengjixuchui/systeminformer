@@ -1789,6 +1789,32 @@ NTSTATUS PhGetProcessMappedFileName(
     return status;
 }
 
+NTSTATUS PhGetProcessMappedImageInformation(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID BaseAddress,
+    _Out_ PMEMORY_IMAGE_INFORMATION ImageInformation
+    )
+{
+    NTSTATUS status;
+    MEMORY_IMAGE_INFORMATION imageInformation;
+
+    status = NtQueryVirtualMemory(
+        ProcessHandle,
+        BaseAddress,
+        MemoryImageInformation,
+        &imageInformation,
+        sizeof(MEMORY_IMAGE_INFORMATION),
+        NULL
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        *ImageInformation = imageInformation;
+    }
+
+    return status;
+}
+
 /**
  * Gets working set information for a process.
  *
@@ -8064,6 +8090,150 @@ VOID PhUpdateDosDevicePrefixes(
     PhReleaseQueuedLockExclusive(&PhDevicePrefixesLock);
 }
 
+static NTSTATUS PhMountManagerQueryMountPoints(
+    _In_ HANDLE DeviceHandle,
+    _Out_ PMOUNTMGR_MOUNT_POINTS *Buffer
+    )
+{
+    NTSTATUS status;
+    IO_STATUS_BLOCK isb;
+    MOUNTMGR_MOUNT_POINT input = { 0 };
+    PMOUNTMGR_MOUNT_POINTS buffer;
+    ULONG bufferSize;
+    ULONG attempts = 16;
+
+    bufferSize = 0x800;
+    buffer = PhAllocate(bufferSize);
+
+    do
+    {
+        status = NtDeviceIoControlFile(
+            DeviceHandle,
+            NULL,
+            NULL,
+            NULL,
+            &isb,
+            IOCTL_MOUNTMGR_QUERY_POINTS,
+            &input,
+            sizeof(MOUNTMGR_MOUNT_POINT),
+            buffer,
+            bufferSize
+            );
+
+        if (NT_SUCCESS(status))
+            break;
+
+        if (status == STATUS_BUFFER_OVERFLOW)
+        {
+            bufferSize = buffer->Size;
+            PhFree(buffer);
+            buffer = PhAllocate(bufferSize);
+        }
+        else
+        {
+            PhFree(buffer);
+            return status;
+        }
+    } while (--attempts);
+
+    *Buffer = buffer;
+
+    return status;
+}
+
+NTSTATUS PhUpdateDosDeviceMountPrefixes(
+    VOID
+    )
+{
+    NTSTATUS status;
+    HANDLE deviceHandle;
+    UNICODE_STRING objectName;
+    OBJECT_ATTRIBUTES objectAttributes;
+    IO_STATUS_BLOCK ioStatusBlock;
+    PMOUNTMGR_MOUNT_POINTS deviceMountPoints;
+
+    RtlInitUnicodeString(&objectName, MOUNTMGR_DEVICE_NAME);
+    InitializeObjectAttributes(
+        &objectAttributes,
+        &objectName,
+        OBJ_CASE_INSENSITIVE,
+        NULL,
+        NULL
+        );
+
+    status = NtCreateFile(
+        &deviceHandle,
+        FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        &objectAttributes,
+        &ioStatusBlock,
+        NULL,
+        FILE_ATTRIBUTE_NORMAL,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        FILE_OPEN,
+        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
+        NULL,
+        0
+        );
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    status = PhMountManagerQueryMountPoints(
+        deviceHandle, 
+        &deviceMountPoints
+        );
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    for (ULONG i = 0; i < RTL_NUMBER_OF(PhDevicePrefixes); i++)
+    {
+        PhDevicePrefixes[i].Length = 0;
+    }
+
+    for (ULONG i = 0; i < deviceMountPoints->NumberOfMountPoints; i++)
+    {
+        PMOUNTMGR_MOUNT_POINT entry = &deviceMountPoints->MountPoints[i];
+        UNICODE_STRING linkName =
+        {
+            entry->SymbolicLinkNameLength,
+            entry->SymbolicLinkNameLength + sizeof(UNICODE_NULL),
+            PTR_ADD_OFFSET(deviceMountPoints, entry->SymbolicLinkNameOffset)
+        };
+        UNICODE_STRING deviceName =
+        {
+            entry->DeviceNameLength,
+            entry->DeviceNameLength + sizeof(UNICODE_NULL),
+            PTR_ADD_OFFSET(deviceMountPoints, entry->DeviceNameOffset)
+        };
+
+        if (MOUNTMGR_IS_DRIVE_LETTER(&linkName))
+        {
+            USHORT index = (USHORT)(linkName.Buffer[12] - L'A');
+
+            if (index >= RTL_NUMBER_OF(PhDevicePrefixes))
+                continue;
+            if (deviceName.Length >= PhDevicePrefixes[index].MaximumLength - sizeof(UNICODE_NULL))
+                continue;
+
+            PhDevicePrefixes[index].Length = deviceName.Length;
+            memcpy_s(
+                PhDevicePrefixes[index].Buffer,
+                PhDevicePrefixes[index].MaximumLength,
+                deviceName.Buffer,
+                deviceName.Length
+                );
+        }
+    }
+
+    PhFree(deviceMountPoints);
+
+CleanupExit:
+    NtClose(deviceHandle);
+
+    return status;
+}
+
 /**
  * Resolves a NT path into a Win32 path.
  *
@@ -8084,6 +8254,8 @@ PPH_STRING PhResolveDevicePrefix(
         PhpInitializeDevicePrefixes();
         PhUpdateDosDevicePrefixes();
         PhUpdateMupDevicePrefixes();
+
+        //PhUpdateDosDeviceMountPrefixes();
 
         PhEndInitOnce(&PhDevicePrefixesInitOnce);
     }
@@ -8326,6 +8498,66 @@ PPH_STRING PhDosPathNameToNtPathName(
     PhReleaseQueuedLockShared(&PhDevicePrefixesLock);
 
     return newName;
+}
+
+// rev from GetLongPathNameW (dmex)
+PPH_STRING PhGetLongPathName(
+    _In_ PPH_STRINGREF FileName
+    )
+{
+    PPH_STRING longPathName = NULL;
+    NTSTATUS status;
+    HANDLE fileHandle;
+    IO_STATUS_BLOCK ioStatusBlock;
+    PFILE_BOTH_DIR_INFORMATION directoryInfoBuffer;
+    ULONG directoryInfoLength;
+    PH_STRINGREF baseNamePart;
+    UNICODE_STRING baseNameUs;
+
+    status = PhOpenFileWin32(
+        &fileHandle,
+        PhGetStringRefZ(FileName),
+        FILE_READ_DATA | FILE_LIST_DIRECTORY | SYNCHRONIZE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_FOR_BACKUP_INTENT
+        );
+
+    if (!NT_SUCCESS(status))
+        return NULL;
+
+    if (!PhGetBasePath(FileName, NULL, &baseNamePart))
+        goto CleanupExit;
+    if (!PhStringRefToUnicodeString(&baseNamePart, &baseNameUs))
+        goto CleanupExit;
+
+    directoryInfoLength = PAGE_SIZE;
+    directoryInfoBuffer = PhAllocate(directoryInfoLength);
+
+    status = NtQueryDirectoryFile(
+        fileHandle,
+        NULL,
+        NULL,
+        NULL,
+        &ioStatusBlock,
+        directoryInfoBuffer,
+        directoryInfoLength,
+        FileBothDirectoryInformation,
+        TRUE,
+        &baseNameUs,
+        FALSE
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        longPathName = PhCreateStringEx(directoryInfoBuffer->FileName, directoryInfoBuffer->FileNameLength);
+    }
+
+    PhFree(directoryInfoBuffer);
+
+CleanupExit:
+    NtClose(fileHandle);
+
+    return longPathName;
 }
 
 typedef struct _ENUM_GENERIC_PROCESS_MODULES_CONTEXT
@@ -10198,11 +10430,44 @@ BOOLEAN PhDoesDirectoryExist(
     return FALSE;
 }
 
+// rev from RtlDetermineDosPathNameType_U (dmex)
 RTL_PATH_TYPE PhDetermineDosPathNameType(
-    _In_ PWSTR FileName
+    _In_ PPH_STRINGREF FileName
     )
 {
+#if (PHNT_USE_NATIVE_PATHTYPE)
     return RtlDetermineDosPathNameType_U(FileName);
+#else
+    if (FileName->Buffer[0] == OBJ_NAME_PATH_SEPARATOR || FileName->Buffer[0] == OBJ_NAME_ALTPATH_SEPARATOR)
+    {
+        if (FileName->Buffer[1] == OBJ_NAME_PATH_SEPARATOR || FileName->Buffer[1] == OBJ_NAME_ALTPATH_SEPARATOR)
+        {
+            if (FileName->Buffer[2] == L'?' || FileName->Buffer[2] == L'.')
+            {
+                if (FileName->Buffer[3] == OBJ_NAME_PATH_SEPARATOR || FileName->Buffer[3] == OBJ_NAME_ALTPATH_SEPARATOR)
+                    return RtlPathTypeLocalDevice;
+
+                if (FileName->Buffer[3] != UNICODE_NULL)
+                    return RtlPathTypeUncAbsolute;
+
+                return RtlPathTypeRootLocalDevice;
+            }
+
+            return RtlPathTypeUncAbsolute;
+        }
+
+        return RtlPathTypeRooted;
+    }
+    else if (FileName->Buffer[0] != UNICODE_NULL && FileName->Buffer[1] == L':')
+    {
+        if (FileName->Buffer[2] == OBJ_NAME_PATH_SEPARATOR || FileName->Buffer[2] == OBJ_NAME_ALTPATH_SEPARATOR)
+            return RtlPathTypeDriveAbsolute;
+
+        return RtlPathTypeDriveRelative;
+    }
+
+    return RtlPathTypeRelative; 
+#endif
 }
 
 /**
@@ -10342,15 +10607,20 @@ NTSTATUS PhCreateDirectoryFullPathWin32(
     )
 {
     NTSTATUS status = STATUS_UNSUCCESSFUL;
+    PH_STRINGREF directoryPart;
+    PPH_STRING directoryPath;
     PPH_STRING directory;
-    PH_STRINGREF pathPart;
-    PH_STRINGREF baseNamePart;
 
-    if (PhSplitStringRefAtLastChar(FileName, OBJ_NAME_PATH_SEPARATOR, &pathPart, &baseNamePart))
+    if (PhGetBasePath(FileName, &directoryPart, NULL))
     {
-        if (directory = PhCreateString2(&pathPart))
+        if (directory = PhCreateString2(&directoryPart))
         {
-            status = PhCreateDirectoryWin32(&directory->sr);
+            if (directoryPath = PhGetFullPath(PhGetString(directory), NULL))
+            {
+                status = PhCreateDirectoryWin32(&directoryPath->sr);
+                PhDereferenceObject(directoryPath);
+            }
+
             PhDereferenceObject(directory);
         }
     }
@@ -12682,32 +12952,77 @@ NTSTATUS PhGetProcessCodePage(
 {
     NTSTATUS status;
     USHORT codePage = 0;
-    PVOID nlsAnsiCodePage;
-    PPH_TARGET_LIBS libs;
 
-    status = PhpGetProcessTargetLibs(ProcessHandle, &libs, NULL);
-    if (!NT_SUCCESS(status))
-        return status;
+    if (WindowsVersion >= WINDOWS_11)
+    {
+        PVOID pebBaseAddress;
+#ifdef _WIN64
+        BOOLEAN isWow64 = FALSE;
 
-    status = PhGetProcedureAddressRemote(
-        ProcessHandle,
-        &libs->Ntdll,
-        "NlsAnsiCodePage",
-        0,
-        &nlsAnsiCodePage,
-        NULL
-        );
+        PhGetProcessIsWow64(ProcessHandle, &isWow64);
 
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
+        if (isWow64)
+        {
+            status = PhGetProcessPeb32(ProcessHandle, &pebBaseAddress);
 
-    status = NtReadVirtualMemory(
-        ProcessHandle,
-        nlsAnsiCodePage,
-        &codePage,
-        sizeof(USHORT),
-        NULL
-        );
+            if (!NT_SUCCESS(status))
+                goto CleanupExit;
+
+            status = NtReadVirtualMemory(
+                ProcessHandle,
+                PTR_ADD_OFFSET(pebBaseAddress, UFIELD_OFFSET(PEB32, ActiveCodePage)),
+                &codePage,
+                sizeof(USHORT),
+                NULL
+                );
+        }
+        else
+#endif
+        {
+            status = PhGetProcessPeb(ProcessHandle, &pebBaseAddress);
+
+            if (!NT_SUCCESS(status))
+                goto CleanupExit;
+
+            status = NtReadVirtualMemory(
+                ProcessHandle,
+                PTR_ADD_OFFSET(pebBaseAddress, UFIELD_OFFSET(PEB, ActiveCodePage)),
+                &codePage,
+                sizeof(USHORT),
+                NULL
+                );
+        }
+    }
+    else
+    {
+        PPH_TARGET_LIBS libs;
+        PVOID nlsAnsiCodePage;
+
+        status = PhpGetProcessTargetLibs(ProcessHandle, &libs, NULL);
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+
+        status = PhGetProcedureAddressRemote(
+            ProcessHandle,
+            &libs->Ntdll,
+            "NlsAnsiCodePage",
+            0,
+            &nlsAnsiCodePage,
+            NULL
+            );
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+
+        status = NtReadVirtualMemory(
+            ProcessHandle,
+            nlsAnsiCodePage,
+            &codePage,
+            sizeof(USHORT),
+            NULL
+            );
+    }
 
     if (NT_SUCCESS(status))
     {
@@ -12716,53 +13031,6 @@ NTSTATUS PhGetProcessCodePage(
 
 CleanupExit:
     return status;
-
-    //    if (WindowsVersion >= WINDOWS_11)
-    //    {
-    //#ifdef _WIN64
-    //        if (isWow64)
-    //        {
-    //            PVOID peb32;
-    //
-    //            status = PhGetProcessPeb32(ProcessHandle, &peb32);
-    //
-    //            if (!NT_SUCCESS(status))
-    //                return status;
-    //
-    //            status = NtReadVirtualMemory(
-    //                ProcessHandle,
-    //                PTR_ADD_OFFSET(peb32, UFIELD_OFFSET(PEB, ActiveCodePage)),
-    //                &codePage,
-    //                sizeof(USHORT),
-    //                NULL
-    //                );
-    //        }
-    //        else
-    //#endif
-    //        {
-    //            PVOID peb;
-    //
-    //            status = PhGetProcessPeb(ProcessHandle, &peb);
-    //
-    //            if (!NT_SUCCESS(status))
-    //                return status;
-    //
-    //            status = NtReadVirtualMemory(
-    //                ProcessHandle,
-    //                PTR_ADD_OFFSET(peb, UFIELD_OFFSET(PEB, ActiveCodePage)),
-    //                &codePage,
-    //                sizeof(USHORT),
-    //                NULL
-    //                );
-    //        }
-    //
-    //        if (NT_SUCCESS(status))
-    //        {
-    //            *ProcessCodePage = codePage;
-    //        }
-    //
-    //        return status;
-    //    }
 }
 
 NTSTATUS PhGetProcessConsoleCodePage(
@@ -12945,6 +13213,98 @@ NTSTATUS PhGetProcessSystemDllInitBlock(
         PhFree(ldrInitBlock);
     }
 
+    return status;
+}
+
+NTSTATUS PhGetProcessTlsBitMapCounters(
+    _In_ HANDLE ProcessHandle,
+    _Out_ PULONG TlsBitMapCount,
+    _Out_ PULONG TlsExpansionBitMapCount
+    )
+{
+    NTSTATUS status;
+#ifdef _WIN64
+    BOOLEAN isWow64 = FALSE;
+#endif
+    PVOID pebBaseAddress;
+    RTL_BITMAP tlsBitMap;
+    RTL_BITMAP tlsExpansionBitMap;
+    ULONG bitmapBits[2] = { 0 };
+    ULONG bitmapExpansionBits[32] = { 0 };
+
+    static_assert(sizeof(bitmapBits) == RTL_FIELD_SIZE(PEB, TlsBitmapBits), "Buffer must equal TlsBitmapBits");
+    static_assert(sizeof(bitmapExpansionBits) == RTL_FIELD_SIZE(PEB, TlsExpansionBitmapBits), "Buffer must equal TlsExpansionBitmapBits");
+
+#ifdef _WIN64
+    PhGetProcessIsWow64(ProcessHandle, &isWow64);
+
+    if (isWow64)
+    {
+        status = PhGetProcessPeb32(ProcessHandle, &pebBaseAddress);
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+
+        status = NtReadVirtualMemory(
+            ProcessHandle,
+            PTR_ADD_OFFSET(pebBaseAddress, UFIELD_OFFSET(PEB32, TlsBitmapBits)),
+            bitmapBits,
+            sizeof(bitmapBits),
+            NULL
+            );
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+
+        status = NtReadVirtualMemory(
+            ProcessHandle,
+            PTR_ADD_OFFSET(pebBaseAddress, UFIELD_OFFSET(PEB32, TlsExpansionBitmapBits)),
+            bitmapExpansionBits,
+            sizeof(bitmapExpansionBits),
+            NULL
+            );
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+    }
+    else
+#endif
+    {
+        status = PhGetProcessPeb(ProcessHandle, &pebBaseAddress);
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+
+        status = NtReadVirtualMemory(
+            ProcessHandle,
+            PTR_ADD_OFFSET(pebBaseAddress, UFIELD_OFFSET(PEB, TlsBitmapBits)),
+            bitmapBits,
+            sizeof(bitmapBits),
+            NULL
+            );
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+
+        status = NtReadVirtualMemory(
+            ProcessHandle,
+            PTR_ADD_OFFSET(pebBaseAddress, UFIELD_OFFSET(PEB, TlsExpansionBitmapBits)),
+            bitmapExpansionBits,
+            sizeof(bitmapExpansionBits),
+            NULL
+            );
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+    }
+
+    RtlInitializeBitMap(&tlsBitMap, bitmapBits, TLS_MINIMUM_AVAILABLE);
+    RtlInitializeBitMap(&tlsExpansionBitMap, bitmapExpansionBits, TLS_EXPANSION_SLOTS);
+
+    *TlsBitMapCount = RtlNumberOfSetBits(&tlsBitMap);
+    *TlsExpansionBitMapCount = RtlNumberOfSetBits(&tlsExpansionBitMap);
+
+CleanupExit:
     return status;
 }
 
@@ -14159,6 +14519,20 @@ BOOLEAN PhIsProcessorFeaturePresent(
     return !!IsProcessorFeaturePresent(ProcessorFeature); // RtlIsProcessorFeaturePresent
 }
 
+VOID PhGetCurrentProcessorNumber(
+    _Out_ PPROCESSOR_NUMBER ProcessorNumber
+    )
+{
+    //if (PhIsProcessorFeaturePresent(PF_RDPID_INSTRUCTION_AVAILABLE))
+    //    _rdpid_u32();
+    //if (PhIsProcessorFeaturePresent(PF_RDTSCP_INSTRUCTION_AVAILABLE))
+    //    __rdtscp();
+
+    memset(ProcessorNumber, 0, sizeof(PROCESSOR_NUMBER));
+
+    RtlGetCurrentProcessorNumberEx(ProcessorNumber);
+}
+
 // based on GetActiveProcessorCount (dmex)
 USHORT PhGetActiveProcessorCount(
     _In_ USHORT ProcessorGroup
@@ -14262,8 +14636,7 @@ NTSTATUS PhGetProcessorSystemAffinityMask(
     {
         PROCESSOR_NUMBER processorNumber;
 
-        memset(&processorNumber, 0, sizeof(PROCESSOR_NUMBER));
-        //RtlGetCurrentProcessorNumberEx(&processorNumber);
+        PhGetCurrentProcessorNumber(&processorNumber);
 
         return PhGetProcessorGroupActiveAffinityMask(processorNumber.Group, ActiveProcessorsAffinityMask);
     }

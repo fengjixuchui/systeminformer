@@ -716,7 +716,7 @@ BOOLEAN PhUiRestartComputer(
             {
                 PhShowMessage2(
                     WindowHandle,
-                    TDCBF_OK_BUTTON,
+                    TD_OK_BUTTON,
                     TD_ERROR_ICON,
                     L"Unable to restart to firmware options.",
                     L"Make sure System Informer is running with administrative privileges."
@@ -728,7 +728,7 @@ BOOLEAN PhUiRestartComputer(
             {
                 PhShowMessage2(
                     WindowHandle,
-                    TDCBF_OK_BUTTON,
+                    TD_OK_BUTTON,
                     TD_ERROR_ICON,
                     L"Unable to restart to firmware options.",
                     L"Make sure System Informer is running with administrative privileges."
@@ -740,7 +740,7 @@ BOOLEAN PhUiRestartComputer(
             {
                 PhShowMessage2(
                     WindowHandle,
-                    TDCBF_OK_BUTTON,
+                    TD_OK_BUTTON,
                     TD_ERROR_ICON,
                     L"Unable to restart to firmware options.",
                     L"This machine does not have UEFI support."
@@ -2258,9 +2258,10 @@ BOOLEAN PhUiRestartProcess(
     BOOLEAN tokenRevertImpersonation = FALSE;
     HANDLE processHandle = NULL;
     HANDLE newProcessHandle = NULL;
-    PPH_STRING commandLine;
-    PPH_STRING currentDirectory;
-    STARTUPINFOEX startupInfo;
+    PPH_STRING fileNameWin32 = NULL;
+    PPH_STRING commandLine = NULL;
+    PPH_STRING currentDirectory = NULL;
+    STARTUPINFOEX startupInfo = { 0 };
     PSECURITY_DESCRIPTOR processSecurityDescriptor = NULL;
     PSECURITY_DESCRIPTOR tokenSecurityDescriptor = NULL;
     PVOID environment = NULL;
@@ -2291,6 +2292,14 @@ BOOLEAN PhUiRestartProcess(
     if (Process->ProcessId == NtCurrentProcessId())
         return FALSE;
 
+    fileNameWin32 = Process->FileName ? PhGetFileName(Process->FileName) : NULL;
+
+    if (!(PhIsNullOrEmptyString(fileNameWin32) && PhDoesFileExistWin32(PhGetString(fileNameWin32))))
+    {
+        status = STATUS_NO_SUCH_FILE;
+        goto CleanupExit;
+    }
+
     memset(&startupInfo, 0, sizeof(STARTUPINFOEX));
     startupInfo.StartupInfo.cb = sizeof(STARTUPINFOEX);
     startupInfo.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
@@ -2311,8 +2320,6 @@ BOOLEAN PhUiRestartProcess(
         )))
         goto CleanupExit;
 
-    PH_AUTO(commandLine);
-
     if (!NT_SUCCESS(status = PhGetProcessCurrentDirectory(
         processHandle,
         !!Process->IsWow64,
@@ -2321,8 +2328,6 @@ BOOLEAN PhUiRestartProcess(
     {
         goto CleanupExit;
     }
-
-    PH_AUTO(currentDirectory);
 
     NtClose(processHandle);
     processHandle = NULL;
@@ -2405,7 +2410,7 @@ BOOLEAN PhUiRestartProcess(
     }
 
     status = PhCreateProcessWin32Ex(
-        PhGetString(Process->FileNameWin32), // we didn't wait for S1 processing
+        PhGetString(fileNameWin32),
         PhGetString(commandLine),
         environment,
         PhGetString(currentDirectory),
@@ -2416,6 +2421,36 @@ BOOLEAN PhUiRestartProcess(
         &newProcessHandle,
         NULL
         );
+
+    if (!NT_SUCCESS(status)) // Try without the token (dmex)
+    {
+        status = PhCreateProcessWin32Ex(
+            PhGetString(fileNameWin32),
+            PhGetString(commandLine),
+            environment,
+            PhGetString(currentDirectory),
+            &startupInfo.StartupInfo,
+            PH_CREATE_PROCESS_SUSPENDED | PH_CREATE_PROCESS_NEW_CONSOLE | PH_CREATE_PROCESS_EXTENDED_STARTUPINFO | PH_CREATE_PROCESS_DEFAULT_ERROR_MODE | flags,
+            NULL,
+            NULL,
+            &newProcessHandle,
+            NULL
+            );
+    }
+
+    if (!NT_SUCCESS(status) && tokenIsUIAccessEnabled) // Try UIAccess (dmex)
+    {
+        status = PhShellExecuteEx(
+            hWnd,
+            PhGetString(fileNameWin32),
+            PhGetString(commandLine),
+            PhGetString(currentDirectory),
+            SW_SHOW,
+            PH_SHELL_EXECUTE_DEFAULT,
+            0,
+            &newProcessHandle
+            );
+    }
 
     if (tokenRevertImpersonation)
     {
@@ -2473,6 +2508,26 @@ BOOLEAN PhUiRestartProcess(
 
 CleanupExit:
 
+    if (tokenHandle)
+    {
+        NtClose(tokenHandle);
+    }
+
+    if (newProcessHandle)
+    {
+        NtClose(newProcessHandle);
+    }
+
+    if (processHandle)
+    {
+        NtClose(processHandle);
+    }
+
+    if (startupInfo.lpAttributeList)
+    {
+        PhDeleteProcThreadAttributeList(startupInfo.lpAttributeList);
+    }
+
     if (environment && DestroyEnvironmentBlock_Import())
     {
         DestroyEnvironmentBlock_Import()(environment);
@@ -2488,24 +2543,19 @@ CleanupExit:
         PhFree(processSecurityDescriptor);
     }
 
-    if (startupInfo.lpAttributeList)
+    if (currentDirectory)
     {
-        PhDeleteProcThreadAttributeList(startupInfo.lpAttributeList);
+        PhDereferenceObject(currentDirectory);
     }
 
-    if (tokenHandle)
+    if (commandLine)
     {
-        NtClose(tokenHandle);
+        PhDereferenceObject(commandLine);
     }
 
-    if (newProcessHandle)
+    if (fileNameWin32)
     {
-        NtClose(newProcessHandle);
-    }
-
-    if (processHandle)
-    {
-        NtClose(processHandle);
+        PhDereferenceObject(fileNameWin32);
     }
 
     if (!NT_SUCCESS(status))
@@ -4055,7 +4105,7 @@ BOOLEAN PhUiCloseConnections(
             {
                 if (PhShowMessage2(
                     hWnd,
-                    TDCBF_OK_BUTTON,
+                    TD_OK_BUTTON,
                     TD_ERROR_ICON,
                     L"Unable to close the TCP connection.",
                     L"Make sure System Informer is running with administrative privileges."
