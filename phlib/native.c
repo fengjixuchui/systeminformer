@@ -998,7 +998,6 @@ NTSTATUS PhGetProcessIsBeingDebugged(
     )
 {
     NTSTATUS status = STATUS_UNSUCCESSFUL;
-    BOOLEAN isBeingDebugged = FALSE;
     PVOID debugHandle;
 
     status = NtQueryInformationProcess(
@@ -3754,6 +3753,125 @@ NTSTATUS PhGetTokenIntegrityLevel(
 
         *IntegrityLevel = integrityLevel;
     }
+
+    return status;
+}
+
+NTSTATUS PhGetProcessMandatoryPolicy(
+    _In_ HANDLE ProcessHandle,
+    _Out_ PACCESS_MASK Mask
+    )
+{
+    NTSTATUS status;
+    PSYSTEM_MANDATORY_LABEL_ACE currentAce;
+    PSECURITY_DESCRIPTOR currentSecurityDescriptor;
+    BOOLEAN currentSaclPresent;
+    BOOLEAN currentSaclDefaulted;
+    PACL currentSacl;
+
+    status = PhGetObjectSecurity(
+        ProcessHandle,
+        LABEL_SECURITY_INFORMATION, 
+        &currentSecurityDescriptor
+        );
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    status = RtlGetSaclSecurityDescriptor(
+        currentSecurityDescriptor,
+        &currentSaclPresent,
+        &currentSacl,
+        &currentSaclDefaulted
+        );
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    status = STATUS_UNSUCCESSFUL;
+
+    if (!(currentSaclPresent && currentSacl))
+        goto CleanupExit;
+
+    for (USHORT i = 0; i < currentSacl->AceCount; i++)
+    {
+        status = RtlGetAce(currentSacl, i, &currentAce);
+
+        if (!NT_SUCCESS(status))
+            break;
+
+        if (currentAce->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE)
+        {
+            *Mask = currentAce->Mask;
+            status = STATUS_SUCCESS;
+            break;
+        }
+    }
+
+CleanupExit:
+    PhFree(currentSecurityDescriptor);
+
+    return status;
+}
+
+NTSTATUS PhSetProcessMandatoryPolicy(
+    _In_ HANDLE ProcessHandle,
+    _In_ ACCESS_MASK Mask
+    )
+{
+    NTSTATUS status;
+    PSYSTEM_MANDATORY_LABEL_ACE currentAce;
+    PSECURITY_DESCRIPTOR currentSecurityDescriptor;
+    BOOLEAN currentSaclPresent;
+    BOOLEAN currentSaclDefaulted;
+    PACL currentSacl;
+
+    status = PhGetObjectSecurity(
+        ProcessHandle,
+        LABEL_SECURITY_INFORMATION, 
+        &currentSecurityDescriptor
+        );
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    status = RtlGetSaclSecurityDescriptor(
+        currentSecurityDescriptor,
+        &currentSaclPresent,
+        &currentSacl,
+        &currentSaclDefaulted
+        );
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    status = STATUS_UNSUCCESSFUL;
+
+    if (!(currentSaclPresent && currentSacl))
+        goto CleanupExit;
+
+    for (USHORT i = 0; i < currentSacl->AceCount; i++)
+    {
+        status = RtlGetAce(currentSacl, i, &currentAce);
+
+        if (!NT_SUCCESS(status))
+            break;
+
+        if (currentAce->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE)
+        {
+            currentAce->Mask = Mask;
+
+            status = PhSetObjectSecurity(
+                ProcessHandle, 
+                LABEL_SECURITY_INFORMATION, 
+                currentSecurityDescriptor
+                );
+            break;
+        }
+    }
+
+CleanupExit:
+    PhFree(currentSecurityDescriptor);
 
     return status;
 }
@@ -12841,8 +12959,8 @@ NTSTATUS PhGetProcessArchitecture(
     _Out_ PUSHORT ProcessArchitecture
     )
 {
-    USHORT architecture;
     NTSTATUS status;
+    USHORT architecture = IMAGE_FILE_MACHINE_UNKNOWN;
     SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION output[6];
     ULONG returnLength;
 
@@ -13163,7 +13281,7 @@ NTSTATUS PhGetProcessSystemDllInitBlock(
     _Out_ PPS_SYSTEM_DLL_INIT_BLOCK* SystemDllInitBlock
     )
 {
-    NTSTATUS status = STATUS_UNSUCCESSFUL;
+    NTSTATUS status;
     PPS_SYSTEM_DLL_INIT_BLOCK ldrInitBlock;
     PVOID ldrInitBlockAddress;
     PPH_TARGET_LIBS runtime;
@@ -13640,7 +13758,7 @@ NTSTATUS PhGetThreadStackSize(
 
     if (NT_SUCCESS(status))
     {
-        MEMORY_BASIC_INFORMATION basicInfo;
+        MEMORY_BASIC_INFORMATION memoryBasicInformation;
         PVOID stackBaseAddress = NULL;
         PVOID stackLimitAddress = NULL;
 
@@ -13660,22 +13778,22 @@ NTSTATUS PhGetThreadStackSize(
         stackBaseAddress = ntTib.StackBase;
         stackLimitAddress = ntTib.StackLimit;
 #endif
-        memset(&basicInfo, 0, sizeof(MEMORY_BASIC_INFORMATION));
+        memset(&memoryBasicInformation, 0, sizeof(MEMORY_BASIC_INFORMATION));
 
         status = NtQueryVirtualMemory(
             ProcessHandle,
             stackLimitAddress,
             MemoryBasicInformation,
-            &basicInfo,
+            &memoryBasicInformation,
             sizeof(MEMORY_BASIC_INFORMATION),
             NULL
             );
 
         if (NT_SUCCESS(status))
         {
-            // TEB->DeallocationStack == basicInfo.AllocationBase
+            // TEB->DeallocationStack == memoryBasicInfo.AllocationBase
             *StackUsage = (ULONG_PTR)PTR_SUB_OFFSET(stackBaseAddress, stackLimitAddress);
-            *StackLimit = (ULONG_PTR)PTR_SUB_OFFSET(stackBaseAddress, basicInfo.AllocationBase);
+            *StackLimit = (ULONG_PTR)PTR_SUB_OFFSET(stackBaseAddress, memoryBasicInformation.AllocationBase);
         }
     }
 

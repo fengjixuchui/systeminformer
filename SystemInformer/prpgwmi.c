@@ -97,7 +97,7 @@ PPHP_PROCESS_WMI_TREENODE PhpAddWmiProviderNode(
 
 PPHP_PROCESS_WMI_TREENODE PhpFindWmiProviderNode(
     _In_ PPH_PROCESS_WMI_CONTEXT Context,
-    _In_ PWSTR KeyPath
+    _In_ PWSTR RelativePath
     );
 
 VOID PhpClearWmiProviderTree(
@@ -589,7 +589,6 @@ PPH_STRING PhpQueryWmiProviderStatistics(
     )
 {
     static PH_STRINGREF wbemResource = PH_STRINGREF_INIT(L"Root\\CIMV2");
-    static PH_STRINGREF wbemLanguage = PH_STRINGREF_INIT(L"WQL");
     HRESULT status;
     PVOID imageBaseAddress;
     PPH_STRING wbemProviderString = NULL;
