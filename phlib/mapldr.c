@@ -1451,7 +1451,7 @@ NTSTATUS PhLoaderEntryDetourImportProcedure(
 
     status = STATUS_UNSUCCESSFUL;
 
-    for (importDirectory = importDirectory; importDirectory->Name; importDirectory++)
+    while (importDirectory->Name && importDirectory->OriginalFirstThunk)
     {
         PSTR importName;
         PIMAGE_THUNK_DATA importThunk;
@@ -1460,39 +1460,57 @@ NTSTATUS PhLoaderEntryDetourImportProcedure(
 
         importName = PTR_ADD_OFFSET(BaseAddress, importDirectory->Name);
         importThunk = PTR_ADD_OFFSET(BaseAddress, importDirectory->FirstThunk);
-        originalThunk = PTR_ADD_OFFSET(BaseAddress, importDirectory->OriginalFirstThunk ? importDirectory->OriginalFirstThunk : importDirectory->FirstThunk);
+        originalThunk = PTR_ADD_OFFSET(BaseAddress, importDirectory->OriginalFirstThunk);
 
-        if (!PhEqualBytesZ(importName, ImportName, TRUE))
-            continue;
-
-        for (
-            originalThunk = originalThunk, importThunk = importThunk;
-            originalThunk->u1.AddressOfData;
-            originalThunk++, importThunk++
-            )
+        if (PhEqualBytesZ(importName, ImportName, TRUE))
         {
-            SIZE_T importThunkSize = sizeof(IMAGE_THUNK_DATA);
-            PVOID importThunkAddress = importThunk;
-            ULONG importThunkProtect = 0;
+            for (; originalThunk->u1.AddressOfData; originalThunk++, importThunk++) // while (originalThunk->u1.AddressOfData)
+            {
+                SIZE_T importThunkSize = sizeof(IMAGE_THUNK_DATA);
+                PVOID importThunkAddress = importThunk;
+                ULONG importThunkProtect = 0;
 
-            if (IMAGE_SNAP_BY_ORDINAL(originalThunk->u1.Ordinal))
-                continue;
+                if (IMAGE_SNAP_BY_ORDINAL(originalThunk->u1.Ordinal))
+                    continue;
 
-            importByName = PTR_ADD_OFFSET(BaseAddress, originalThunk->u1.AddressOfData);
+                importByName = PTR_ADD_OFFSET(BaseAddress, originalThunk->u1.AddressOfData);
 
-            if (!PhEqualBytesZ(importByName->Name, ProcedureName, FALSE))
-                continue;
+                if (!PhEqualBytesZ(importByName->Name, ProcedureName, FALSE))
+                    continue;
 
-            if (OriginalAddress)
-                *OriginalAddress = (PVOID)importThunk->u1.Function;
+                if (OriginalAddress)
+                    *OriginalAddress = (PVOID)importThunk->u1.Function;
 
-            NtProtectVirtualMemory(NtCurrentProcess(), &importThunkAddress, &importThunkSize, PAGE_READWRITE, &importThunkProtect);
-            importThunk->u1.Function = (ULONG_PTR)FunctionAddress;
-            NtProtectVirtualMemory(NtCurrentProcess(), &importThunkAddress, &importThunkSize, importThunkProtect, &importThunkProtect);
+                if (NT_SUCCESS(status = NtProtectVirtualMemory(
+                    NtCurrentProcess(), 
+                    &importThunkAddress, 
+                    &importThunkSize, 
+                    PAGE_READWRITE, 
+                    &importThunkProtect
+                    )))
+                {
+                    importThunk->u1.Function = (ULONG_PTR)FunctionAddress;
 
-            status = STATUS_SUCCESS;
-            break;
+                    NtProtectVirtualMemory(
+                        NtCurrentProcess(), 
+                        &importThunkAddress, 
+                        &importThunkSize, 
+                        importThunkProtect, 
+                        &importThunkProtect
+                        );
+#ifdef _M_ARM64
+                    NtFlushInstructionCache(
+                        NtCurrentProcess(), 
+                        importThunkAddress, 
+                        importThunkSize
+                        );
+#endif
+                }
+                break;
+            }
         }
+
+        importDirectory++;
     }
 
     return status;
@@ -1504,11 +1522,11 @@ static NTSTATUS PhpFixupLoaderEntryImageImports(
     )
 {
     NTSTATUS status;
-    SIZE_T importDirectorySize;
-    ULONG importDirectoryProtect;
     PIMAGE_DATA_DIRECTORY dataDirectory;
     PIMAGE_IMPORT_DESCRIPTOR importDirectory;
     PVOID importDirectorySectionAddress;
+    SIZE_T importDirectorySectionSize;
+    ULONG importDirectoryProtect;
 
     status = PhGetLoaderEntryImageDirectory(
         BaseAddress,
@@ -1520,14 +1538,14 @@ static NTSTATUS PhpFixupLoaderEntryImageImports(
         );
 
     if (!NT_SUCCESS(status))
-        goto CleanupExit;
+        return status;
 
     status = PhGetLoaderEntryImageVaToSection(
         BaseAddress,
         ImageNtHeader,
         importDirectory,
         &importDirectorySectionAddress,
-        &importDirectorySize
+        &importDirectorySectionSize
         );
 
     if (!NT_SUCCESS(status))
@@ -1536,7 +1554,7 @@ static NTSTATUS PhpFixupLoaderEntryImageImports(
     status = NtProtectVirtualMemory(
         NtCurrentProcess(),
         &importDirectorySectionAddress,
-        &importDirectorySize,
+        &importDirectorySectionSize,
         PAGE_READWRITE,
         &importDirectoryProtect
         );
@@ -1544,7 +1562,7 @@ static NTSTATUS PhpFixupLoaderEntryImageImports(
     if (!NT_SUCCESS(status))
         goto CleanupExit;
 
-    for (importDirectory = importDirectory; importDirectory->Name; importDirectory++)
+    while (importDirectory->Name && importDirectory->OriginalFirstThunk)
     {
         PSTR importName;
         PIMAGE_THUNK_DATA importThunk;
@@ -1553,7 +1571,7 @@ static NTSTATUS PhpFixupLoaderEntryImageImports(
 
         importName = PTR_ADD_OFFSET(BaseAddress, importDirectory->Name);
         importThunk = PTR_ADD_OFFSET(BaseAddress, importDirectory->FirstThunk);
-        originalThunk = PTR_ADD_OFFSET(BaseAddress, importDirectory->OriginalFirstThunk ? importDirectory->OriginalFirstThunk : importDirectory->FirstThunk);
+        originalThunk = PTR_ADD_OFFSET(BaseAddress, importDirectory->OriginalFirstThunk);
 
         if (PhEqualBytesZ(importName, "SystemInformer.exe", FALSE))
         {
@@ -1586,11 +1604,7 @@ static NTSTATUS PhpFixupLoaderEntryImageImports(
             goto CleanupExit;
         }
 
-        for (
-            originalThunk = originalThunk, importThunk = importThunk;
-            originalThunk->u1.AddressOfData;
-            originalThunk++, importThunk++
-            )
+        for (; originalThunk->u1.AddressOfData; originalThunk++, importThunk++) // while (originalThunk->u1.AddressOfData)
         {
             if (IMAGE_SNAP_BY_ORDINAL(originalThunk->u1.Ordinal))
             {
@@ -1663,20 +1677,28 @@ static NTSTATUS PhpFixupLoaderEntryImageImports(
                 importThunk->u1.Function = (ULONG_PTR)procedureAddress;
             }
         }
+
+        importDirectory++;
     }
 
     status = NtProtectVirtualMemory(
         NtCurrentProcess(),
         &importDirectorySectionAddress,
-        &importDirectorySize,
+        &importDirectorySectionSize,
         importDirectoryProtect,
         &importDirectoryProtect
         );
 
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
 CleanupExit:
+
+#ifdef _M_ARM64
+    NtFlushInstructionCache(
+        NtCurrentProcess(), 
+        importDirectorySectionAddress, 
+        importDirectorySectionSize
+        );
+#endif
+
     return status;
 }
 
@@ -1687,11 +1709,11 @@ static NTSTATUS PhpFixupLoaderEntryImageDelayImports(
     )
 {
     NTSTATUS status;
-    SIZE_T importDirectorySectionSize;
-    ULONG importDirectoryProtect;
     PIMAGE_DATA_DIRECTORY dataDirectory;
     PIMAGE_DELAYLOAD_DESCRIPTOR delayImportDirectory;
     PVOID importDirectorySectionAddress;
+    SIZE_T importDirectorySectionSize;
+    ULONG importDirectoryProtect;
 
     status = PhGetLoaderEntryImageDirectory(
         BaseAddress,
@@ -1707,7 +1729,7 @@ static NTSTATUS PhpFixupLoaderEntryImageDelayImports(
         if (status == STATUS_INVALID_FILE_FOR_SECTION)
             status = STATUS_SUCCESS;
 
-        goto CleanupExit;
+        return status;
     }
 
     status = PhGetLoaderEntryImageVaToSection(
@@ -1732,19 +1754,19 @@ static NTSTATUS PhpFixupLoaderEntryImageDelayImports(
     if (!NT_SUCCESS(status))
         goto CleanupExit;
 
-    for (delayImportDirectory = delayImportDirectory; delayImportDirectory->DllNameRVA; delayImportDirectory++)
+    while (delayImportDirectory->ImportAddressTableRVA && delayImportDirectory->ImportNameTableRVA)
     {
         PSTR importName;
         PVOID* importHandle;
-        PIMAGE_THUNK_DATA importThunk;
-        PIMAGE_THUNK_DATA originalThunk;
+        PIMAGE_THUNK_DATA importAddressTable;
+        PIMAGE_THUNK_DATA importNameTable;
         PVOID importBaseAddress;
         BOOLEAN importNeedsFree = FALSE;
 
         importName = PTR_ADD_OFFSET(BaseAddress, delayImportDirectory->DllNameRVA);
         importHandle = PTR_ADD_OFFSET(BaseAddress, delayImportDirectory->ModuleHandleRVA);
-        importThunk = PTR_ADD_OFFSET(BaseAddress, delayImportDirectory->ImportAddressTableRVA);
-        originalThunk = PTR_ADD_OFFSET(BaseAddress, delayImportDirectory->ImportNameTableRVA);
+        importAddressTable = PTR_ADD_OFFSET(BaseAddress, delayImportDirectory->ImportAddressTableRVA);
+        importNameTable = PTR_ADD_OFFSET(BaseAddress, delayImportDirectory->ImportNameTableRVA);
 
         if (PhEqualBytesZ(importName, ImportDllName, TRUE))
         {
@@ -1789,32 +1811,31 @@ static NTSTATUS PhpFixupLoaderEntryImageDelayImports(
                 break;
             }
 
-            for (
-                originalThunk = originalThunk, importThunk = importThunk;
-                originalThunk->u1.AddressOfData;
-                originalThunk++, importThunk++
-                )
+            while (importNameTable->u1.AddressOfData)
             {
-                if (IMAGE_SNAP_BY_ORDINAL(originalThunk->u1.Ordinal))
+                if (IMAGE_SNAP_BY_ORDINAL(importNameTable->u1.Ordinal))
                 {
                     USHORT procedureOrdinal;
                     PVOID procedureAddress;
 
-                    procedureOrdinal = IMAGE_ORDINAL(originalThunk->u1.Ordinal);
+                    procedureOrdinal = IMAGE_ORDINAL(importNameTable->u1.Ordinal);
                     procedureAddress = PhGetDllBaseProcedureAddress(importBaseAddress, NULL, procedureOrdinal);
 
-                    importThunk->u1.Function = (ULONG_PTR)procedureAddress;
+                    importAddressTable->u1.Function = (ULONG_PTR)procedureAddress;
                 }
                 else
                 {
                     PIMAGE_IMPORT_BY_NAME importByName;
                     PVOID procedureAddress;
 
-                    importByName = PTR_ADD_OFFSET(BaseAddress, originalThunk->u1.AddressOfData);
+                    importByName = PTR_ADD_OFFSET(BaseAddress, importNameTable->u1.AddressOfData);
                     procedureAddress = PhGetDllBaseProcedureAddressWithHint(importBaseAddress, importByName->Name, importByName->Hint);
 
-                    importThunk->u1.Function = (ULONG_PTR)procedureAddress;
+                    importAddressTable->u1.Function = (ULONG_PTR)procedureAddress;
                 }
+
+                importAddressTable++;
+                importNameTable++;
             }
 
             if ((InterlockedExchangePointer(importHandle, importBaseAddress) == importBaseAddress) && importNeedsFree)
@@ -1822,10 +1843,12 @@ static NTSTATUS PhpFixupLoaderEntryImageDelayImports(
                 PhFreeLibrary(importBaseAddress); // A different thread has already updated the cache.
             }
         }
+
+        delayImportDirectory++;
     }
 
-    //if (!NT_SUCCESS(status))
-    //    goto CleanupExit;
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
 
     status = NtProtectVirtualMemory(
         NtCurrentProcess(),
@@ -1835,10 +1858,16 @@ static NTSTATUS PhpFixupLoaderEntryImageDelayImports(
         &importDirectoryProtect
         );
 
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
 CleanupExit:
+
+#ifdef _M_ARM64
+    NtFlushInstructionCache(
+        NtCurrentProcess(), 
+        importDirectorySectionAddress, 
+        importDirectorySectionSize
+        );
+#endif
+
     return status;
 }
 
@@ -1908,8 +1937,6 @@ NTSTATUS PhLoaderEntryRelocateImage(
     if (!NT_SUCCESS(status))
         return status;
 
-    if (dataDirectory->Size == 0)
-        return STATUS_SUCCESS;
     if (imageNtHeader->FileHeader.Characteristics & IMAGE_FILE_RELOCS_STRIPPED)
         return STATUS_SUCCESS;
 
@@ -2002,6 +2029,13 @@ NTSTATUS PhLoaderEntryRelocateImage(
             &sectionProtectionJunk
             );
 
+#ifdef _M_ARM64
+        NtFlushInstructionCache(
+            NtCurrentProcess(),
+            sectionHeaderAddress,
+            sectionHeaderSize
+            );
+#endif
         if (!NT_SUCCESS(status))
             break;
     }
@@ -2089,10 +2123,10 @@ NTSTATUS PhLoaderEntryLoadDll(
 
     status = NtCreateSection(
         &sectionHandle,
-        SECTION_QUERY | SECTION_MAP_EXECUTE,
+        SECTION_QUERY | SECTION_MAP_READ | SECTION_MAP_EXECUTE,
         NULL,
         NULL,
-        PAGE_READONLY,
+        PAGE_EXECUTE,
         SEC_IMAGE,
         fileHandle
         );
@@ -2316,6 +2350,142 @@ CleanupExit:
 #else
         PhLoaderEntryUnloadDll(imageBaseAddress);
 #endif
+    }
+
+    return status;
+}
+
+// based on GetBinaryTypeW (dmex)
+NTSTATUS PhGetFileBinaryTypeWin32(
+    _In_ PWSTR FileName,
+    _Out_ PULONG BinaryType
+    )
+{
+    NTSTATUS status;
+    HANDLE fileHandle;
+    HANDLE sectionHandle;
+    UNICODE_STRING fileName;
+    IO_STATUS_BLOCK ioStatusBlock;
+    OBJECT_ATTRIBUTES objectAttributes;
+    SECTION_IMAGE_INFORMATION section = { 0 };
+
+    status = RtlDosPathNameToNtPathName_U_WithStatus(
+        FileName,
+        &fileName,
+        NULL,
+        NULL
+        );
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    InitializeObjectAttributes(
+        &objectAttributes,
+        &fileName,
+        OBJ_CASE_INSENSITIVE,
+        NULL,
+        NULL
+        );
+
+    status = NtOpenFile(
+        &fileHandle,
+        FILE_READ_DATA | FILE_EXECUTE | SYNCHRONIZE,
+        &objectAttributes,
+        &ioStatusBlock,
+        FILE_SHARE_READ | FILE_SHARE_DELETE,
+        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
+        );
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    status = NtCreateSection(
+        &sectionHandle,
+        SECTION_QUERY | SECTION_MAP_READ | SECTION_MAP_EXECUTE,
+        NULL,
+        NULL,
+        PAGE_EXECUTE,
+        SEC_IMAGE,
+        fileHandle
+        );
+
+    NtClose(fileHandle);
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    status = NtQuerySection(
+        sectionHandle,
+        SectionImageInformation,
+        &section,
+        sizeof(SECTION_IMAGE_INFORMATION),
+        NULL
+        );
+
+    NtClose(sectionHandle);
+
+CleanupExit:
+    RtlFreeUnicodeString(&fileName);
+
+    if (NT_SUCCESS(status))
+    {
+        switch (section.Machine)
+        {
+        case IMAGE_FILE_MACHINE_I386:
+            {
+                *BinaryType = SCS_32BIT_BINARY;
+            }
+            return STATUS_SUCCESS;
+        case IMAGE_FILE_MACHINE_IA64:
+        case IMAGE_FILE_MACHINE_AMD64:
+            {
+                *BinaryType = SCS_64BIT_BINARY;
+            }
+            return STATUS_SUCCESS;
+        }
+
+        return STATUS_UNSUCCESSFUL;
+    }
+    else
+    {
+        switch (status)
+        {
+        case STATUS_INVALID_IMAGE_PROTECT:
+            {
+                *BinaryType = SCS_DOS_BINARY;
+            }
+            return STATUS_SUCCESS;
+        case STATUS_INVALID_IMAGE_NOT_MZ:
+            {
+                static PH_STRINGREF extensionCOM = PH_STRINGREF_INIT(L".COM");
+                static PH_STRINGREF extensionPIF = PH_STRINGREF_INIT(L".PIF");
+                static PH_STRINGREF extensionEXE = PH_STRINGREF_INIT(L".EXE");
+                PH_STRINGREF fileNameSr;
+
+                PhInitializeStringRefLongHint(&fileNameSr, FileName);
+
+                if (
+                    PhEndsWithStringRef(&fileNameSr, &extensionCOM, TRUE) || 
+                    PhEndsWithStringRef(&fileNameSr, &extensionPIF, TRUE) || 
+                    PhEndsWithStringRef(&fileNameSr, &extensionEXE, TRUE)
+                    )
+                {
+                    *BinaryType = SCS_DOS_BINARY;
+                    return STATUS_SUCCESS;
+                }
+            }
+            break;
+        case STATUS_INVALID_IMAGE_WIN_32:
+            {
+                *BinaryType = SCS_32BIT_BINARY;
+            }
+            return STATUS_SUCCESS;
+        case STATUS_INVALID_IMAGE_WIN_64:
+            {
+                *BinaryType = SCS_64BIT_BINARY;
+            }
+            return STATUS_SUCCESS;
+        }
     }
 
     return status;

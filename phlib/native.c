@@ -634,10 +634,10 @@ NTSTATUS PhTerminateProcessAlternative(
             goto CleanupExit;
     }
 
-    status = RtlCreateUserThread(
+    status = PhCreateUserThread(
         ProcessHandle,
         NULL,
-        FALSE,
+        0,
         0,
         0,
         0,
@@ -1814,6 +1814,43 @@ NTSTATUS PhGetProcessMappedImageInformation(
     return status;
 }
 
+NTSTATUS PhGetProcessMappedImageBaseFromAddress(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID Address,
+    _Out_ PVOID* ImageBaseAddress,
+    _Out_opt_ PSIZE_T SizeOfImage
+    )
+{
+    NTSTATUS status;
+    MEMORY_IMAGE_INFORMATION imageInfo;
+
+    status = PhGetProcessMappedImageInformation(
+        ProcessHandle, 
+        Address, 
+        &imageInfo
+        );
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    if (!imageInfo.ImageBase ||
+        imageInfo.ImageNotExecutable ||
+        imageInfo.ImagePartialMap ||
+        Address < imageInfo.ImageBase)
+    {
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    *ImageBaseAddress = imageInfo.ImageBase;
+
+    if (SizeOfImage)
+    {
+        *SizeOfImage = imageInfo.SizeOfImage;
+    }
+
+    return STATUS_SUCCESS;
+}
+
 /**
  * Gets working set information for a process.
  *
@@ -2180,10 +2217,10 @@ NTSTATUS PhLoadDllProcess(
             goto CleanupExit;
     }
 
-    status = RtlCreateUserThread(
+    status = PhCreateUserThread(
         ProcessHandle,
         NULL,
-        FALSE,
+        0,
         0,
         0,
         0,
@@ -2299,10 +2336,10 @@ NTSTATUS PhUnloadDllProcess(
             return status;
     }
 
-    status = RtlCreateUserThread(
+    status = PhCreateUserThread(
         ProcessHandle,
         NULL,
-        FALSE,
+        0,
         0,
         0,
         0,
@@ -2465,10 +2502,10 @@ NTSTATUS PhSetEnvironmentVariableRemote(
             goto CleanupExit;
     }
 
-    status = RtlCreateUserThread(
+    status = PhCreateUserThread(
         ProcessHandle,
         NULL,
-        TRUE,
+        THREAD_CREATE_FLAGS_CREATE_SUSPENDED,
         0,
         0,
         0,
@@ -5297,6 +5334,9 @@ NTSTATUS PhpEnumProcessModules(
     if (!NT_SUCCESS(status))
         return status;
 
+    if (!ldr) // Process uninitialized (dmex)
+        return STATUS_UNSUCCESSFUL;
+
     // Read the loader data.
     status = NtReadVirtualMemory(
         ProcessHandle,
@@ -5822,28 +5862,57 @@ BOOLEAN NTAPI PhpEnumProcessModules32Callback(
 
             if (!(parameters->Flags & PH_ENUM_PROCESS_MODULES_DONT_RESOLVE_WOW64_FS))
             {
-                // WOW64 file system redirection - convert "system32" to "SysWOW64".
+                // WOW64 file system redirection - convert "system32" to "SysWOW64" or "SysArm32".
                 if (!(nativeEntry.FullDllName.Length & 1)) // validate the string length
                 {
-                    fullDllName.Buffer = fullDllNameBuffer;
-                    fullDllName.Length = nativeEntry.FullDllName.Length;
-
-                    PhGetSystemRoot(&systemRootString);
-
-                    if (PhStartsWithStringRef(&fullDllName, &systemRootString, TRUE))
+#ifdef _M_ARM64
+                    USHORT arch;
+                    if (NT_SUCCESS(PhGetProcessArchitecture(ProcessHandle, &arch)))
                     {
-                        PhSkipStringRef(&fullDllName, systemRootString.Length);
+#endif
+                        fullDllName.Buffer = fullDllNameBuffer;
+                        fullDllName.Length = nativeEntry.FullDllName.Length;
 
-                        if (PhStartsWithStringRef(&fullDllName, &system32String, TRUE))
+                        PhGetSystemRoot(&systemRootString);
+
+                        if (PhStartsWithStringRef(&fullDllName, &systemRootString, TRUE))
                         {
-                            fullDllName.Buffer[1] = L'S';
-                            fullDllName.Buffer[4] = L'W';
-                            fullDllName.Buffer[5] = L'O';
-                            fullDllName.Buffer[6] = L'W';
-                            fullDllName.Buffer[7] = L'6';
-                            fullDllName.Buffer[8] = L'4';
+                            PhSkipStringRef(&fullDllName, systemRootString.Length);
+
+                            if (PhStartsWithStringRef(&fullDllName, &system32String, TRUE))
+                            {
+#ifdef _M_ARM64
+                                if (arch == IMAGE_FILE_MACHINE_ARMNT)
+                                {
+                                    fullDllName.Buffer[1] = L'S';
+                                    fullDllName.Buffer[2] = L'y';
+                                    fullDllName.Buffer[3] = L's';
+                                    fullDllName.Buffer[4] = L'A';
+                                    fullDllName.Buffer[5] = L'r';
+                                    fullDllName.Buffer[6] = L'm';
+                                    fullDllName.Buffer[7] = L'3';
+                                    fullDllName.Buffer[8] = L'2';
+                                }
+                                else
+#endif
+                                {
+                                    fullDllName.Buffer[1] = L'S';
+                                    fullDllName.Buffer[4] = L'W';
+                                    fullDllName.Buffer[5] = L'O';
+                                    fullDllName.Buffer[6] = L'W';
+                                    fullDllName.Buffer[7] = L'6';
+                                    fullDllName.Buffer[8] = L'4';
+                                }
+                            }
                         }
+#ifdef _M_ARM64
                     }
+                    else
+                    {
+                        fullDllNameBuffer[0] = UNICODE_NULL;
+                        nativeEntry.FullDllName.Length = 0;
+                    }
+#endif
                 }
             }
         }
@@ -13189,10 +13258,10 @@ NTSTATUS PhGetProcessConsoleCodePage(
             return status;
     }
 
-    status = RtlCreateUserThread(
+    status = PhCreateUserThread(
         ProcessHandle,
         NULL,
-        FALSE,
+        0,
         0,
         0,
         0,

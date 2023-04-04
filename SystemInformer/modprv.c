@@ -100,31 +100,34 @@ PPH_MODULE_PROVIDER PhCreateModuleProvider(
     moduleProvider->PackageFullName = NULL;
     moduleProvider->RunStatus = STATUS_SUCCESS;
 
-    // It doesn't matter if we can't get a process handle.
-
-    // Try to get a handle with query information + vm read access.
-    if (!NT_SUCCESS(status = PhOpenProcess(
-        &moduleProvider->ProcessHandle,
-        PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
-        ProcessId
-        )))
+    if (PH_IS_REAL_PROCESS_ID(ProcessId))
     {
-        // Try to get a handle with query limited information + vm read access.
+        // It doesn't matter if we can't get a process handle.
+
+        // Try to get a handle with query information + vm read access.
         if (!NT_SUCCESS(status = PhOpenProcess(
             &moduleProvider->ProcessHandle,
-            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+            PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
             ProcessId
             )))
         {
-            // Try to get a handle with query limited information (required for WSL when KPH disabled) (dmex)
-            status = PhOpenProcess(
+            // Try to get a handle with query limited information + vm read access.
+            if (!NT_SUCCESS(status = PhOpenProcess(
                 &moduleProvider->ProcessHandle,
-                PROCESS_QUERY_LIMITED_INFORMATION,
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
                 ProcessId
+                )))
+            {
+                // Try to get a handle with query limited information (required for WSL when KPH disabled) (dmex)
+                status = PhOpenProcess(
+                    &moduleProvider->ProcessHandle,
+                    PROCESS_QUERY_LIMITED_INFORMATION,
+                    ProcessId
                 );
-        }
+            }
 
-        moduleProvider->RunStatus = status;
+            moduleProvider->RunStatus = status;
+        }
     }
 
     if (processItem = PhReferenceProcessItem(ProcessId))
@@ -412,6 +415,7 @@ NTSTATUS PhpModuleQueryWorker(
                     data->ModuleItem->FileName,
                     data->ModuleProvider->ProcessHandle,
                     data->ModuleItem->BaseAddress,
+                    data->ModuleItem->Size,
                     data->ModuleItem->Type == PH_MODULE_TYPE_KERNEL_MODULE,
                     data->ModuleProvider->ImageCoherencyScanLevel,
                     &data->ImageCoherency
@@ -678,7 +682,13 @@ VOID PhModuleProviderUpdate(
                 // 1. It (should be) faster than opening the file and mapping it in, and
                 // 2. It contains the correct original image base relocated by ASLR, if present.
 
-                if (NT_SUCCESS(PhLoadRemoteMappedImageEx(moduleProvider->ProcessHandle, moduleItem->BaseAddress, readVirtualMemoryCallback, &remoteMappedImage)))
+                if (NT_SUCCESS(PhLoadRemoteMappedImageEx(
+                    moduleProvider->ProcessHandle,
+                    moduleItem->BaseAddress,
+                    moduleItem->Size,
+                    readVirtualMemoryCallback,
+                    &remoteMappedImage
+                    )))
                 {
                     ULONG_PTR imageBase = 0;
                     ULONG entryPoint = 0;

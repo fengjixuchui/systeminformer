@@ -131,13 +131,8 @@ BOOLEAN PhBaseInitialization(
 {
     PH_OBJECT_TYPE_PARAMETERS parameters;
 
-    // The following relies on the (technically undefined) value of XState being zero before Windows 7 SP1.
-    // NOTE: This is unused for now.
-    /*if (USER_SHARED_DATA->XState.EnabledFeatures & XSTATE_MASK_AVX)
-        PhpVectorLevel = PH_VECTOR_LEVEL_AVX;
-    else if (USER_SHARED_DATA->ProcessorFeatures[PF_XMMI64_INSTRUCTIONS_AVAILABLE])
-        PhpVectorLevel = PH_VECTOR_LEVEL_SSE2;*/
-
+    //if (PhIsProcessorFeaturePresent(PF_AVX_INSTRUCTIONS_AVAILABLE))
+    //    PhpVectorLevel = PH_VECTOR_LEVEL_AVX;
     if (PhIsProcessorFeaturePresent(PF_XMMI64_INSTRUCTIONS_AVAILABLE))
         PhpVectorLevel = PH_VECTOR_LEVEL_SSE2;
 
@@ -214,13 +209,35 @@ NTSTATUS PhpBaseThreadStart(
     return status;
 }
 
-// rev from RtlCreateUserThread (dmex)
+/**
+ * \brief Creates a thread.
+ *
+ * \param ProcessHandle A handle to the process in which the thread is to be created.
+ * \param ThreadSecurityDescriptor A pointer to a security descriptor for the new thread and
+ * \a determines whether child processes can inherit the thread handle.
+ * \param CreateFlags The flags that control the creation of the thread.
+ * \param ZeroBits The number of high-order address bits that must be zero.
+ * \a If this parameter is zero, the new thread uses the default for the executable.
+ * \param StackSize The initial size of the stack, in bytes. The system rounds this value to the nearest page.
+ * \a If this parameter is zero, the new thread uses the default size for the executable.
+ * \param MaximumStackSize The maximum size of the stack, in bytes. The system rounds this value to the nearest page.
+ * \a If this parameter is zero, the new thread uses the default maximum for the executable.
+ * \param StartRoutine A pointer to the starting address of the thread.
+ * \param Argument A pointer to a variable to be passed to the StartRoutine.
+ * \param ThreadHandle A pointer to a variable that receives a handle to the new thread.
+ * \param ClientId A pointer to a variable that receives the thread identifier.
+ *
+ * \return Successful or errant status.
+ */
 NTSTATUS PhCreateUserThread(
     _In_ HANDLE ProcessHandle,
+    _In_opt_ PSECURITY_DESCRIPTOR ThreadSecurityDescriptor,
     _In_opt_ ULONG CreateFlags,
+    _In_opt_ SIZE_T ZeroBits,
     _In_opt_ SIZE_T StackSize,
-    _In_ PUSER_THREAD_START_ROUTINE StartAddress,
-    _In_opt_ PVOID Parameter,
+    _In_opt_ SIZE_T MaximumStackSize,
+    _In_ PUSER_THREAD_START_ROUTINE StartRoutine,
+    _In_opt_ PVOID Argument,
     _Out_opt_ PHANDLE ThreadHandle,
     _Out_opt_ PCLIENT_ID ClientId
     )
@@ -233,7 +250,15 @@ NTSTATUS PhCreateUserThread(
     CLIENT_ID clientId = { 0 };
     //PTEB teb = NULL;
 
-    InitializeObjectAttributes(&objectAttributes, NULL, 0, NULL, NULL);
+    InitializeObjectAttributes(
+        &objectAttributes,
+        NULL,
+        0,
+        NULL,
+        NULL
+        );
+    objectAttributes.SecurityDescriptor = ThreadSecurityDescriptor;
+
     attributeList->TotalLength = sizeof(buffer);
     attributeList->Attributes[0].Attribute = PS_ATTRIBUTE_CLIENT_ID;
     attributeList->Attributes[0].Size = sizeof(CLIENT_ID);
@@ -249,12 +274,12 @@ NTSTATUS PhCreateUserThread(
         THREAD_ALL_ACCESS,
         &objectAttributes,
         ProcessHandle,
-        StartAddress,
-        Parameter,
+        StartRoutine,
+        Argument,
         CreateFlags,
-        0,
+        ZeroBits,
         StackSize,
-        0,
+        MaximumStackSize,
         attributeList
         );
 
@@ -299,10 +324,10 @@ HANDLE PhCreateThread(
     context->StartAddress = StartAddress;
     context->Parameter = Parameter;
 
-    status = RtlCreateUserThread(
+    status = PhCreateUserThread(
         NtCurrentProcess(),
         NULL,
-        FALSE,
+        0,
         0,
         0,
         StackSize,
@@ -339,10 +364,10 @@ NTSTATUS PhCreateThreadEx(
     context->StartAddress = StartAddress;
     context->Parameter = Parameter;
 
-    status = RtlCreateUserThread(
+    status = PhCreateUserThread(
         NtCurrentProcess(),
         NULL,
-        FALSE,
+        0,
         0,
         0,
         0,
@@ -378,10 +403,10 @@ NTSTATUS PhCreateThread2(
     context->StartAddress = StartAddress;
     context->Parameter = Parameter;
 
-    status = RtlCreateUserThread(
+    status = PhCreateUserThread(
         NtCurrentProcess(),
         NULL,
-        FALSE,
+        0,
         0,
         0,
         0,
