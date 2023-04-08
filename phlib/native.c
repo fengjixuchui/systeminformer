@@ -9262,8 +9262,7 @@ VOID PhpInitializePredefineKeys(
 
     if (NT_SUCCESS(status = PhGetTokenUser(PhGetOwnTokenAttributes().TokenHandle, &tokenUser)))
     {
-        stringSid.Buffer = stringSidBuffer;
-        stringSid.MaximumLength = sizeof(stringSidBuffer);
+        RtlInitEmptyUnicodeString(&stringSid, stringSidBuffer, sizeof(stringSidBuffer));
 
         status = RtlConvertSidToUnicodeString(
             &stringSid,
@@ -9278,7 +9277,8 @@ VOID PhpInitializePredefineKeys(
     {
         currentUserKeyName = &PhPredefineKeyNames[PH_KEY_CURRENT_USER_NUMBER];
         currentUserKeyName->Length = currentUserPrefix.Length + stringSid.Length;
-        currentUserKeyName->Buffer = PhAllocate(currentUserKeyName->Length + sizeof(UNICODE_NULL));
+        currentUserKeyName->MaximumLength = currentUserKeyName->Length + sizeof(UNICODE_NULL);
+        currentUserKeyName->Buffer = PhAllocate(currentUserKeyName->MaximumLength);
         memcpy(currentUserKeyName->Buffer, currentUserPrefix.Buffer, currentUserPrefix.Length);
         memcpy(&currentUserKeyName->Buffer[currentUserPrefix.Length / sizeof(WCHAR)], stringSid.Buffer, stringSid.Length);
     }
@@ -14693,6 +14693,66 @@ NTSTATUS PhGetSystemLogicalProcessorInformation(
     return status;
 }
 
+NTSTATUS PhGetSystemLogicalProcessorRelationInformation(
+    _Out_ PPH_LOGICAL_PROCESSOR_INFORMATION LogicalProcessorInformation
+    )
+{
+    NTSTATUS status;
+    ULONG logicalInformationLength = 0;
+    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX logicalInformation;
+
+    status = PhGetSystemLogicalProcessorInformation(
+        RelationAll, 
+        &logicalInformation, 
+        &logicalInformationLength
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        ULONG processorCoreCount = 0;
+        ULONG processorNumaCount = 0;
+        ULONG processorLogicalCount = 0;
+        ULONG processorPackageCount = 0;
+
+        for (
+            PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX processorInfo = logicalInformation;
+            (ULONG_PTR)processorInfo < (ULONG_PTR)PTR_ADD_OFFSET(logicalInformation, logicalInformationLength);
+            processorInfo = PTR_ADD_OFFSET(processorInfo, processorInfo->Size)
+            )
+        {
+            switch (processorInfo->Relationship)
+            {
+            case RelationProcessorCore:
+                {
+                    processorCoreCount++;
+
+                    for (USHORT j = 0; j < processorInfo->Processor.GroupCount; j++)
+                    {
+                        processorLogicalCount += PhCountBitsUlongPtr(processorInfo->Processor.GroupMask[j].Mask); // RtlNumberOfSetBitsUlongPtr
+                    }
+                }
+                break;
+            case RelationNumaNode:
+                processorNumaCount++;
+                break;
+            case RelationProcessorPackage:
+                processorPackageCount++;
+                break;
+            }
+        }
+
+        memset(LogicalProcessorInformation, 0, sizeof(PH_LOGICAL_PROCESSOR_INFORMATION));
+        LogicalProcessorInformation->ProcessorCoreCount = processorCoreCount;
+        LogicalProcessorInformation->ProcessorNumaCount = processorNumaCount;
+        LogicalProcessorInformation->ProcessorLogicalCount = processorLogicalCount;
+        LogicalProcessorInformation->ProcessorPackageCount = processorPackageCount;
+
+        PhFree(logicalInformation);
+    }
+
+    return status;
+}
+
 // based on RtlIsProcessorFeaturePresent (dmex)
 BOOLEAN PhIsProcessorFeaturePresent(
     _In_ ULONG ProcessorFeature
@@ -15246,4 +15306,220 @@ CreateResult:
 
     PhInitializeStringRefLongHint(SystemPath, WithSeperators); // RtlInitUnicodeString
     return STATUS_SUCCESS;
+}
+
+NTSTATUS PhEnumVirtualMemory(
+    _In_opt_ HANDLE ProcessHandle,
+    _In_opt_ HANDLE ProcessId,
+    _In_ PPH_ENUM_MEMORY_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    )
+{
+    NTSTATUS status = STATUS_SUCCESS;
+    HANDLE processHandle = ProcessHandle;
+    PVOID baseAddress;
+    MEMORY_BASIC_INFORMATION basicInfo;
+
+    if (!ProcessHandle)
+    {
+        if (WindowsVersion < WINDOWS_10)
+        {
+            status = PhOpenProcess(
+                &processHandle,
+                PROCESS_QUERY_INFORMATION,
+                ProcessId
+                );
+        }
+        else
+        {
+            status = PhOpenProcess(
+                &processHandle,
+                PROCESS_QUERY_LIMITED_INFORMATION,
+                ProcessId
+                );
+        }
+    }
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    baseAddress = (PVOID)0;
+
+    while (TRUE)
+    {
+        status = NtQueryVirtualMemory(
+            processHandle,
+            baseAddress,
+            MemoryBasicInformation,
+            &basicInfo,
+            sizeof(MEMORY_BASIC_INFORMATION),
+            NULL
+            );
+
+        if (!NT_SUCCESS(status))
+            break;
+
+        if (basicInfo.State & MEM_FREE)
+        {
+            basicInfo.AllocationBase = basicInfo.BaseAddress;
+            basicInfo.AllocationProtect = basicInfo.Protect;
+        }
+
+        if (!Callback(processHandle, &basicInfo, Context))
+            break;
+
+        baseAddress = PTR_ADD_OFFSET(baseAddress, basicInfo.RegionSize);
+
+        if ((ULONG_PTR)baseAddress >= PhSystemBasicInformation.MaximumUserModeAddress)
+            break;
+    }
+
+    if (!ProcessHandle && processHandle)
+        NtClose(processHandle);
+
+    return status;
+}
+
+NTSTATUS PhEnumVirtualMemoryPages(
+    _In_opt_ HANDLE ProcessHandle,
+    _In_opt_ HANDLE ProcessId,
+    _In_ PPH_ENUM_MEMORY_PAGE_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    )
+{
+    NTSTATUS status = STATUS_SUCCESS;
+    HANDLE processHandle = ProcessHandle;
+    PMEMORY_WORKING_SET_INFORMATION pageInfo;
+
+    if (!ProcessHandle)
+    {
+        if (WindowsVersion < WINDOWS_10)
+        {
+            status = PhOpenProcess(
+                &processHandle,
+                PROCESS_QUERY_INFORMATION,
+                ProcessId
+                );
+        }
+        else
+        {
+            status = PhOpenProcess(
+                &processHandle,
+                PROCESS_QUERY_LIMITED_INFORMATION,
+                ProcessId
+                );
+        }
+    }
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    status = PhGetProcessWorkingSetInformation(
+        processHandle, 
+        &pageInfo
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        Callback(
+            processHandle, 
+            pageInfo->NumberOfEntries, 
+            pageInfo->WorkingSetInfo, 
+            Context
+            );
+
+        //for (ULONG_PTR i = 0; i < pageInfo->NumberOfEntries; i++)
+        //{
+        //    PMEMORY_WORKING_SET_BLOCK workingSetBlock = &pageInfo->WorkingSetInfo[i];
+        //    PVOID virtualAddress = (PVOID)(workingSetBlock->VirtualPage << PAGE_SHIFT);
+        //}
+
+        PhFree(pageInfo);
+    }
+
+    if (!ProcessHandle && processHandle)
+        NtClose(processHandle);
+
+    return status;
+}
+
+NTSTATUS PhEnumVirtualMemoryAttributes(
+    _In_opt_ HANDLE ProcessHandle,
+    _In_opt_ HANDLE ProcessId,
+    _In_ PVOID BaseAddress,
+    _In_ SIZE_T Size,
+    _In_ PPH_ENUM_MEMORY_ATTRIBUTE_CALLBACK Callback,
+    _In_ PVOID Context
+    )
+{
+    NTSTATUS status = STATUS_SUCCESS;
+    HANDLE processHandle = ProcessHandle;
+    SIZE_T numberOfPages;
+    ULONG_PTR virtualAddress;
+    PMEMORY_WORKING_SET_EX_INFORMATION info;
+    SIZE_T i;
+
+    if (!ProcessHandle)
+    {
+        status = PhOpenProcess(
+            &processHandle,
+            PROCESS_QUERY_INFORMATION,
+            ProcessId
+            );
+    }
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    numberOfPages = ((SIZE_T)((ULONG_PTR)BaseAddress & PAGE_MASK) + Size + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
+    virtualAddress = (ULONG_PTR)BaseAddress & ~PAGE_MASK;
+
+    if (!numberOfPages)
+    {
+        status = STATUS_UNSUCCESSFUL;
+        goto CleanupExit;
+    }
+
+    info = PhAllocatePage(numberOfPages * sizeof(MEMORY_WORKING_SET_EX_INFORMATION), NULL);
+
+    if (!info)
+    {
+        status = STATUS_UNSUCCESSFUL;
+        goto CleanupExit;
+    }
+
+    for (i = 0; i < numberOfPages; i++)
+    {
+        info[i].VirtualAddress = (PVOID)virtualAddress;
+        virtualAddress += PAGE_SIZE;
+    }
+
+    status = NtQueryVirtualMemory(
+        processHandle,
+        NULL,
+        MemoryWorkingSetExInformation,
+        info,
+        numberOfPages * sizeof(MEMORY_WORKING_SET_EX_INFORMATION),
+        NULL
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        Callback(
+            processHandle,
+            BaseAddress,
+            Size,
+            numberOfPages,
+            info,
+            Context
+            );
+    }
+
+    PhFreePage(info);
+
+CleanupExit:
+    if (!ProcessHandle && processHandle)
+        NtClose(processHandle);
+
+    return status;
 }

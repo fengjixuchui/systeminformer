@@ -2870,6 +2870,21 @@ PhGetSystemLogicalProcessorInformation(
     _Out_ PULONG BufferLength
     );
 
+typedef struct _PH_LOGICAL_PROCESSOR_INFORMATION
+{
+    ULONG ProcessorCoreCount;
+    ULONG ProcessorNumaCount;
+    ULONG ProcessorLogicalCount;
+    ULONG ProcessorPackageCount;
+} PH_LOGICAL_PROCESSOR_INFORMATION, *PPH_LOGICAL_PROCESSOR_INFORMATION;
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhGetSystemLogicalProcessorRelationInformation(
+    _Out_ PPH_LOGICAL_PROCESSOR_INFORMATION LogicalProcessorInformation
+    );
+
 PHLIBAPI
 BOOLEAN
 NTAPI
@@ -2986,6 +3001,60 @@ PhDeviceIoControlFile(
     _Out_writes_bytes_to_opt_(OutputBufferLength, *ReturnLength) PVOID OutputBuffer,
     _In_ ULONG OutputBufferLength,
     _Out_opt_ PULONG ReturnLength
+    );
+
+typedef BOOLEAN (NTAPI* PPH_ENUM_MEMORY_CALLBACK)(
+    _In_ HANDLE ProcessHandle,
+    _In_ PMEMORY_BASIC_INFORMATION BasicInformation,
+    _In_opt_ PVOID Context
+    );
+
+typedef BOOLEAN (NTAPI* PPH_ENUM_MEMORY_PAGE_CALLBACK)(
+    _In_ HANDLE ProcessHandle,
+    _In_ ULONG_PTR NumberOfEntries,
+    _In_ PMEMORY_WORKING_SET_BLOCK Blocks,
+    _In_opt_ PVOID Context
+    );
+
+typedef BOOLEAN (NTAPI* PPH_ENUM_MEMORY_ATTRIBUTE_CALLBACK)(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID BaseAddress,
+    _In_ SIZE_T SizeOfImage,
+    _In_ ULONG_PTR NumberOfEntries,
+    _In_ PMEMORY_WORKING_SET_EX_INFORMATION Blocks,
+    _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhEnumVirtualMemory(
+    _In_opt_ HANDLE ProcessHandle,
+    _In_opt_ HANDLE ProcessId,
+    _In_ PPH_ENUM_MEMORY_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhEnumVirtualMemoryPages(
+    _In_opt_ HANDLE ProcessHandle,
+    _In_opt_ HANDLE ProcessId,
+    _In_ PPH_ENUM_MEMORY_PAGE_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhEnumVirtualMemoryAttributes(
+    _In_opt_ HANDLE ProcessHandle,
+    _In_opt_ HANDLE ProcessId,
+    _In_ PVOID BaseAddress,
+    _In_ SIZE_T Size,
+    _In_ PPH_ENUM_MEMORY_ATTRIBUTE_CALLBACK Callback,
+    _In_ PVOID Context
     );
 
 EXTERN_C_END
