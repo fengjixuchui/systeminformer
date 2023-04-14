@@ -150,9 +150,9 @@ FORCEINLINE LONG PhModifySort(
 }
 
 #define PH_BUILTIN_COMPARE(value1, value2) \
-    if (value1 > value2) \
+    if ((value1) > (value2)) \
         return 1; \
-    else if (value1 < value2) \
+    else if ((value1) < (value2)) \
         return -1; \
     \
     return 0
@@ -515,36 +515,6 @@ FORCEINLINE VOID PhPrintPointerPadZeros(
 }
 
 // Misc.
-
-FORCEINLINE ULONG PhCountBits(
-    _In_ ULONG Value
-    )
-{
-    ULONG count = 0;
-
-    while (Value)
-    {
-        count++;
-        Value &= Value - 1;
-    }
-
-    return count;
-}
-
-FORCEINLINE ULONG PhCountBitsUlongPtr(
-    _In_ ULONG_PTR Value
-    )
-{
-    ULONG count = 0;
-
-    while (Value)
-    {
-        count++;
-        Value &= Value - 1;
-    }
-
-    return count;
-}
 
 FORCEINLINE ULONG64 PhRoundNumber(
     _In_ ULONG64 Value,

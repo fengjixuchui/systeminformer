@@ -27,9 +27,9 @@
 #include <lsasup.h>
 #include <wslsup.h>
 
-#include "..\tools\thirdparty\md5\md5.h"
-#include "..\tools\thirdparty\sha\sha.h"
-#include "..\tools\thirdparty\sha256\sha256.h"
+#include "../tools/thirdparty/md5/md5.h"
+#include "../tools/thirdparty/sha/sha.h"
+#include "../tools/thirdparty/sha256/sha256.h"
 
 DECLSPEC_SELECTANY WCHAR *PhSizeUnitNames[7] = { L"B", L"kB", L"MB", L"GB", L"TB", L"PB", L"EB" };
 DECLSPEC_SELECTANY ULONG PhMaxSizeUnit = ULONG_MAX;
@@ -1511,12 +1511,34 @@ BOOLEAN PhGenerateRandomNumber(
 #ifndef _M_ARM64
     if (PhIsProcessorFeaturePresent(PF_RDRAND_INSTRUCTION_AVAILABLE))
     {
-#if defined(_M_X64)
-        if (_rdrand64_step(&Number->QuadPart))
-            return TRUE;
+        ULONG count = 0;
+
+#ifdef _M_X64
+        while (TRUE)
+        {
+            if (_rdrand64_step(&Number->QuadPart))
+                break;
+            if (++count >= 10)
+                return FALSE;
+        }
+#else
+        ULONG low = 0;
+        ULONG high = 0;
+        
+        while (TRUE)
+        { 
+            if (_rdrand32_step(&low) && _rdrand32_step(&high))
+            {
+                Number->LowPart = low;
+                Number->HighPart = high;
+                break;
+            }
+
+            if (++count >= 10)
+                return FALSE;
+        }
 #endif
-        if (_rdrand32_step(&Number->LowPart))
-            return TRUE;
+        return TRUE;
     }
 #endif
 
@@ -1530,18 +1552,18 @@ BOOLEAN PhGenerateRandomSeed(
 {
     memset(Seed, 0, sizeof(LARGE_INTEGER));
 
-#ifndef _M_ARM64
-    if (PhIsProcessorFeaturePresent(PF_RDRAND_INSTRUCTION_AVAILABLE))
-    {
-#if defined(_M_X64)
-        if (_rdseed64_step(&Seed->QuadPart))
-            return TRUE;
-#else
-        if (_rdseed32_step(&Seed->LowPart))
-            return TRUE;
-#endif
-    }
-#endif
+//#ifndef _M_ARM64
+//    if (PhIsProcessorFeaturePresent(PF_RDRAND_INSTRUCTION_AVAILABLE))
+//    {
+//#ifdef _M_X64
+//        if (_rdseed64_step(&Seed->QuadPart))
+//            return TRUE;
+//#else
+//        if (_rdseed32_step(&Seed->LowPart))
+//            return TRUE;
+//#endif
+//    }
+//#endif
 
     return PhQueryPerformanceCounter(Seed);
 }
@@ -5147,7 +5169,7 @@ BOOLEAN PhShellExecuteEx(
     _In_ PWSTR FileName,
     _In_opt_ PWSTR Parameters,
     _In_opt_ PWSTR Directory,
-    _In_ ULONG ShowWindowType,
+    _In_ INT32 ShowWindowType,
     _In_ ULONG Flags,
     _In_opt_ ULONG Timeout,
     _Out_opt_ PHANDLE ProcessHandle
@@ -5208,14 +5230,41 @@ VOID PhShellExploreFile(
     _In_ PWSTR FileName
     )
 {
-    if (SHOpenFolderAndSelectItems && SHParseDisplayName)
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static HRESULT (WINAPI* SHOpenFolderAndSelectItems_I)(
+        _In_ PCIDLIST_ABSOLUTE pidlFolder,
+        _In_ UINT cidl,
+        _In_reads_opt_(cidl) PCUITEMID_CHILD_ARRAY* apidl,
+        _In_ DWORD dwFlags
+        ) = NULL;
+    static HRESULT (WINAPI* SHParseDisplayName_I)(
+        _In_ PCWSTR pszName,
+        _In_opt_ IBindCtx* pbc,
+        _Outptr_ PIDLIST_ABSOLUTE* ppidl,
+        _In_ SFGAOF sfgaoIn,
+        _Out_opt_ SFGAOF* psfgaoOut
+        ) = NULL;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PVOID baseAddress;
+
+        if (baseAddress = PhLoadLibrary(L"shell32.dll"))
+        {
+            SHOpenFolderAndSelectItems_I = PhGetDllBaseProcedureAddress(baseAddress, "SHOpenFolderAndSelectItems", 0);
+            SHParseDisplayName_I = PhGetDllBaseProcedureAddress(baseAddress, "SHParseDisplayName", 0);
+        }
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (SHOpenFolderAndSelectItems_I && SHParseDisplayName_I)
     {
         LPITEMIDLIST item;
-        SFGAOF attributes;
 
-        if (SUCCEEDED(SHParseDisplayName(FileName, NULL, &item, 0, &attributes)))
+        if (SUCCEEDED(SHParseDisplayName_I(FileName, NULL, &item, 0, NULL)))
         {
-            SHOpenFolderAndSelectItems(item, 0, NULL, 0);
+            SHOpenFolderAndSelectItems_I(item, 0, NULL, 0);
             CoTaskMemFree(item);
         }
         else
@@ -5982,8 +6031,34 @@ VOID PhSetFileDialogFileName(
     _In_ PWSTR FileName
     )
 {
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static HRESULT (WINAPI* SHParseDisplayName_I)(
+        _In_ PCWSTR pszName,
+        _In_opt_ IBindCtx* pbc,
+        _Out_ PIDLIST_ABSOLUTE* ppidl,
+        _In_ SFGAOF sfgaoIn,
+        _Out_opt_ SFGAOF* psfgaoOut
+        ) = NULL;
+    static HRESULT (WINAPI* SHCreateItemFromIDList_I)(
+        _In_ PCIDLIST_ABSOLUTE pidl, 
+        _In_ REFIID riid, 
+        _Outptr_ void** ppv
+        ) = NULL;
     PPHP_FILE_DIALOG fileDialog = FileDialog;
     PH_STRINGREF fileName;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PVOID baseAddress;
+
+        if (baseAddress = PhLoadLibrary(L"shell32.dll"))
+        {
+            SHParseDisplayName_I = PhGetDllBaseProcedureAddress(baseAddress, "SHParseDisplayName", 0);
+            SHCreateItemFromIDList_I = PhGetDllBaseProcedureAddress(baseAddress, "SHCreateItemFromIDList", 0);
+        }
+
+        PhEndInitOnce(&initOnce);
+    }
 
     PhInitializeStringRefLongHint(&fileName, FileName);
 
@@ -5993,18 +6068,16 @@ VOID PhSetFileDialogFileName(
         PH_STRINGREF pathNamePart;
         PH_STRINGREF baseNamePart;
 
-        if (PhSplitStringRefAtLastChar(&fileName, OBJ_NAME_PATH_SEPARATOR, &pathNamePart, &baseNamePart) &&
-            SHParseDisplayName && SHCreateShellItem)
+        if (PhGetBasePath(&fileName, &pathNamePart, &baseNamePart) && SHParseDisplayName_I && SHCreateItemFromIDList_I)
         {
             LPITEMIDLIST item;
-            SFGAOF attributes;
             PPH_STRING pathName;
 
-            pathName = PhCreateString2(&pathNamePart);
+            pathName = PhCreateString2(&pathNamePart);          
 
-            if (SUCCEEDED(SHParseDisplayName(pathName->Buffer, NULL, &item, 0, &attributes)))
+            if (SUCCEEDED(SHParseDisplayName_I(pathName->Buffer, NULL, &item, 0, NULL)))
             {
-                SHCreateShellItem(NULL, NULL, item, &shellItem);
+                SHCreateItemFromIDList_I(item, &IID_IShellItem, &shellItem);
                 CoTaskMemFree(item);
             }
 
@@ -6198,6 +6271,15 @@ CleanupExit:
     return status;
 }
 
+/**
+ * \brief CRC-32 (Ethernet, ZIP - polynomial 0xedb88320 - TEST=0xEEEA93B8)
+ *
+ * \param Crc Crc
+ * \param Buffer Buffer
+ * \param Length Length
+ *
+ * \return Crc
+ */
 ULONG PhCrc32(
     _In_ ULONG Crc,
     _In_reads_(Length) PCHAR Buffer,
@@ -6210,6 +6292,61 @@ ULONG PhCrc32(
         Crc = (Crc >> 8) ^ PhCrc32Table[(Crc ^ *Buffer++) & 0xff];
 
     return Crc ^ 0xffffffff;
+}
+
+/**
+ * \brief CRC-32C (iSCSI - polynomial 0x82f63b78 - TEST=0xEFF7F083)
+ *
+ * \param Crc Crc
+ * \param Buffer Buffer
+ * \param Length Length
+ *
+ * \return Crc
+ */
+ULONG PhCrc32C(
+    _In_ ULONG Crc,
+    _In_reads_(Length) PVOID Buffer,
+    _In_ SIZE_T Length
+    )
+{
+#ifndef _ARM64_
+#ifdef _M_X64
+    SIZE_T u64_blocks = Length / sizeof(ULONG64);
+#endif
+    SIZE_T u64_remaining = Length % sizeof(ULONG64);
+    SIZE_T u32_blocks = u64_remaining / sizeof(ULONG);
+    SIZE_T u32_remaining = u64_remaining % sizeof(ULONG);
+    SIZE_T u16_blocks = u32_remaining / sizeof(USHORT);
+    SIZE_T u8_blocks = u32_remaining % sizeof(UCHAR);
+
+    Crc ^= 0xffffffff;
+
+    while (u8_blocks--)
+    {
+        Crc = _mm_crc32_u8(Crc, (*(PUCHAR)Buffer)++);
+    }
+
+    while (u16_blocks--)
+    {
+        Crc = _mm_crc32_u16(Crc, (*(PUSHORT)Buffer)++);
+    }
+
+    while (u32_blocks--)
+    {
+        Crc = _mm_crc32_u32(Crc, (*(PULONG)Buffer)++);
+    }
+
+#ifdef _M_X64
+    while (u64_blocks--)
+    {
+        Crc = (ULONG)_mm_crc32_u64(Crc, (*(PULONG64)Buffer)++);
+    }
+#endif
+
+    return Crc ^ 0xffffffff;
+#else
+    PhRaiseStatus(STATUS_NOT_SUPPORTED);
+#endif
 }
 
 C_ASSERT(RTL_FIELD_SIZE(PH_HASH_CONTEXT, Context) >= sizeof(MD5_CTX));
@@ -7219,6 +7356,19 @@ HRESULT PhGetClassObjectDllBase(
     return status;
 }
 
+/**
+ * \brief Provides a pointer to an interface on a class object associated with a specified CLSID.
+ * Most class objects implement the IClassFactory interface. You would then call CreateInstance to
+ * create an uninitialized object. It is not always necessary to go through this process however.
+ *
+ * \param DllName The file containing the object to initialize.
+ * \param Rclsid A pointer to the class identifier of the object to be created.
+ * \param Riid Reference to the identifier of the interface to communicate with the class object.
+ * \a Typically this value is IID_IClassFactory, although other values such as IID_IClassFactory2 which supports a form of licensing are allowed. 
+ * \param Ppv The address of pointer variable that contains the requested interface.
+ *
+ * \return Successful or errant status.
+ */
 HRESULT PhGetClassObject(
     _In_ PCWSTR DllName,
     _In_ REFCLSID Rclsid,
@@ -7299,7 +7449,16 @@ HRESULT PhGetActivationFactoryDllBase(
     return status;
 }
 
-// rev from RoGetActivationFactory (dmex)
+/**
+ * \brief Activates the specified Windows Runtime class.
+ *
+ * \param DllName The file containing the object to initialize.
+ * \param RuntimeClass The class identifier string that is associated with the activatable runtime class.
+ * \param Riid The reference ID of the interface.
+ * \param Ppv The activation factory.
+ *
+ * \return Successful or errant status.
+ */
 HRESULT PhGetActivationFactory(
     _In_ PCWSTR DllName,
     _In_ PCWSTR RuntimeClass,
@@ -7392,7 +7551,16 @@ HRESULT PhActivateInstanceDllBase(
     return status;
 }
 
-// rev from RoActivateInstance (dmex)
+/**
+ * \brief Activates the specified Windows Runtime class.
+ *
+ * \param DllName The file containing the object to initialize.
+ * \param RuntimeClass The class identifier string that is associated with the activatable runtime class.
+ * \param Riid The reference ID of the interface.
+ * \param Ppv A pointer to the activated instance of the runtime class.
+ *
+ * \return Successful or errant status.
+ */
 HRESULT PhActivateInstance(
     _In_ PCWSTR DllName,
     _In_ PCWSTR RuntimeClass,

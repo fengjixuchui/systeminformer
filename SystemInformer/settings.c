@@ -192,6 +192,8 @@ VOID PhAddDefaultSettings(
     PhpAddStringSetting(L"RunAsProgram", L"");
     PhpAddStringSetting(L"RunAsUserName", L"");
     PhpAddIntegerPairSetting(L"RunAsWindowPosition", L"0,0");
+    PhpAddIntegerPairSetting(L"RunAsPackageWindowPosition", L"0,0");
+    PhpAddScalableIntegerPairSetting(L"RunAsPackageWindowSize", L"@96|500,300");
     PhpAddIntegerSetting(L"RunFileDlgState", L"0");
     PhpAddIntegerSetting(L"SampleCount", L"200"); // 512
     PhpAddIntegerSetting(L"SampleCountAutomatic", L"1");
@@ -224,6 +226,8 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"ThreadTreeListFlags", L"0");
     PhpAddStringSetting(L"ThreadStackTreeListColumns", L"");
     PhpAddScalableIntegerPairSetting(L"ThreadStackWindowSize", L"@96|420,400");
+    PhpAddIntegerPairSetting(L"TokenWindowPosition", L"0,0");
+    PhpAddScalableIntegerPairSetting(L"TokenWindowSize", L"@96|0,0");
     PhpAddStringSetting(L"TokenGroupsListViewColumns", L"");
     PhpAddStringSetting(L"TokenGroupsListViewStates", L"");
     PhpAddStringSetting(L"TokenGroupsListViewSort", L"1,2");

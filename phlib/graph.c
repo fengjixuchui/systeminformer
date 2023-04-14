@@ -72,7 +72,7 @@ BOOLEAN PhGraphControlInitialization(
 {
     WNDCLASSEX c = { sizeof(c) };
 
-    c.style = CS_GLOBALCLASS | CS_DBLCLKS;
+    c.style = CS_PARENTDC | CS_GLOBALCLASS | CS_DBLCLKS;
     c.lpfnWndProc = PhpGraphWndProc;
     c.cbClsExtra = 0;
     c.cbWndExtra = sizeof(PVOID);
@@ -987,7 +987,7 @@ LRESULT CALLBACK PhpGraphWndProc(
             CREATESTRUCT *createStruct = (CREATESTRUCT *)lParam;
 
             context->Handle = hwnd;
-            context->ParentHandle = GetParent(hwnd);
+            context->ParentHandle = createStruct->hwndParent;
             context->Style = createStruct->style;
             context->Id = (ULONG_PTR)createStruct->hMenu;
         }

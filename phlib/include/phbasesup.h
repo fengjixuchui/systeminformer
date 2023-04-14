@@ -3580,7 +3580,21 @@ PhFormatEntropy(
     _In_opt_ DOUBLE Variance,
     _In_opt_ USHORT VariancePrecision
     );
+    
+PHLIBAPI
+ULONG
+NTAPI
+PhCountBits(
+    _In_ ULONG Value
+    );
 
+PHLIBAPI
+ULONG
+NTAPI
+PhCountBitsUlongPtr(
+    _In_ ULONG_PTR Value
+    );
+    
 // Auto-dereference convenience functions
 
 FORCEINLINE
