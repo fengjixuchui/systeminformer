@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     dmex    2012-2022
+ *     dmex    2012-2023
  *
  */
 
@@ -20,14 +20,16 @@ typedef struct _PH_SEARCHCONTROL_CONTEXT
         ULONG Flags;
         struct
         {
-            ULONG ThemeSupport : 1;
             ULONG Hot : 1;
             ULONG ButtonHot : 1;
             ULONG Pushed : 1;
             ULONG HotTrack : 1;
-            ULONG Spare : 27;
+            ULONG Spare : 28;
         };
     };
+
+    HWND ParentWindowHandle;
+    LONG WindowDpi;
 
     LONG ButtonWidth;
     INT BorderSize;
@@ -95,17 +97,13 @@ VOID PhSearchControlInitializeFont(
     _In_ HWND WindowHandle
     )
 {
-    LONG dpiValue;
-
-    dpiValue = PhGetWindowDpi(WindowHandle);
-
     if (Context->WindowFont)
     {
         DeleteFont(Context->WindowFont);
         Context->WindowFont = NULL;
     }
 
-    Context->WindowFont = PhCreateCommonFont(10, FW_MEDIUM, WindowHandle, dpiValue);
+    Context->WindowFont = PhCreateCommonFont(10, FW_MEDIUM, WindowHandle, Context->WindowDpi);
 }
 
 VOID PhSearchControlInitializeTheme(
@@ -113,13 +111,11 @@ VOID PhSearchControlInitializeTheme(
     _In_ HWND WindowHandle
     )
 {
-    LONG dpiValue;
     LONG borderSize;
 
-    dpiValue = PhGetWindowDpi(WindowHandle);
-    borderSize = PhGetSystemMetrics(SM_CXBORDER, dpiValue);
+    borderSize = PhGetSystemMetrics(SM_CXBORDER, Context->WindowDpi);
 
-    Context->ButtonWidth = PhGetDpi(20, dpiValue);
+    Context->ButtonWidth = PhGetDpi(20, Context->WindowDpi);
     Context->BorderSize = borderSize;
     Context->DCBrush = GetStockBrush(DC_BRUSH);
     Context->WindowBrush = GetSysColorBrush(COLOR_WINDOW);
@@ -128,7 +124,7 @@ VOID PhSearchControlInitializeTheme(
     {
         HTHEME themeHandle;
 
-        if (themeHandle = PhOpenThemeData(WindowHandle, VSCLASS_EDIT, dpiValue))
+        if (themeHandle = PhOpenThemeData(WindowHandle, VSCLASS_EDIT, Context->WindowDpi))
         {
             if (PhGetThemeInt(themeHandle, 0, 0, TMT_BORDERSIZE, &borderSize))
             {
@@ -146,23 +142,27 @@ VOID PhSearchControlInitializeImages(
     )
 {
     HBITMAP bitmap;
-    LONG dpiValue;
 
-    dpiValue = PhGetWindowDpi(WindowHandle);
-    Context->ImageWidth = PhGetSystemMetrics(SM_CXSMICON, dpiValue) + PhGetDpi(4, dpiValue);
-    Context->ImageHeight = PhGetSystemMetrics(SM_CYSMICON, dpiValue) + PhGetDpi(4, dpiValue);
+    Context->ImageWidth = PhGetSystemMetrics(SM_CXSMICON, Context->WindowDpi) + PhGetDpi(4, Context->WindowDpi);
+    Context->ImageHeight = PhGetSystemMetrics(SM_CYSMICON, Context->WindowDpi) + PhGetDpi(4, Context->WindowDpi);
 
     if (Context->ImageListHandle)
     {
-        PhImageListDestroy(Context->ImageListHandle);
-        Context->ImageListHandle = NULL;
+        PhImageListSetIconSize(
+            Context->ImageListHandle,
+            Context->ImageWidth,
+            Context->ImageHeight
+            );
     }
-    Context->ImageListHandle = PhImageListCreate(
-        Context->ImageWidth,
-        Context->ImageHeight,
-        ILC_MASK | ILC_COLOR32,
-        2, 0
-        );
+    else
+    {
+        Context->ImageListHandle = PhImageListCreate(
+            Context->ImageWidth,
+            Context->ImageHeight,
+            ILC_MASK | ILC_COLOR32,
+            2, 0
+            );
+    }
     PhImageListSetImageCount(Context->ImageListHandle, 2);
 
     if (Context->ImageWidth == 20 && Context->ImageHeight == 20) // Avoids bitmap scaling on startup at default DPI (dmex)
@@ -235,7 +235,7 @@ VOID PhpSearchDrawButton(
     _In_ WNDPROC DefaultWindowProc
     )
 {
-    if (Context->ThemeSupport) // HACK
+    if (PhEnableThemeSupport)
     {
         if (GetFocus() == WindowHandle)
         {
@@ -297,7 +297,7 @@ VOID PhpSearchDrawButton(
 
     if (Context->Pushed)
     {
-        if (Context->ThemeSupport)
+        if (PhEnableThemeSupport)
         {
             //switch (Context->ColorMode)
             //{
@@ -319,7 +319,7 @@ VOID PhpSearchDrawButton(
     }
     else if (Context->ButtonHot)
     {
-        if (Context->ThemeSupport)
+        if (PhEnableThemeSupport)
         {
             //switch (Context->ColorMode)
             //{
@@ -341,7 +341,7 @@ VOID PhpSearchDrawButton(
     }
     else
     {
-        if (Context->ThemeSupport)
+        if (PhEnableThemeSupport)
         {
             //switch (Context->ColorMode)
             //{
@@ -508,7 +508,7 @@ LRESULT CALLBACK PhpSearchWndSubclassProc(
                 }
                 else if (context->Hot || context->ButtonHot)
                 {
-                    if (context->ThemeSupport)
+                    if (PhEnableThemeSupport)
                     {
                         SetDCBrushColor(context->BufferedDc, RGB(0x8f, 0x8f, 0x8f));
                         FrameRect(context->BufferedDc, &windowRect, context->DCBrush);
@@ -649,8 +649,14 @@ LRESULT CALLBACK PhpSearchWndSubclassProc(
     case WM_SETTINGCHANGE:
     case WM_SYSCOLORCHANGE:
     case WM_THEMECHANGED:
+        {
+            PhSearchControlThemeChanged(context, hWnd);
+        }
+        break;
     case WM_DPICHANGED_AFTERPARENT:
         {
+            context->WindowDpi = PhGetWindowDpi(context->ParentWindowHandle);
+
             PhSearchControlThemeChanged(context, hWnd);
         }
         break;
@@ -747,7 +753,7 @@ LRESULT CALLBACK PhpSearchWndSubclassProc(
 
                 SetBkMode(bufferDc, TRANSPARENT);
 
-                if (context->ThemeSupport)
+                if (PhEnableThemeSupport)
                 {
                     SetTextColor(bufferDc, RGB(170, 170, 170));
                     SetDCBrushColor(bufferDc, RGB(60, 60, 60));
@@ -849,7 +855,7 @@ LRESULT CALLBACK PhpSearchWndSubclassProc(
 }
 
 VOID PhCreateSearchControl(
-    _In_ HWND Parent,
+    _In_ HWND ParentWindowHandle,
     _In_ HWND WindowHandle,
     _In_opt_ PWSTR BannerText
     )
@@ -857,8 +863,9 @@ VOID PhCreateSearchControl(
     PPH_SEARCHCONTROL_CONTEXT context;
 
     context = PhAllocateZero(sizeof(PH_SEARCHCONTROL_CONTEXT));
-    context->ThemeSupport = !!PhGetIntegerSetting(L"EnableThemeSupport");
+    context->ParentWindowHandle = ParentWindowHandle;
     context->CueBannerText = BannerText ? PhCreateString(BannerText) : NULL;
+    context->WindowDpi = PhGetWindowDpi(ParentWindowHandle);
 
     // Subclass the Edit control window procedure.
     context->DefaultWindowProc = (WNDPROC)GetWindowLongPtr(WindowHandle, GWLP_WNDPROC);

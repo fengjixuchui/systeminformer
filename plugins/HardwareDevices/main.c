@@ -122,7 +122,8 @@ VOID NTAPI MainWindowShowingCallback(
     )
 {
     AddRemoveDeviceChangeCallback();
-    if (NetWindowsVersion >= WINDOWS_10)
+
+    if (PhDeviceProviderInitialization())
         InitializeDevicesTab();
 }
 
@@ -235,16 +236,6 @@ VOID NTAPI SettingsUpdatedCallback(
     )
 {
     LoadSettings();
-}
-
-PPH_STRING TrimString(
-    _In_ PPH_STRING String
-    )
-{
-    static PH_STRINGREF whitespace = PH_STRINGREF_INIT(L" \t\r\n");
-    PH_STRINGREF sr = String->sr;
-    PhTrimStringRef(&sr, &whitespace, 0);
-    return PhCreateString2(&sr);
 }
 
 BOOLEAN HardwareDeviceEnableDisable(
@@ -667,12 +658,20 @@ LOGICAL DllMain(
                 { IntegerPairSettingType, SETTING_NAME_DEVICE_TREE_SORT, L"0,0" },
                 { StringSettingType, SETTING_NAME_DEVICE_TREE_COLUMNS, L"" },
                 { IntegerSettingType, SETTING_NAME_DEVICE_PROBLEM_COLOR, L"283cff" },
-                { IntegerSettingType, SETTING_NAME_DEVICE_DISABLED_COLOR, L"6d6d6d" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_DISABLED_COLOR, L"000000" },
                 { IntegerSettingType, SETTING_NAME_DEVICE_DISCONNECTED_COLOR, L"6d6d6d" },
                 { IntegerSettingType, SETTING_NAME_DEVICE_HIGHLIGHT_COLOR, L"00aaff" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_INTERFACE_COLOR, L"ffccaa" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_DISABLED_INTERFACE_COLOR, L"886644" },
                 { IntegerSettingType, SETTING_NAME_DEVICE_SORT_CHILDREN_BY_NAME, L"1" },
                 { IntegerSettingType, SETTING_NAME_DEVICE_SHOW_ROOT, L"0" },
                 { IntegerSettingType, SETTING_NAME_DEVICE_SHOW_SOFTWARE_COMPONENTS, L"1" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_SHOW_DEVICE_INTERFACES, L"0" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_SHOW_DISABLED_DEVICE_INTERFACES, L"0" },
+                { IntegerPairSettingType, SETTING_NAME_DEVICE_PROPERTIES_POSITION, L"0,0" },
+                { StringSettingType, SETTING_NAME_DEVICE_GENERAL_COLUMNS, L"" },
+                { StringSettingType, SETTING_NAME_DEVICE_PROPERTIES_COLUMNS, L"" },
+                { StringSettingType, SETTING_NAME_DEVICE_INTERFACES_COLUMNS, L"" },
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);

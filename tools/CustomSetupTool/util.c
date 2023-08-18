@@ -204,8 +204,8 @@ VOID SetupDeleteUninstallFile(
         PPH_STRING tempFileName = PhGetTemporaryDirectoryRandomAlphaFileName();
 
         PhMoveFileWin32(
-            PhGetString(uninstallFilePath), 
-            PhGetString(tempFileName), 
+            PhGetString(uninstallFilePath),
+            PhGetString(tempFileName),
             FALSE
             );
 
@@ -1065,7 +1065,7 @@ PPH_STRING SetupCreateFullPath(
 
     pathString = PhConcatStringRefZ(&Path->sr, FileName);
 
-    if (NT_SUCCESS(PhGetFullPathEx(pathString->Buffer, NULL, &tempString)))
+    if (NT_SUCCESS(PhGetFullPath(pathString->Buffer, &tempString, NULL)))
     {
         PhMoveReference(&pathString, tempString);
         return pathString;

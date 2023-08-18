@@ -18,7 +18,6 @@ typedef struct _KPH_SIGNING_INFRASTRUCTURE
 {
     KPH_AUTHENTICODE_INFO HalAuthenticode;
     volatile SIZE_T CatalogsAreLoadedCalls;
-
 } KPH_SIGNING_INFRASTRUCTURE, *PKPH_SIGNING_INFRASTRUCTURE;
 
 static UNICODE_STRING KphpSigningInfraName = RTL_CONSTANT_STRING(L"KphSigningInfrastructure");
@@ -146,7 +145,7 @@ VOID KphpResetSigningInfo(
         SigningTime->QuadPart = 0;
     }
 
-    if (CatalogName && CatalogName->Buffer)
+    if (CatalogName)
     {
         RtlFreeUnicodeString(CatalogName);
         RtlZeroMemory(CatalogName, sizeof(*CatalogName));
@@ -560,10 +559,7 @@ VOID KphFreeSigningInfo(
 {
     PAGED_PASSIVE();
 
-    if (Info->CatalogName.Buffer)
-    {
-        RtlFreeUnicodeString(&Info->CatalogName);
-    }
+    RtlFreeUnicodeString(&Info->CatalogName);
 
     if (KphDynCiFreePolicyInfo)
     {

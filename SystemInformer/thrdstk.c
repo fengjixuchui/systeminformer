@@ -437,6 +437,8 @@ BOOLEAN NTAPI ThreadStackTreeNewCallback(
                 };
                 int (__cdecl *sortFunction)(void *, const void *, const void *);
 
+                static_assert(RTL_NUMBER_OF(sortFunctions) == TREE_COLUMN_ITEM_MAXIMUM, "SortFunctions must equal maximum.");
+
                 if (context->TreeNewSortColumn < TREE_COLUMN_ITEM_MAXIMUM)
                     sortFunction = sortFunctions[context->TreeNewSortColumn];
                 else
@@ -571,6 +573,14 @@ BOOLEAN NTAPI ThreadStackTreeNewCallback(
             {
             case VK_F5:
                 SendMessage(context->WindowHandle, WM_COMMAND, IDC_REFRESH, 0);
+                break;
+            case 'C':
+                if (GetKeyState(VK_CONTROL) < 0)
+                    SendMessage(context->WindowHandle, WM_COMMAND, IDC_COPY, 0);
+                break;
+            case 'A':
+                if (GetKeyState(VK_CONTROL) < 0)
+                    TreeNew_SelectRange(context->TreeNewHandle, 0, -1);
                 break;
             }
         }

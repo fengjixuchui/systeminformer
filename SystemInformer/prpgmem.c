@@ -456,7 +456,7 @@ VOID PhpProcessMemorySave(
             else
                 mode = PH_EXPORT_MODE_TABS;
 
-            PhWriteStringAsUtf8FileStream(fileStream, &PhUnicodeByteOrderMark);
+            PhWriteStringAsUtf8FileStream(fileStream, (PPH_STRINGREF)&PhUnicodeByteOrderMark);
             PhWritePhTextHeader(fileStream);
 
             lines = PhpGetProcessMemoryTreeListLines(
@@ -863,6 +863,7 @@ INT_PTR CALLBACK PhpProcessMemoryDlgProc(
                         // Non-standard PH_MEMORY_FLAG options.
                         PH_MEMORY_FILTER_MENU_READ_ADDRESS,
                         PH_MEMORY_FILTER_MENU_HEAPS,
+                        PH_MEMORY_FILTER_MENU_MODIFIED,
                         PH_MEMORY_FILTER_MENU_STRINGS,
                         PH_MEMORY_FILTER_MENU_SAVE,
                         PH_MEMORY_FILTER_MENU_ZERO_PAD_ADDRESSES
@@ -882,6 +883,7 @@ INT_PTR CALLBACK PhpProcessMemoryDlgProc(
                     PhInsertEMenuItem(menu, PhCreateEMenuSeparator(), ULONG_MAX);
                     PhInsertEMenuItem(menu, PhCreateEMenuItem(0, PH_MEMORY_FILTER_MENU_READ_ADDRESS, L"Read/Write &address...", NULL, NULL), ULONG_MAX);
                     PhInsertEMenuItem(menu, PhCreateEMenuItem(0, PH_MEMORY_FILTER_MENU_HEAPS, L"Heaps...", NULL, NULL), ULONG_MAX);
+                    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, PH_MEMORY_FILTER_MENU_MODIFIED, L"Modified...", NULL, NULL), ULONG_MAX);
                     PhInsertEMenuItem(menu, PhCreateEMenuItem(0, PH_MEMORY_FILTER_MENU_STRINGS, L"Strings...", NULL, NULL), ULONG_MAX);
                     PhInsertEMenuItem(menu, PhCreateEMenuItem(0, PH_MEMORY_FILTER_MENU_SAVE, L"Save...", NULL, NULL), ULONG_MAX);
 
@@ -934,13 +936,17 @@ INT_PTR CALLBACK PhpProcessMemoryDlgProc(
 
                             PhInvalidateAllMemoryBaseAddressNodes(&memoryContext->ListContext);
                         }
-                        else if (selectedItem->Id == PH_MEMORY_FILTER_MENU_STRINGS)
-                        {
-                            PhShowMemoryStringDialog(hwndDlg, processItem);
-                        }
                         else if (selectedItem->Id == PH_MEMORY_FILTER_MENU_HEAPS)
                         {
                             PhShowProcessHeapsDialog(hwndDlg, processItem);
+                        }
+                        else if (selectedItem->Id == PH_MEMORY_FILTER_MENU_MODIFIED)
+                        {
+                            PhShowImagePageModifiedDialog(hwndDlg, processItem);
+                        }
+                        else if (selectedItem->Id == PH_MEMORY_FILTER_MENU_STRINGS)
+                        {
+                            PhShowMemoryStringDialog(hwndDlg, processItem);
                         }
                         else if (selectedItem->Id == PH_MEMORY_FILTER_MENU_SAVE)
                         {

@@ -31,10 +31,10 @@ EXTERN_C_START
 #define PH_EMENU_TEXT_OWNED 0x80000000
 #define PH_EMENU_BITMAP_OWNED 0x40000000
 
-struct _PH_EMENU_ITEM;
+typedef struct _PH_EMENU_ITEM *PPH_EMENU_ITEM;
 
 typedef VOID (NTAPI *PPH_EMENU_ITEM_DELETE_FUNCTION)(
-    _In_ struct _PH_EMENU_ITEM *Item
+    _In_ PPH_EMENU_ITEM Item
     );
 
 typedef struct _PH_EMENU_ITEM
@@ -49,7 +49,7 @@ typedef struct _PH_EMENU_ITEM
     PPH_EMENU_ITEM_DELETE_FUNCTION DeleteFunction;
     PVOID Reserved;
 
-    struct _PH_EMENU_ITEM *Parent;
+    PPH_EMENU_ITEM Parent;
     PPH_LIST Items;
 } PH_EMENU_ITEM, *PPH_EMENU_ITEM;
 
@@ -218,6 +218,10 @@ VOID PhModifyEMenuItem(
 VOID PhSetHMenuStyle(
     _In_ HMENU Menu,
     _In_ BOOLEAN MainMenu
+    );
+
+VOID PhSetHMenuNotify(
+    _In_ HMENU MenuHandle
     );
 
 VOID PhDeleteHMenu(

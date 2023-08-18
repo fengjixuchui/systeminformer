@@ -132,7 +132,7 @@ VOID PhpProcessMiniDumpContextDeleteProcedure(
         {
             if (fileSize.QuadPart == 0)
             {
-                PhDeleteFile(context->KernelFileHandle);
+                PhSetFileDelete(context->KernelFileHandle);
             }
         }
 
@@ -551,7 +551,7 @@ Completed:
     }
     else
     {
-        PhDeleteFile(context->FileHandle);
+        PhSetFileDelete(context->FileHandle);
     }
 
     PhDereferenceObject(context);
@@ -598,12 +598,12 @@ INT_PTR CALLBACK PhpProcessMiniDumpDlgProc(
             PhReferenceObject(context);
             PhCreateThread2(PhpProcessMiniDumpThreadStart, context);
 
-            PhSetTimer(hwndDlg, 1, 500, NULL);
+            PhSetTimer(hwndDlg, PH_WINDOW_TIMER_DEFAULT, 500, NULL);
         }
         break;
     case WM_DESTROY:
         {
-            PhKillTimer(hwndDlg, 1);
+            PhKillTimer(hwndDlg, PH_WINDOW_TIMER_DEFAULT);
 
             PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
 
@@ -625,7 +625,7 @@ INT_PTR CALLBACK PhpProcessMiniDumpDlgProc(
         break;
     case WM_TIMER:
         {
-            if (wParam == 1)
+            if (wParam == PH_WINDOW_TIMER_DEFAULT)
             {
                 ULONG64 currentTickCount;
 

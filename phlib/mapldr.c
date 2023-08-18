@@ -149,7 +149,7 @@ PVOID PhLoadLibrary(
     if (baseAddress = LoadLibraryEx(
         FileName,
         NULL,
-        LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_APPLICATION_DIR
+        LOAD_LIBRARY_SEARCH_APPLICATION_DIR
         ))
     {
         return baseAddress;
@@ -199,10 +199,10 @@ NtSuppressDebugMessage(
     _In_ BOOLEAN SuppressDebugMessage
     )
 {
-    // Note: The Visual Studio debugger on Windows 7/8 attempts to load symbols 
+    // Note: The Visual Studio debugger on Windows 7/8 attempts to load symbols
     // for non-executable resources. The kernelbase BasepLoadLibraryAsDataFileInternal
-    // function temporarily suppresses symbols while loading resources (both release and debug) 
-    // as a QOL optimization but we only suppress debug messages for debug builds. This issue 
+    // function temporarily suppresses symbols while loading resources (both release and debug)
+    // as a QOL optimization but we only suppress debug messages for debug builds. This issue
     // was fixed on Windows 10 with SEC_IMAGE_NO_EXECUTE and suppression is not required (dmex)
 
     if (WindowsVersion < WINDOWS_10)
@@ -354,21 +354,23 @@ PVOID PhGetDllHandle(
     _In_ PWSTR DllName
     )
 {
+#if (PHNT_NATIVE_LDR)
+    UNICODE_STRING dllName;
+    PVOID dllHandle;
+
+    RtlInitUnicodeString(&dllName, DllName);
+
+    if (NT_SUCCESS(LdrGetDllHandle(NULL, NULL, &dllName, &dllHandle)))
+        return dllHandle;
+    else
+        return NULL;
+#else
     PH_STRINGREF baseDllName;
 
     PhInitializeStringRefLongHint(&baseDllName, DllName);
 
     return PhGetLoaderEntryDllBase(NULL, &baseDllName);
-
-    //UNICODE_STRING dllName;
-    //PVOID dllHandle;
-    //
-    //RtlInitUnicodeString(&dllName, DllName);
-    //
-    //if (NT_SUCCESS(LdrGetDllHandle(NULL, NULL, &dllName, &dllHandle)))
-    //    return dllHandle;
-    //else
-    //    return NULL;
+#endif
 }
 
 PVOID PhGetModuleProcAddress(
@@ -376,19 +378,21 @@ PVOID PhGetModuleProcAddress(
     _In_opt_ PSTR ProcedureName
     )
 {
+#if (PHNT_NATIVE_LDR)
+    PVOID module;
+
+    module = PhGetDllHandle(ModuleName);
+
+    if (module)
+        return PhGetProcedureAddress(module, ProcedureName, 0);
+    else
+        return NULL;
+#else
     if (IS_INTRESOURCE(ProcedureName))
         return PhGetDllProcedureAddress(ModuleName, NULL, PtrToUshort(ProcedureName));
 
     return PhGetDllProcedureAddress(ModuleName, ProcedureName, 0);
-
-    //PVOID module;
-    //
-    //module = PhGetDllHandle(ModuleName);
-    //
-    //if (module)
-    //    return PhGetProcedureAddress(module, ProcName, 0);
-    //else
-    //    return NULL;
+#endif
 }
 
 PVOID PhGetProcedureAddress(
@@ -397,36 +401,38 @@ PVOID PhGetProcedureAddress(
     _In_opt_ ULONG ProcedureNumber
     )
 {
-    return PhGetDllBaseProcedureAddress(DllHandle, ProcedureName, (USHORT)ProcedureNumber);
+#if (PHNT_NATIVE_LDR)
+    NTSTATUS status;
+    ANSI_STRING procedureName;
+    PVOID procedureAddress;
 
-    //NTSTATUS status;
-    //ANSI_STRING procedureName;
-    //PVOID procedureAddress;
-    //
-    //if (ProcedureName)
-    //{
-    //    RtlInitAnsiString(&procedureName, ProcedureName);
-    //    status = LdrGetProcedureAddress(
-    //        DllHandle,
-    //        &procedureName,
-    //        0,
-    //        &procedureAddress
-    //        );
-    //}
-    //else
-    //{
-    //    status = LdrGetProcedureAddress(
-    //        DllHandle,
-    //        NULL,
-    //        ProcedureNumber,
-    //        &procedureAddress
-    //        );
-    //}
-    //
-    //if (!NT_SUCCESS(status))
-    //    return NULL;
-    //
-    //return procedureAddress;
+    if (ProcedureName)
+    {
+        RtlInitAnsiString(&procedureName, ProcedureName);
+        status = LdrGetProcedureAddress(
+            DllHandle,
+            &procedureName,
+            0,
+            &procedureAddress
+            );
+    }
+    else
+    {
+        status = LdrGetProcedureAddress(
+            DllHandle,
+            NULL,
+            ProcedureNumber,
+            &procedureAddress
+            );
+    }
+
+    if (!NT_SUCCESS(status))
+        return NULL;
+
+    return procedureAddress;
+#else
+    return PhGetDllBaseProcedureAddress(DllHandle, ProcedureName, (USHORT)ProcedureNumber);
+#endif
 }
 
 typedef struct _PH_PROCEDURE_ADDRESS_REMOTE_CONTEXT
@@ -485,15 +491,28 @@ NTSTATUS PhGetProcedureAddressRemote(
     ULONG exportsFlags;
 #endif
 
-    status = PhLoadMappedImageEx(FileName, NULL, &mappedImage);
+    status = PhLoadMappedImageEx(
+        FileName,
+        NULL,
+        &mappedImage
+        );
 
     if (!NT_SUCCESS(status))
         return status;
 
-    status = PhGetProcessMappedFileName(NtCurrentProcess(), mappedImage.ViewBase, &fileName);
+    fileName = PhDosPathNameToNtPathName(FileName);
 
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
+    if (PhIsNullOrEmptyString(fileName))
+    {
+        status = PhGetProcessMappedFileName(
+            NtCurrentProcess(),
+            mappedImage.ViewBase,
+            &fileName
+            );
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+    }
 
     memset(&context, 0, sizeof(PH_PROCEDURE_ADDRESS_REMOTE_CONTEXT));
     context.FileName = fileName;
@@ -616,6 +635,22 @@ CleanupExit:
 //    return STATUS_SUCCESS;
 //}
 
+/**
+ * Finds and returns the address of a resource.
+ *
+ * \param DllBase The base address of the image containing the resource.
+ * \param Name The name of the resource or the integer identifier.
+ * \param Type The type of resource or the integer identifier.
+ * \param ResourceLength A variable which will receive the length of the resource block.
+ * \param ResourceBuffer A variable which receives the address of the resource data.
+ *
+ * \return TRUE if the resource was found, FALSE if an error occurred.
+ *
+ * \remarks Use this function instead of LoadResource() because no memory allocation is required.
+ * This function returns the address of the resource from the read-only section of the image
+ * and does not need to be allocated or deallocated. This function cannot be used when the
+ * image will be unloaded since the validity of the address is tied to the lifetime of the image.
+ */
 _Success_(return)
 BOOLEAN PhLoadResource(
     _In_ PVOID DllBase,
@@ -648,6 +683,20 @@ BOOLEAN PhLoadResource(
     return TRUE;
 }
 
+ /**
+  * Finds and returns a copy of the resource.
+  *
+  * \param DllBase The base address of the image containing the resource.
+  * \param Name The name of the resource or the integer identifier.
+  * \param Type The type of resource or the integer identifier.
+  * \param ResourceLength A variable which will receive the length of the resource block.
+  * \param ResourceBuffer A variable which receives the address of the resource data.
+  *
+  * \return TRUE if the resource was found, FALSE if an error occurred.
+  *
+  * \remarks This function returns a copy of a resource from heap memory
+  * and must be deallocated. Use this function when the image will be unloaded.
+  */
 _Success_(return)
 BOOLEAN PhLoadResourceCopy(
     _In_ PVOID DllBase,
@@ -671,6 +720,15 @@ BOOLEAN PhLoadResourceCopy(
     return TRUE;
 }
 
+// rev from LoadString (dmex)
+/**
+ * Loads a string resource from the image into a buffer.
+ *
+ * \param DllBase The base address of the image containing the resource.
+ * \param ResourceId The identifier of the string to be loaded.
+ *
+ * \return A string containing a copy of the string resource.
+ */
 PPH_STRING PhLoadString(
     _In_ PVOID DllBase,
     _In_ ULONG ResourceId
@@ -716,7 +774,7 @@ PPH_STRING PhLoadString(
     return string;
 }
 
-// rev from SHLoadIndirectString
+// rev from SHLoadIndirectString (dmex)
 /**
  * Extracts a specified text resource when given that resource in the form of an indirect string (a string that begins with the '@' symbol).
  *
@@ -846,10 +904,11 @@ PVOID PhGetLoaderEntryAddressDllBase(
     )
 {
     PLDR_DATA_TABLE_ENTRY ldrEntry;
+    PPEB peb = NtCurrentPeb();
 
-    RtlEnterCriticalSection(NtCurrentPeb()->LoaderLock);
+    RtlEnterCriticalSection(peb->LoaderLock);
     ldrEntry = PhFindLoaderEntryAddress(Address);
-    RtlLeaveCriticalSection(NtCurrentPeb()->LoaderLock);
+    RtlLeaveCriticalSection(peb->LoaderLock);
 
     if (ldrEntry)
         return ldrEntry->DllBase;
@@ -863,8 +922,9 @@ PVOID PhGetLoaderEntryDllBase(
     )
 {
     PLDR_DATA_TABLE_ENTRY ldrEntry;
+    PPEB peb = NtCurrentPeb();
 
-    RtlEnterCriticalSection(NtCurrentPeb()->LoaderLock);
+    RtlEnterCriticalSection(peb->LoaderLock);
 
     if (WindowsVersion >= WINDOWS_8 && !FullDllName && BaseDllName)
     {
@@ -877,7 +937,7 @@ PVOID PhGetLoaderEntryDllBase(
         ldrEntry = PhFindLoaderEntry(NULL, FullDllName, BaseDllName);
     }
 
-    RtlLeaveCriticalSection(NtCurrentPeb()->LoaderLock);
+    RtlLeaveCriticalSection(peb->LoaderLock);
 
     if (ldrEntry)
         return ldrEntry->DllBase;
@@ -959,14 +1019,14 @@ NTSTATUS PhGetLoaderEntryImageNtHeaders(
 {
     PIMAGE_DOS_HEADER imageDosHeader;
     PIMAGE_NT_HEADERS imageNtHeaders;
-    LONG imageNtHeadersOffset;
+    ULONG imageNtHeadersOffset;
 
     imageDosHeader = PTR_ADD_OFFSET(BaseAddress, 0);
 
     if (imageDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
         return STATUS_INVALID_IMAGE_NOT_MZ;
 
-    imageNtHeadersOffset = imageDosHeader->e_lfanew;
+    imageNtHeadersOffset = (ULONG)imageDosHeader->e_lfanew;
 
     if (imageNtHeadersOffset == 0 || imageNtHeadersOffset >= LONG_MAX)
         return STATUS_INVALID_IMAGE_FORMAT;
@@ -1052,13 +1112,15 @@ NTSTATUS PhGetLoaderEntryImageVaToSection(
     )
 {
     SIZE_T directorySectionLength = 0;
+    PIMAGE_SECTION_HEADER section;
     PIMAGE_SECTION_HEADER sectionHeader;
     PVOID directorySectionAddress = NULL;
-    ULONG i;
 
-    for (i = 0; i < ImageNtHeader->FileHeader.NumberOfSections; i++)
+    section = IMAGE_FIRST_SECTION(ImageNtHeader);
+
+    for (ULONG i = 0; i < ImageNtHeader->FileHeader.NumberOfSections; i++)
     {
-        sectionHeader = PTR_ADD_OFFSET(IMAGE_FIRST_SECTION(ImageNtHeader), UInt32x32To64(sizeof(IMAGE_SECTION_HEADER), i));
+        sectionHeader = PTR_ADD_OFFSET(section, UInt32x32To64(sizeof(IMAGE_SECTION_HEADER), i));
 
         if (
             ((ULONG_PTR)ImageDirectoryAddress >= (ULONG_PTR)PTR_ADD_OFFSET(BaseAddress, sectionHeader->VirtualAddress)) &&
@@ -1089,13 +1151,15 @@ NTSTATUS PhLoaderEntryImageRvaToSection(
     )
 {
     SIZE_T directorySectionLength = 0;
+    PIMAGE_SECTION_HEADER section;
     PIMAGE_SECTION_HEADER sectionHeader;
     PIMAGE_SECTION_HEADER directorySectionHeader = NULL;
-    ULONG i;
 
-    for (i = 0; i < ImageNtHeader->FileHeader.NumberOfSections; i++)
+    section = IMAGE_FIRST_SECTION(ImageNtHeader);
+
+    for (ULONG i = 0; i < ImageNtHeader->FileHeader.NumberOfSections; i++)
     {
-        sectionHeader = PTR_ADD_OFFSET(IMAGE_FIRST_SECTION(ImageNtHeader), UInt32x32To64(sizeof(IMAGE_SECTION_HEADER), i));
+        sectionHeader = PTR_ADD_OFFSET(section, UInt32x32To64(sizeof(IMAGE_SECTION_HEADER), i));
 
         if (
             ((ULONG_PTR)Rva >= (ULONG_PTR)sectionHeader->VirtualAddress) &&
@@ -1317,17 +1381,6 @@ PVOID PhGetDllBaseProcedureAddressWithHint(
     PIMAGE_DATA_DIRECTORY dataDirectory;
     PIMAGE_EXPORT_DIRECTORY exportDirectory;
 
-    // This is a workaround for the CRT __delayLoadHelper2.
-    if (PhEqualBytesZ(ProcedureName, "GetProcAddress", FALSE))
-    {
-        return PhGetDllBaseProcAddress;
-    }
-    // This is a workaround for the CRT __delayLoadHelper2.
-    if (PhEqualBytesZ(ProcedureName, "LoadLibraryExA", FALSE))
-    {
-        return PhLoadLibraryUtf8Ex;
-    }
-
     if (!NT_SUCCESS(PhGetLoaderEntryImageNtHeaders(BaseAddress, &imageNtHeader)))
         return NULL;
 
@@ -1482,26 +1535,26 @@ NTSTATUS PhLoaderEntryDetourImportProcedure(
                     *OriginalAddress = (PVOID)importThunk->u1.Function;
 
                 if (NT_SUCCESS(status = NtProtectVirtualMemory(
-                    NtCurrentProcess(), 
-                    &importThunkAddress, 
-                    &importThunkSize, 
-                    PAGE_READWRITE, 
+                    NtCurrentProcess(),
+                    &importThunkAddress,
+                    &importThunkSize,
+                    PAGE_READWRITE,
                     &importThunkProtect
                     )))
                 {
                     importThunk->u1.Function = (ULONG_PTR)FunctionAddress;
 
                     NtProtectVirtualMemory(
-                        NtCurrentProcess(), 
-                        &importThunkAddress, 
-                        &importThunkSize, 
-                        importThunkProtect, 
+                        NtCurrentProcess(),
+                        &importThunkAddress,
+                        &importThunkSize,
+                        importThunkProtect,
                         &importThunkProtect
                         );
 #ifdef _M_ARM64
                     NtFlushInstructionCache(
-                        NtCurrentProcess(), 
-                        importThunkAddress, 
+                        NtCurrentProcess(),
+                        importThunkAddress,
                         importThunkSize
                         );
 #endif
@@ -1515,6 +1568,159 @@ NTSTATUS PhLoaderEntryDetourImportProcedure(
 
     return status;
 }
+
+NTSTATUS PhLoaderEntrySnapImportDirectory(
+    _In_ PVOID BaseAddress,
+    _In_ PIMAGE_IMPORT_DESCRIPTOR ImportDirectory
+    )
+{
+    NTSTATUS status = STATUS_SUCCESS;
+    PSTR importName;
+    PIMAGE_THUNK_DATA importThunk;
+    PIMAGE_THUNK_DATA originalThunk;
+    PVOID importBaseAddress;
+
+    importName = PTR_ADD_OFFSET(BaseAddress, ImportDirectory->Name);
+    importThunk = PTR_ADD_OFFSET(BaseAddress, ImportDirectory->FirstThunk);
+    originalThunk = PTR_ADD_OFFSET(BaseAddress, ImportDirectory->OriginalFirstThunk);
+
+    if (PhEqualBytesZ(importName, "SystemInformer.exe", FALSE))
+    {
+        importBaseAddress = PhInstanceHandle;
+    }
+    else
+    {
+        PPH_STRING importNameSr;
+
+        importNameSr = PhZeroExtendToUtf16(importName);
+
+        if (!(importBaseAddress = PhGetLoaderEntryDllBase(NULL, &importNameSr->sr)))
+        {
+            if (!(importBaseAddress = PhLoadLibrary(importNameSr->Buffer)))
+            {
+                status = PhGetLastWin32ErrorAsNtStatus();
+            }
+        }
+
+        PhDereferenceObject(importNameSr);
+    }
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    if (!importBaseAddress)
+    {
+        status = STATUS_UNSUCCESSFUL;
+        goto CleanupExit;
+    }
+
+    for (; originalThunk->u1.AddressOfData; originalThunk++, importThunk++) // while (originalThunk->u1.AddressOfData)
+    {
+        if (IMAGE_SNAP_BY_ORDINAL(originalThunk->u1.Ordinal))
+        {
+            USHORT procedureOrdinal;
+            PVOID procedureAddress;
+
+            procedureOrdinal = IMAGE_ORDINAL(originalThunk->u1.Ordinal);
+            procedureAddress = PhGetDllBaseProcedureAddress(importBaseAddress, NULL, procedureOrdinal);
+
+            if (!procedureAddress)
+            {
+#ifdef DEBUG
+                PPH_STRING fileName;
+
+                if (NT_SUCCESS(PhGetProcessMappedFileName(NtCurrentProcess(), BaseAddress, &fileName)))
+                {
+                    PhMoveReference(&fileName, PhGetFileName(fileName));
+                    PhMoveReference(&fileName, PhGetBaseName(fileName));
+
+                    PhShowError(
+                        NULL,
+                        L"Unable to load plugin.\r\nName: %s\r\nOrdinal: %u\r\nModule: %hs",
+                        PhGetStringOrEmpty(fileName),
+                        procedureOrdinal,
+                        importName
+                        );
+
+                    PhDereferenceObject(fileName);
+                }
+#endif
+                status = STATUS_ORDINAL_NOT_FOUND;
+                goto CleanupExit;
+            }
+
+            importThunk->u1.Function = (ULONG_PTR)procedureAddress;
+        }
+        else
+        {
+            PIMAGE_IMPORT_BY_NAME importByName;
+            PVOID procedureAddress;
+
+            importByName = PTR_ADD_OFFSET(BaseAddress, originalThunk->u1.AddressOfData);
+            procedureAddress = PhGetDllBaseProcedureAddressWithHint(importBaseAddress, importByName->Name, importByName->Hint);
+
+            if (!procedureAddress)
+            {
+#ifdef DEBUG
+                PPH_STRING fileName;
+
+                if (NT_SUCCESS(PhGetProcessMappedFileName(NtCurrentProcess(), BaseAddress, &fileName)))
+                {
+                    PhMoveReference(&fileName, PhGetFileName(fileName));
+                    PhMoveReference(&fileName, PhGetBaseName(fileName));
+
+                    PhShowError(
+                        NULL,
+                        L"Unable to load plugin.\r\nName: %s\r\nFunction: %hs\r\nModule: %hs",
+                        PhGetStringOrEmpty(fileName),
+                        importByName->Name,
+                        importName
+                        );
+
+                    PhDereferenceObject(fileName);
+                }
+#endif
+                status = STATUS_PROCEDURE_NOT_FOUND;
+                goto CleanupExit;
+            }
+
+            importThunk->u1.Function = (ULONG_PTR)procedureAddress;
+        }
+    }
+
+CleanupExit:
+    return status;
+}
+
+#if (PH_NATIVE_LOADER_WORKQUEUE)
+typedef struct _PH_LOADER_IMPORTS_WORKQUEUE_CONTEXT
+{
+    PVOID BaseAddress;
+    PIMAGE_IMPORT_DESCRIPTOR ImportDirectory;
+} PH_LOADER_IMPORTS_WORKQUEUE_CONTEXT, *PPH_LOADER_IMPORTS_WORKQUEUE_CONTEXT;
+
+VOID CALLBACK LoaderEntryImageImportsWorkQueueCallback(
+    _Inout_ PTP_CALLBACK_INSTANCE Instance,
+    _Inout_opt_ PVOID Context,
+    _Inout_ PTP_WORK Work
+    )
+{
+    PPH_LOADER_IMPORTS_WORKQUEUE_CONTEXT context = (PPH_LOADER_IMPORTS_WORKQUEUE_CONTEXT)Context;
+    NTSTATUS status;
+
+    status = PhLoaderEntrySnapImportDirectory(
+        context->BaseAddress,
+        context->ImportDirectory
+        );
+
+    if (!NT_SUCCESS(status))
+    {
+        PhRaiseStatus(status);
+    }
+
+    PhFree(context);
+}
+#endif
 
 static NTSTATUS PhpFixupLoaderEntryImageImports(
     _In_ PVOID BaseAddress,
@@ -1562,124 +1768,73 @@ static NTSTATUS PhpFixupLoaderEntryImageImports(
     if (!NT_SUCCESS(status))
         goto CleanupExit;
 
+#if (PH_NATIVE_LOADER_WORKQUEUE)
+    PTP_POOL loaderThreadpool;
+    TP_CALLBACK_ENVIRON loaderThreadpoolEnvironment;
+    PTP_CLEANUP_GROUP loaderThreadpoolCleanupGroup;
+
+    status = TpAllocPool(&loaderThreadpool, NULL);
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    status = TpAllocCleanupGroup(&loaderThreadpoolCleanupGroup);
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    status = TpSetPoolMinThreads(loaderThreadpool, 8);
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    TpSetPoolMaxThreads(loaderThreadpool, 8);
+
+    TpInitializeCallbackEnviron(&loaderThreadpoolEnvironment);
+    TpSetCallbackThreadpool(&loaderThreadpoolEnvironment, loaderThreadpool);
+    TpSetCallbackCleanupGroup(&loaderThreadpoolEnvironment, loaderThreadpoolCleanupGroup, NULL);
+#endif
+
     while (importDirectory->Name && importDirectory->OriginalFirstThunk)
     {
-        PSTR importName;
-        PIMAGE_THUNK_DATA importThunk;
-        PIMAGE_THUNK_DATA originalThunk;
-        PVOID importBaseAddress;
+#if (PH_NATIVE_LOADER_WORKQUEUE)
+        PPH_LOADER_IMPORTS_WORKQUEUE_CONTEXT context;
+        PTP_WORK loaderThreadpoolWork;
 
-        importName = PTR_ADD_OFFSET(BaseAddress, importDirectory->Name);
-        importThunk = PTR_ADD_OFFSET(BaseAddress, importDirectory->FirstThunk);
-        originalThunk = PTR_ADD_OFFSET(BaseAddress, importDirectory->OriginalFirstThunk);
+        context = PhAllocateZero(sizeof(PH_LOADER_IMPORTS_WORKQUEUE_CONTEXT));
+        context->ImportDirectory = importDirectory;
+        context->BaseAddress = BaseAddress;
 
-        if (PhEqualBytesZ(importName, "SystemInformer.exe", FALSE))
-        {
-            importBaseAddress = PhInstanceHandle;
-            status = STATUS_SUCCESS;
-        }
-        else
-        {
-            PPH_STRING importNameSr;
-
-            importNameSr = PhZeroExtendToUtf16(importName);
-
-            if (!(importBaseAddress = PhGetLoaderEntryDllBase(NULL, &importNameSr->sr)))
-            {
-                if (importBaseAddress = PhLoadLibrary(importNameSr->Buffer))
-                    status = STATUS_SUCCESS;
-                else
-                    status = PhGetLastWin32ErrorAsNtStatus();
-            }
-
-            PhDereferenceObject(importNameSr);
-        }
+        status = TpAllocWork(
+            &loaderThreadpoolWork,
+            LoaderEntryImageImportsWorkQueueCallback,
+            context,
+            &loaderThreadpoolEnvironment
+            );
 
         if (!NT_SUCCESS(status))
             goto CleanupExit;
 
-        if (!importBaseAddress)
-        {
-            status = STATUS_UNSUCCESSFUL;
+        TpPostWork(loaderThreadpoolWork);
+#else
+        status = PhLoaderEntrySnapImportDirectory(
+            BaseAddress,
+            importDirectory
+            );
+
+        if (!NT_SUCCESS(status))
             goto CleanupExit;
-        }
-
-        for (; originalThunk->u1.AddressOfData; originalThunk++, importThunk++) // while (originalThunk->u1.AddressOfData)
-        {
-            if (IMAGE_SNAP_BY_ORDINAL(originalThunk->u1.Ordinal))
-            {
-                USHORT procedureOrdinal;
-                PVOID procedureAddress;
-
-                procedureOrdinal = IMAGE_ORDINAL(originalThunk->u1.Ordinal);
-                procedureAddress = PhGetDllBaseProcedureAddress(importBaseAddress, NULL, procedureOrdinal);
-
-                if (!procedureAddress)
-                {
-#ifdef DEBUG
-                    PPH_STRING fileName;
-
-                    if (NT_SUCCESS(PhGetProcessMappedFileName(NtCurrentProcess(), BaseAddress, &fileName)))
-                    {
-                        PhMoveReference(&fileName, PhGetFileName(fileName));
-                        PhMoveReference(&fileName, PhGetBaseName(fileName));
-
-                        PhShowError(
-                            NULL,
-                            L"Unable to load plugin.\r\nName: %s\r\nOrdinal: %u\r\nModule: %hs",
-                            PhGetStringOrEmpty(fileName),
-                            procedureOrdinal,
-                            importName
-                            );
-
-                        PhDereferenceObject(fileName);
-                    }
 #endif
-                    status = STATUS_ORDINAL_NOT_FOUND;
-                    goto CleanupExit;
-                }
-
-                importThunk->u1.Function = (ULONG_PTR)procedureAddress;
-            }
-            else
-            {
-                PIMAGE_IMPORT_BY_NAME importByName;
-                PVOID procedureAddress;
-
-                importByName = PTR_ADD_OFFSET(BaseAddress, originalThunk->u1.AddressOfData);
-                procedureAddress = PhGetDllBaseProcedureAddressWithHint(importBaseAddress, importByName->Name, importByName->Hint);
-
-                if (!procedureAddress)
-                {
-#ifdef DEBUG
-                    PPH_STRING fileName;
-
-                    if (NT_SUCCESS(PhGetProcessMappedFileName(NtCurrentProcess(), BaseAddress, &fileName)))
-                    {
-                        PhMoveReference(&fileName, PhGetFileName(fileName));
-                        PhMoveReference(&fileName, PhGetBaseName(fileName));
-
-                        PhShowError(
-                            NULL,
-                            L"Unable to load plugin.\r\nName: %s\r\nFunction: %hs\r\nModule: %hs",
-                            PhGetStringOrEmpty(fileName),
-                            importByName->Name,
-                            importName
-                            );
-
-                        PhDereferenceObject(fileName);
-                    }
-#endif
-                    status = STATUS_PROCEDURE_NOT_FOUND;
-                    goto CleanupExit;
-                }
-
-                importThunk->u1.Function = (ULONG_PTR)procedureAddress;
-            }
-        }
-
         importDirectory++;
     }
+
+#if (PH_NATIVE_LOADER_WORKQUEUE)
+    // Wait for all callbacks to finish.
+    TpReleaseCleanupGroupMembers(loaderThreadpoolCleanupGroup, FALSE, NULL);
+    // Clean up the pool.
+    TpReleaseCleanupGroup(loaderThreadpoolCleanupGroup);
+    TpReleasePool(loaderThreadpool);
+#endif
 
     status = NtProtectVirtualMemory(
         NtCurrentProcess(),
@@ -1693,8 +1848,8 @@ CleanupExit:
 
 #ifdef _M_ARM64
     NtFlushInstructionCache(
-        NtCurrentProcess(), 
-        importDirectorySectionAddress, 
+        NtCurrentProcess(),
+        importDirectorySectionAddress,
         importDirectorySectionSize
         );
 #endif
@@ -1862,8 +2017,8 @@ CleanupExit:
 
 #ifdef _M_ARM64
     NtFlushInstructionCache(
-        NtCurrentProcess(), 
-        importDirectorySectionAddress, 
+        NtCurrentProcess(),
+        importDirectorySectionAddress,
         importDirectorySectionSize
         );
 #endif
@@ -2108,9 +2263,9 @@ NTSTATUS PhLoaderEntryLoadDll(
     PVOID imageBaseAddress;
     SIZE_T imageBaseOffset;
 
-    status = PhCreateFileWin32(
+    status = PhCreateFile(
         &fileHandle,
-        PhGetStringRefZ(FileName),
+        FileName,
         FILE_READ_DATA | FILE_EXECUTE | SYNCHRONIZE,
         FILE_ATTRIBUTE_NORMAL,
         FILE_SHARE_READ,
@@ -2369,7 +2524,7 @@ NTSTATUS PhGetFileBinaryTypeWin32(
     OBJECT_ATTRIBUTES objectAttributes;
     SECTION_IMAGE_INFORMATION section = { 0 };
 
-    status = RtlDosPathNameToNtPathName_U_WithStatus(
+    status = PhDosLongPathNameToNtPathNameWithStatus(
         FileName,
         &fileName,
         NULL,
@@ -2465,8 +2620,8 @@ CleanupExit:
                 PhInitializeStringRefLongHint(&fileNameSr, FileName);
 
                 if (
-                    PhEndsWithStringRef(&fileNameSr, &extensionCOM, TRUE) || 
-                    PhEndsWithStringRef(&fileNameSr, &extensionPIF, TRUE) || 
+                    PhEndsWithStringRef(&fileNameSr, &extensionCOM, TRUE) ||
+                    PhEndsWithStringRef(&fileNameSr, &extensionPIF, TRUE) ||
                     PhEndsWithStringRef(&fileNameSr, &extensionEXE, TRUE)
                     )
                 {

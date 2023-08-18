@@ -34,7 +34,7 @@ typedef struct _PHSVCP_CAPTURED_RUNAS_SERVICE_PARAMETERS
     PPH_STRING ServiceName;
 } PHSVCP_CAPTURED_RUNAS_SERVICE_PARAMETERS, *PPHSVCP_CAPTURED_RUNAS_SERVICE_PARAMETERS;
 
-PPHSVC_API_PROCEDURE PhSvcApiCallTable[] =
+CONST PPHSVC_API_PROCEDURE PhSvcApiCallTable[] =
 {
     PhSvcApiPlugin,
     PhSvcApiExecuteRunAsCommand,
@@ -387,6 +387,7 @@ NTSTATUS PhSvcpCaptureRunAsServiceParameters(
     Parameters->UseLinkedToken = Payload->u.ExecuteRunAsCommand.i.UseLinkedToken;
     Parameters->ServiceName = PhGetString(CapturedParameters->ServiceName);
     Parameters->CreateSuspendedProcess = Payload->u.ExecuteRunAsCommand.i.CreateSuspendedProcess;
+    Parameters->CreateUIAccessProcess = Payload->u.ExecuteRunAsCommand.i.CreateUIAccessProcess;
 
     return status;
 }
@@ -1417,7 +1418,7 @@ NTSTATUS PhSvcApiWriteMiniDumpProcess(
     _Inout_ PPHSVC_API_PAYLOAD Payload
     )
 {
-    MINIDUMP_CALLBACK_INFORMATION callbackInfo = { 0 };
+    MINIDUMP_CALLBACK_INFORMATION callbackInfo;
     HANDLE processHandle = UlongToHandle(Payload->u.WriteMiniDumpProcess.i.LocalProcessHandle);
     ULONG processDumpType = Payload->u.WriteMiniDumpProcess.i.DumpType;
     HANDLE snapshotHandle = NULL;
@@ -1434,6 +1435,7 @@ NTSTATUS PhSvcApiWriteMiniDumpProcess(
             MiniDumpWithIptTrace;
     }
 
+    memset(&callbackInfo, 0, sizeof(callbackInfo));
     callbackInfo.CallbackRoutine = PhpProcessMiniDumpCallback;
     callbackInfo.CallbackParam = snapshotHandle;
 

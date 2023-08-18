@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2016
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
@@ -120,7 +120,7 @@ static VOID FilterResults(
 
     results = Context->Results;
 
-    SetCursor(LoadCursor(NULL, IDC_WAIT));
+    PhSetCursor(PhLoadCursor(NULL, IDC_WAIT));
 
     while (PhaChoiceDialog(
         hwndDlg,
@@ -242,7 +242,7 @@ static VOID FilterResults(
         }
     }
 
-    SetCursor(LoadCursor(NULL, IDC_ARROW));
+    PhSetCursor(PhLoadCursor(NULL, IDC_ARROW));
 }
 
 INT_PTR CALLBACK PhpMemoryResultsDlgProc(
@@ -435,7 +435,7 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
                             0
                             )))
                         {
-                            PhWriteStringAsUtf8FileStream(fileStream, &PhUnicodeByteOrderMark);
+                            PhWriteStringAsUtf8FileStream(fileStream, (PPH_STRINGREF)&PhUnicodeByteOrderMark);
                             PhWritePhTextHeader(fileStream);
 
                             string = PhpGetStringForSelectedResults(GetDlgItem(hwndDlg, IDC_LIST), context->Results, TRUE);

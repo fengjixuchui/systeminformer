@@ -247,14 +247,14 @@ VOID InitializeDbPath(
     {
         PPH_STRING fileName;
 
-        fileName = PhGetApplicationDirectoryFileNameZ(L"usernotesdb.xml", FALSE);
+        fileName = PhGetApplicationDirectoryFileNameZ(L"usernotesdb.xml", TRUE);
         SetDbPath(fileName);
     }
     else
     {
         PPH_STRING fileName;
 
-        fileName = PhGetKnownLocationZ(PH_FOLDERID_RoamingAppData, L"\\SystemInformer\\usernotesdb.xml");
+        fileName = PhGetKnownLocationZ(PH_FOLDERID_RoamingAppData, L"\\SystemInformer\\usernotesdb.xml", TRUE);
         SetDbPath(fileName);
     }
 }
@@ -2050,7 +2050,7 @@ VOID ProcessMenuInitializingCallback(
 
     LockDb();
 
-    if ((object = FindDbObject(FILE_TAG, &menuInfo->u.Process.Processes[0]->ProcessName->sr)) && object->Collapse)
+    if ((object = FindDbObject(FILE_TAG, &processItem->ProcessName->sr)) && object->Collapse)
         collapseMenuItem->Flags |= PH_EMENU_CHECKED;
     if (highlightPresent)
         highlightMenuItem->Flags |= PH_EMENU_CHECKED;

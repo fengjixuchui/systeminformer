@@ -154,7 +154,7 @@ FORCEINLINE
 NTSTATUS
 PhGetProcessPeb32(
     _In_ HANDLE ProcessHandle,
-    _Out_ PVOID *Peb32
+    _Out_ PVOID* Peb32
     )
 {
     NTSTATUS status;
@@ -170,7 +170,7 @@ PhGetProcessPeb32(
 
     if (NT_SUCCESS(status))
     {
-        // No PEB for System and minimal/pico processes. (dmex)
+        // No PEB for System, Minimal or Pico processes. (dmex)
         if (!wow64)
             return STATUS_UNSUCCESSFUL;
 
@@ -197,7 +197,7 @@ PhGetProcessPeb(
 
     if (NT_SUCCESS(status))
     {
-        // No PEB for System and minimal/pico processes. (dmex)
+        // No PEB for System, Minimal or Pico processes. (dmex)
         if (!basicInfo.PebBaseAddress)
             return STATUS_UNSUCCESSFUL;
 
@@ -1452,7 +1452,7 @@ PhGetTokenIsVirtualizationEnabled(
 */
 FORCEINLINE
 NTSTATUS
-PhGetTokenIsUIAccessEnabled(
+PhGetTokenUIAccess(
     _In_ HANDLE TokenHandle,
     _Out_ PBOOLEAN IsUIAccessEnabled
     )
@@ -1486,7 +1486,7 @@ PhGetTokenIsUIAccessEnabled(
 */
 FORCEINLINE
 NTSTATUS
-PhSetTokenUIAccessEnabled(
+PhSetTokenUIAccess(
     _In_ HANDLE TokenHandle,
     _In_ BOOLEAN IsUIAccessEnabled
     )
@@ -1562,6 +1562,14 @@ PhGetTokenMandatoryPolicy(
         );
 }
 
+/**
+* The TOKEN_ORIGIN structure contains information about the origin of the logon session.
+*
+* \param TokenHandle A handle to a token. The handle must have TOKEN_QUERY access.
+* \param Origin A variable which receives the Locally unique identifier (LUID) for the logon session.
+*
+* \return Successful or errant status.
+*/
 FORCEINLINE
 NTSTATUS
 PhGetTokenOrigin(
@@ -1580,6 +1588,15 @@ PhGetTokenOrigin(
         );
 }
 
+/**
+* Gets a value that is nonzero if the token is an app container token.
+*
+* \param TokenHandle A handle to a token. The handle must have TOKEN_QUERY access.
+* \param IsAppContainer Any callers who check the TokenIsAppContainer and have it return 0 should
+* also verify that the caller token is not an identify level impersonation token.
+*
+* \return Successful or errant status.
+*/
 FORCEINLINE
 NTSTATUS
 PhGetTokenIsAppContainer(
@@ -1607,6 +1624,14 @@ PhGetTokenIsAppContainer(
     return status;
 }
 
+/**
+* Gets a value that includes the app container number for the token.
+*
+* \param TokenHandle A handle to a token. The handle must have TOKEN_QUERY access.
+* \param AppContainerNumber The app container number for the token.
+*
+* \return Successful or errant status.
+*/
 FORCEINLINE
 NTSTATUS
 PhGetTokenAppContainerNumber(
@@ -1721,6 +1746,15 @@ PhGetTimerBasicInformation(
         );
 }
 
+/**
+* The action to be performed when the calling thread exits.
+*
+* \param DebugObjectHandle A handle to a process' debug object.
+* \param KillProcessOnExit If this parameter is TRUE, the thread terminates all attached processes on exit
+* (note that this is the default). Otherwise, the thread detaches from all processes being debugged on exit.
+*
+* \return Successful or errant status.
+*/
 FORCEINLINE
 NTSTATUS
 PhSetDebugKillProcessOnExit(
@@ -1783,6 +1817,88 @@ PhGetSystemShadowStackInformation(
         sizeof(SYSTEM_SHADOW_STACK_INFORMATION),
         NULL
         );
+}
+
+/**
+* The system boot time in Coordinated Universal Time (UTC) format.
+*
+* \param BootTime A pointer to a LARGE_INTEGER structure to receive the current system boot date and time.
+*
+* \return Successful or errant status.
+*/
+FORCEINLINE
+NTSTATUS
+PhGetSystemBootTime(
+    _Out_ PLARGE_INTEGER BootTime
+    )
+{
+    NTSTATUS status;
+    SYSTEM_TIMEOFDAY_INFORMATION timeOfDayInfo;
+
+    status = NtQuerySystemInformation(
+        SystemTimeOfDayInformation,
+        &timeOfDayInfo,
+        sizeof(SYSTEM_TIMEOFDAY_INFORMATION),
+        NULL
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        *BootTime = timeOfDayInfo.BootTime;
+    }
+
+    return status;
+}
+
+/**
+* The system uptime in Coordinated Universal Time (UTC) format.
+*
+* \param Uptime A pointer to a LARGE_INTEGER structure to receive the current system uptime.
+*
+* \return Successful or errant status.
+*/
+FORCEINLINE
+NTSTATUS
+PhGetSystemUptime(
+    _Out_ PLARGE_INTEGER Uptime
+    )
+{
+    NTSTATUS status;
+    SYSTEM_TIMEOFDAY_INFORMATION timeOfDayInfo;
+
+    status = NtQuerySystemInformation(
+        SystemTimeOfDayInformation,
+        &timeOfDayInfo,
+        sizeof(SYSTEM_TIMEOFDAY_INFORMATION),
+        NULL
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        Uptime->QuadPart = timeOfDayInfo.CurrentTime.QuadPart - timeOfDayInfo.BootTime.QuadPart;
+    }
+
+    return status;
+}
+
+/**
+ * Waits until the specified object is in the signaled state or the time-out interval elapses.
+ *
+ * \param Handle A handle to the object.
+ * \param Timeout The time-out interval.
+ * If a nonzero value is specified, the function waits until the object is signaled or the interval elapses.
+ * If Timeout is zero, the function does not enter a wait state if the object is not signaled; it always returns immediately.
+ * If Timeout is INFINITE, the function will return only when the object is signaled.
+ *
+ * \return Successful or errant status.
+ */
+FORCEINLINE
+NTSTATUS PhWaitForSingleObject(
+    _In_ HANDLE Handle,
+    _In_opt_ PLARGE_INTEGER Timeout
+    )
+{
+    return NtWaitForSingleObject(Handle, FALSE, Timeout);
 }
 
 #endif

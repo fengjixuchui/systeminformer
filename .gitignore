@@ -7,6 +7,7 @@
 *.user
 *.key
 *.sig
+*.orig
 
 # Build results
 *.appx
@@ -113,4 +114,4 @@ tools/GenerateZw/GenerateZw/bin/Release/*
 !tools/delaylib/bin/
 
 !tools/thirdparty/bin/
-!tools/thirdparty/bin/Debug*/*.pdb
+!tools/thirdparty/bin/*/*.pdb

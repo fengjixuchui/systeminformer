@@ -10,8 +10,11 @@
  *
  */
 
+#include <ph.h>
 #include <kphcomms.h>
 #include <kphuser.h>
+#include <mapldr.h>
+
 #include <fltuser.h>
 
 typedef struct _KPH_UMESSAGE
@@ -229,8 +232,9 @@ NTSTATUS KphpFilterDeviceIoControl(
     return status;
 }
 
+// rev from FilterLoad/FilterUnload (fltlib) (dmex)
 /**
- * Rev from FilterLoad/FilterUnload (dmex)
+ * \brief An application with minifilter support can dynamically load and unload the minifilter.
  *
  * \param[in] ServiceName The service name from HKLM\\System\\CurrentControlSet\\Services\\<ServiceName>.
  * \param[in] LoadDriver TRUE to load the kernel driver, FALSE to unload the kernel driver.
@@ -510,6 +514,40 @@ NTSTATUS KphpFilterConnectCommunicationPort(
 }
 
 /**
+ * \brief No-operation communications callback handling only the minimum
+ *  necessary. Used when no callback is provided when connecting. Or when the
+ *  callback does not handle the message.
+ *
+ * \details Synchronous messages expecting a reply must always be handled, this
+ * no-operation default callback will handle them as necessary.
+ *
+ * \param[in] ReplyToken - Token used to reply, when possible.
+ * \param[in] Message - Message from KPH to handle.
+ */
+VOID KphpCommsCallbackUnhandled(
+    _In_ ULONG_PTR ReplyToken,
+    _In_ PCKPH_MESSAGE Message
+    )
+{
+    PPH_FREE_LIST freelist;
+    PKPH_MESSAGE msg;
+
+    if (Message->Header.MessageId != KphMsgProcessCreate)
+    {
+        return;
+    }
+
+    freelist = KphGetMessageFreeList();
+
+    msg = PhAllocateFromFreeList(freelist);
+    KphMsgInit(msg, KphMsgProcessCreate);
+    msg->Reply.ProcessCreate.CreationStatus = STATUS_SUCCESS;
+    KphCommsReplyMessage(ReplyToken, msg);
+
+    PhFreeToFreeList(freelist, msg);
+}
+
+/**
  * \brief I/O thread pool callback for filter port.
  *
  * \param[in,out] Instance Unused
@@ -528,6 +566,7 @@ VOID WINAPI KphpCommsIoCallback(
 {
     NTSTATUS status;
     PKPH_UMESSAGE msg;
+    BOOLEAN handled;
 
     if (!PhAcquireRundownProtection(&KphpCommsRundown))
     {
@@ -556,8 +595,18 @@ VOID WINAPI KphpCommsIoCallback(
 
     if (KphpCommsRegisteredCallback)
     {
-        KphpCommsRegisteredCallback((ULONG_PTR)&msg->MessageHeader,
-                                    &msg->Message);
+        handled = KphpCommsRegisteredCallback((ULONG_PTR)&msg->MessageHeader,
+                                              &msg->Message);
+    }
+    else
+    {
+        handled = FALSE;
+    }
+
+    if (!handled)
+    {
+        KphpCommsCallbackUnhandled((ULONG_PTR)&msg->MessageHeader,
+                                   &msg->Message);
     }
 
 Exit:

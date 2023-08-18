@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2011
- *     dmex    2013-2022
+ *     dmex    2013-2023
  *
  */
 
@@ -32,11 +32,15 @@ PH_QUEUED_LOCK NetworkExtensionListLock = PH_QUEUED_LOCK_INIT;
 
 typedef BOOLEAN (NTAPI* PNETWORKTOOLS_GET_COUNTRYCODE)(
     _In_ PH_IP_ADDRESS RemoteAddress,
-    _Out_ PPH_STRING* CountryCode,
+    _Out_ ULONG* CountryCode,
     _Out_ PPH_STRING* CountryName
     );
 typedef INT (NTAPI* PNETWORKTOOLS_GET_COUNTRYICON)(
-    _In_ PPH_STRING Name
+    _In_ ULONG CountryCode
+    );
+typedef BOOLEAN (NTAPI* PNETWORKTOOLS_GET_SERVICENAME)(
+    _In_ ULONG Port,
+    _Out_ PPH_STRINGREF ServiceName
     );
 typedef VOID (NTAPI* PNETWORKTOOLS_DRAW_COUNTRYICON)(
     _In_ HDC hdc,
@@ -61,6 +65,7 @@ typedef struct _NETWORKTOOLS_INTERFACE
     ULONG Version;
     PNETWORKTOOLS_GET_COUNTRYCODE LookupCountryCode;
     PNETWORKTOOLS_GET_COUNTRYICON LookupCountryIcon;
+    PNETWORKTOOLS_GET_SERVICENAME LookupPortServiceName;
     PNETWORKTOOLS_DRAW_COUNTRYICON DrawCountryIcon;
     PNETWORKTOOLS_SHOWWINDOW_PING ShowPingWindow;
     PNETWORKTOOLS_SHOWWINDOW_TRACERT ShowTracertWindow;
@@ -72,6 +77,7 @@ NETWORKTOOLS_INTERFACE PluginInterface =
     NETWORKTOOLS_INTERFACE_VERSION,
     LookupCountryCode,
     LookupCountryIcon,
+    LookupPortServiceName,
     DrawCountryIcon,
     ShowPingWindowFromAddress,
     ShowTracertWindowFromAddress,
@@ -83,6 +89,8 @@ VOID NTAPI LoadCallback(
     _In_opt_ PVOID Context
     )
 {
+    GeoDbDatabaseType = !!PhGetIntegerSetting(SETTING_NAME_GEOLITE_DB_TYPE);
+
     if (PhGetOwnTokenAttributes().Elevated)
     {
         NetworkExtensionEnabled = !!PhGetIntegerSetting(SETTING_NAME_EXTENDED_TCP_STATS);
@@ -90,14 +98,11 @@ VOID NTAPI LoadCallback(
 }
 
 VOID NTAPI ShowOptionsCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_OPTIONS_POINTERS optionsEntry = (PPH_PLUGIN_OPTIONS_POINTERS)Parameter;
-
-    if (!optionsEntry)
-        return;
 
     optionsEntry->CreateSection(
         L"NetworkTools",
@@ -420,9 +425,9 @@ LONG NTAPI NetworkServiceSortFunction(
     case NETWORK_COLUMN_ID_REMOTE_COUNTRY:
         return PhCompareStringWithNullSortOrder(extension1->RemoteCountryName, extension2->RemoteCountryName, SortOrder, TRUE);
     case NETWORK_COLUMN_ID_LOCAL_SERVICE:
-        return PhCompareStringWithNullSortOrder(extension1->LocalServiceName, extension2->LocalServiceName, SortOrder, TRUE);
+        return PhCompareStringRefWithNullSortOrder(&extension1->LocalServiceName, &extension2->LocalServiceName, SortOrder, TRUE);
     case NETWORK_COLUMN_ID_REMOTE_SERVICE:
-        return PhCompareStringWithNullSortOrder(extension1->RemoteServiceName, extension2->RemoteServiceName, SortOrder, TRUE);
+        return PhCompareStringRefWithNullSortOrder(&extension1->RemoteServiceName, &extension2->RemoteServiceName, SortOrder, TRUE);
     case NETWORK_COLUMN_ID_BYTES_IN:
         return uint64cmp(extension1->NumberOfBytesIn, extension2->NumberOfBytesIn);
     case NETWORK_COLUMN_ID_BYTES_OUT:
@@ -529,10 +534,6 @@ VOID NTAPI NetworkItemDeleteCallback(
         PhReleaseQueuedLockExclusive(&NetworkExtensionListLock);
     }
 
-    if (extension->LocalServiceName)
-        PhDereferenceObject(extension->LocalServiceName);
-    if (extension->RemoteServiceName)
-        PhDereferenceObject(extension->RemoteServiceName);
     if (extension->RemoteCountryName)
         PhDereferenceObject(extension->RemoteCountryName);
     if (extension->BytesIn)
@@ -582,7 +583,7 @@ VOID NTAPI NetworkNodeCreateCallback(
 
     if (!extension->CountryValid)
     {
-        PPH_STRING remoteCountryCode;
+        ULONG remoteCountryCode;
         PPH_STRING remoteCountryName;
 
         if (LookupCountryCode(
@@ -593,7 +594,6 @@ VOID NTAPI NetworkNodeCreateCallback(
         {
             PhMoveReference(&extension->RemoteCountryName, remoteCountryName);
             extension->CountryIconIndex = LookupCountryIcon(remoteCountryCode);
-            PhDereferenceObject(remoteCountryCode);
         }
 
         extension->CountryValid = TRUE;
@@ -649,14 +649,11 @@ VOID UpdateNetworkNode(
         {
             if (!Extension->LocalValid)
             {
-                for (ULONG x = 0; x < ARRAYSIZE(ResolvedPortsTable); x++)
+                PH_STRINGREF localServiceName;
+
+                if (LookupPortServiceName(Node->NetworkItem->LocalEndpoint.Port, &localServiceName))
                 {
-                    if (Node->NetworkItem->LocalEndpoint.Port == ResolvedPortsTable[x].Port)
-                    {
-                        //PhAppendFormatStringBuilder(&stringBuilder, L"%s,", ResolvedPortsTable[x].Name);
-                        PhMoveReference(&Extension->LocalServiceName, PhCreateString(ResolvedPortsTable[x].Name));
-                        break;
-                    }
+                    Extension->LocalServiceName = localServiceName;
                 }
 
                 Extension->LocalValid = TRUE;
@@ -667,14 +664,11 @@ VOID UpdateNetworkNode(
         {
             if (!Extension->RemoteValid)
             {
-                for (ULONG x = 0; x < ARRAYSIZE(ResolvedPortsTable); x++)
+                PH_STRINGREF remoteServiceName;
+
+                if (LookupPortServiceName(Node->NetworkItem->RemoteEndpoint.Port, &remoteServiceName))
                 {
-                    if (Node->NetworkItem->RemoteEndpoint.Port == ResolvedPortsTable[x].Port)
-                    {
-                        //PhAppendFormatStringBuilder(&stringBuilder, L"%s,", ResolvedPortsTable[x].Name);
-                        PhMoveReference(&Extension->RemoteServiceName, PhCreateString(ResolvedPortsTable[x].Name));
-                        break;
-                    }
+                    Extension->RemoteServiceName = remoteServiceName;
                 }
 
                 Extension->RemoteValid = TRUE;
@@ -748,10 +742,30 @@ VOID NTAPI TreeNewMessageCallback(
                     getCellText->Text = PhGetStringRef(extension->RemoteCountryName);
                     break;
                 case NETWORK_COLUMN_ID_LOCAL_SERVICE:
-                    getCellText->Text = PhGetStringRef(extension->LocalServiceName);
+                    {
+                        if (extension->LocalServiceName.Length)
+                        {
+                            getCellText->Text.Buffer = extension->LocalServiceName.Buffer;
+                            getCellText->Text.Length = extension->LocalServiceName.Length;
+                        }
+                        else
+                        {
+                            PhInitializeEmptyStringRef(&getCellText->Text);
+                        }
+                    }
                     break;
                 case NETWORK_COLUMN_ID_REMOTE_SERVICE:
-                    getCellText->Text = PhGetStringRef(extension->RemoteServiceName);
+                    {
+                        if (extension->RemoteServiceName.Length)
+                        {
+                            getCellText->Text.Buffer = extension->RemoteServiceName.Buffer;
+                            getCellText->Text.Length = extension->RemoteServiceName.Length;
+                        }
+                        else
+                        {
+                            PhInitializeEmptyStringRef(&getCellText->Text);
+                        }
+                    }
                     break;
                 case NETWORK_COLUMN_ID_BYTES_IN:
                     getCellText->Text = PhGetStringRef(extension->BytesIn);
@@ -992,8 +1006,10 @@ LOGICAL DllMain(
                 { IntegerSettingType, SETTING_NAME_TRACERT_MAX_HOPS, L"14" },
                 { IntegerPairSettingType, SETTING_NAME_WHOIS_WINDOW_POSITION, L"0,0" },
                 { ScalableIntegerPairSettingType, SETTING_NAME_WHOIS_WINDOW_SIZE, L"@96|600,365" },
+                { IntegerSettingType, SETTING_NAME_WHOIS_IPV6_SUPPORT, L"0" },
                 { IntegerSettingType, SETTING_NAME_EXTENDED_TCP_STATS, L"0" },
                 { StringSettingType, SETTING_NAME_GEOLITE_API_KEY, L"" },
+                { IntegerSettingType, SETTING_NAME_GEOLITE_DB_TYPE, L"0" },
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);

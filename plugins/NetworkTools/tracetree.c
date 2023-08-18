@@ -27,8 +27,6 @@ VOID NTAPI TracertTreeNodeItemDeleteProcedure(
         PhDereferenceObject(tracertNode->HostnameString);
     if (tracertNode->IpAddressString)
         PhDereferenceObject(tracertNode->IpAddressString);
-    if (tracertNode->RemoteCountryCode)
-        PhDereferenceObject(tracertNode->RemoteCountryCode);
     if (tracertNode->RemoteCountryName)
         PhDereferenceObject(tracertNode->RemoteCountryName);
 
@@ -332,6 +330,8 @@ BOOLEAN NTAPI TracertTreeNewCallback(
                 };
                 int (__cdecl *sortFunction)(void *, const void *, const void *);
 
+                static_assert(RTL_NUMBER_OF(sortFunctions) == TREE_COLUMN_ITEM_MAXIMUM, "SortFunctions must equal maximum.");
+
                 if (context->TreeNewSortColumn < TREE_COLUMN_ITEM_MAXIMUM)
                     sortFunction = sortFunctions[context->TreeNewSortColumn];
                 else
@@ -530,6 +530,7 @@ PTRACERT_ROOT_NODE GetSelectedTracertNode(
     return NULL;
 }
 
+_Success_(return)
 BOOLEAN GetSelectedTracertNodes(
     _In_ PNETWORK_TRACERT_CONTEXT Context,
     _Out_ PTRACERT_ROOT_NODE **Nodes,

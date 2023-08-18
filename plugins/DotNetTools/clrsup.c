@@ -1205,11 +1205,11 @@ static BOOLEAN DnpMscordaccoreDirectoryCallback(
     baseName.Buffer = Information->FileName;
     baseName.Length = Information->FileNameLength;
 
-    if (PhEqualStringRef2(&baseName, L".", TRUE) || PhEqualStringRef2(&baseName, L"..", TRUE))
-        return TRUE;
-
-    if (Information->FileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+    if (FlagOn(Information->FileAttributes, FILE_ATTRIBUTE_DIRECTORY))
     {
+        if (PATH_IS_WIN32_RELATIVE_PREFIX(&baseName))
+            return TRUE;
+
         PhAddItemList(DirectoryList, PhCreateString2(&baseName));
     }
 
@@ -1737,7 +1737,7 @@ HRESULT STDMETHODCALLTYPE DnCLRDataTarget_GetImageBase(
 
     if (context.BaseAddress)
     {
-        *baseAddress = (CLRDATA_ADDRESS)context.BaseAddress;    
+        *baseAddress = (CLRDATA_ADDRESS)context.BaseAddress;
         return S_OK;
     }
     else

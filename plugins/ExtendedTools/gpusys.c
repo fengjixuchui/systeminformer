@@ -78,7 +78,7 @@ BOOLEAN EtpGpuSysInfoSectionCallback(
         return TRUE;
     case SysInfoViewChanging:
         {
-            PH_SYSINFO_VIEW_TYPE view = (PH_SYSINFO_VIEW_TYPE)Parameter1;
+            PH_SYSINFO_VIEW_TYPE view = (PH_SYSINFO_VIEW_TYPE)PtrToUlong(Parameter1);
             PPH_SYSINFO_SECTION section = (PPH_SYSINFO_SECTION)Parameter2;
 
             if (view == SysInfoSummaryView || section != Section)
@@ -155,12 +155,19 @@ BOOLEAN EtpGpuSysInfoSectionCallback(
                 {
                     FLOAT max = 0;
 
-                    for (ULONG i = 0; i < drawInfo->LineDataCount; i++)
+                    if (EtEnableAvxSupport && drawInfo->LineDataCount > 128)
                     {
-                        FLOAT data = Section->GraphState.Data1[i]; // HACK
+                        max = PhMaxMemorySingles(Section->GraphState.Data1, drawInfo->LineDataCount);
+                    }
+                    else
+                    {
+                        for (ULONG i = 0; i < drawInfo->LineDataCount; i++)
+                        {
+                            FLOAT data = Section->GraphState.Data1[i];
 
-                        if (max < data)
-                            max = data;
+                            if (max < data)
+                                max = data;
+                        }
                     }
 
                     if (max != 0)

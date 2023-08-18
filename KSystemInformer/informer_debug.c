@@ -25,7 +25,6 @@ typedef struct _KPH_DBG_PRINT_SLOT
     ULONG Level;
     USHORT Length;
     CHAR Buffer[3 * 1024];
-
 } KPH_DBG_PRINT_SLOT, *PKPH_DBG_PRINT_SLOT;
 
 static BOOLEAN KphpDbgPrintInitialized = FALSE;
@@ -251,7 +250,7 @@ Exit:
 
         if (KphpDbgPrintSlots)
         {
-            ExFreePoolWithTag(KphpDbgPrintSlots, KPH_TAG_DBG_SLOTS);
+            KphFree(KphpDbgPrintSlots, KPH_TAG_DBG_SLOTS);
             KphpDbgPrintSlots = NULL;
         }
     }
@@ -278,18 +277,7 @@ VOID KphDebugInformerStop(
 
     for (ULONG i = 0; i < KphpDbgPrintSlotCount; i++)
     {
-        if (KphDynKeRemoveQueueDpcEx)
-        {
-            KphDynKeRemoveQueueDpcEx(&KphpDbgPrintSlots[i].Dpc, TRUE);
-        }
-        else
-        {
-            //
-            // This produces a small chance that we haven't completely returned
-            // from the DPC routine.
-            //
-            KeRemoveQueueDpc(&KphpDbgPrintSlots[i].Dpc);
-        }
+        KeRemoveQueueDpcEx(&KphpDbgPrintSlots[i].Dpc, TRUE);
     }
 
     KeAcquireSpinLock(&KphpDbgPrintLock, &oldIrql);
@@ -297,7 +285,7 @@ VOID KphDebugInformerStop(
     KphpDebugPrintFlush();
 
     KphpDbgPrintSlotCount = 0;
-    ExFreePoolWithTag(KphpDbgPrintSlots, KPH_TAG_DBG_SLOTS);
+    KphFree(KphpDbgPrintSlots, KPH_TAG_DBG_SLOTS);
     KphpDbgPrintSlots = NULL;
 
     KeReleaseSpinLock(&KphpDbgPrintLock, oldIrql);

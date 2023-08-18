@@ -53,6 +53,14 @@ PPH_STRING PhCreateStringFromWindowsRuntimeString(
 }
 
 // rev from WindowsCreateStringReference (dmex)
+/**
+ * \brief Creates a new string reference based on the specified string.
+ *
+ * \param SourceString A null-terminated string to use as the source for the new string.
+ * \param String A pointer to the newly created string.
+ *
+ * \return Successful or errant status.
+ */
 HRESULT PhCreateWindowsRuntimeStringReference(
     _In_ PCWSTR SourceString,
     _Out_ PVOID String
@@ -79,6 +87,14 @@ HRESULT PhCreateWindowsRuntimeStringReference(
 }
 
 // rev from WindowsCreateString (dmex)
+/**
+ * \brief Creates a new string based on the specified string.
+ *
+ * \param SourceString A null-terminated string to use as the source for the new string.
+ * \param String A pointer to the newly created string.
+ *
+ * \return Successful or errant status.
+ */
 HRESULT PhCreateWindowsRuntimeString(
     _In_ PCWSTR SourceString,
     _Out_ HSTRING* String
@@ -86,8 +102,8 @@ HRESULT PhCreateWindowsRuntimeString(
 {
 #if (PH_NATIVE_WINDOWS_RUNTIME_STRING)
     return WindowsCreateString(
-        SourceString, 
-        (UINT32)PhCountStringZ((PWSTR)SourceString), 
+        SourceString,
+        (UINT32)PhCountStringZ((PWSTR)SourceString),
         String
         );
 #else
@@ -121,6 +137,11 @@ HRESULT PhCreateWindowsRuntimeString(
 }
 
 // rev from WindowsDeleteString (dmex)
+/**
+ * \brief Decrements the reference count of a string.
+ *
+ * \param String The string to be deleted.
+ */
 VOID PhDeleteWindowsRuntimeString(
     _In_opt_ HSTRING String
     )
@@ -146,6 +167,13 @@ VOID PhDeleteWindowsRuntimeString(
 }
 
 // rev from WindowsGetStringLen (dmex)
+/**
+ * \brief Gets the length, in Unicode characters, of the specified string.
+ *
+ * \param String The string to be counted.
+ *
+ * \return Successful or errant status.
+ */
 UINT32 PhGetWindowsRuntimeStringLength(
     _In_opt_ HSTRING String
     )
@@ -165,6 +193,14 @@ UINT32 PhGetWindowsRuntimeStringLength(
 }
 
 // rev from WindowsGetStringRawBuffer (dmex)
+/**
+ * \brief Retrieves the backing buffer for the specified string.
+ *
+ * \param String An optional string for which the backing buffer is to be retrieved. Can be NULL.
+ * \param Length The number of Unicode characters in the backing buffer for String (including embedded null characters, but excluding the terminating null).
+ *
+ * \return A pointer to the buffer that provides the backing store for string, or the empty string if string is NULL or the empty string.
+ */
 PCWSTR PhGetWindowsRuntimeStringBuffer(
     _In_opt_ HSTRING String,
     _Out_opt_ PUINT32 Length
@@ -302,7 +338,7 @@ PPH_STRING PhSystemIdentificationToString(
 
         __x_ABI_CWindows_CStorage_CStreams_CIBuffer_Release(buffer);
     }
-    
+
     if (SUCCEEDED(__x_ABI_CWindows_CSystem_CProfile_CISystemIdentificationInfo_get_Source(IdentificationInfo, &source)))
     {
         switch (source)
@@ -320,8 +356,8 @@ PPH_STRING PhSystemIdentificationToString(
     }
 
     PhMoveReference(&identifier, PhFormatString(
-        L"%s (%s)", 
-        PhGetStringOrDefault(identifier, L"Unknown"), 
+        L"%s (%s)",
+        PhGetStringOrDefault(identifier, L"Unknown"),
         string
         ));
 
@@ -432,7 +468,7 @@ static HRESULT PhDetoursPackageSystemIdentificationInitialize(
         return E_FAIL;
 
     if (!NT_SUCCESS(PhLoaderEntryDetourImportProcedure(
-        baseAddress, 
+        baseAddress,
         "api-ms-win-core-processthreads-l1-1-0.dll",
         "GetCurrentProcess",
         PhDetoursPackageSystemIdentificationCurrentProcess,
@@ -608,7 +644,7 @@ CleanupExit:
     {
         if (HRESULT_FACILITY(systemIdPublisherStatus) == FACILITY_NT_BIT >> NT_FACILITY_SHIFT)
         {
-            systemIdPublisherStatus = ClearFlag(systemIdPublisherStatus, FACILITY_NT_BIT); // 0xD0000022 -> 0xC0000022
+            ClearFlag(systemIdPublisherStatus, FACILITY_NT_BIT); // 0xD0000022 -> 0xC0000022
             *SystemIdForPublisher = PhGetStatusMessage(systemIdPublisherStatus, 0);
         }
 
@@ -626,7 +662,7 @@ CleanupExit:
     {
         if (HRESULT_FACILITY(systemIdForUserStatus) == FACILITY_NT_BIT >> NT_FACILITY_SHIFT)
         {
-            systemIdForUserStatus = ClearFlag(systemIdForUserStatus, FACILITY_NT_BIT); // 0xD0000022 -> 0xC0000022
+            ClearFlag(systemIdForUserStatus, FACILITY_NT_BIT); // 0xD0000022 -> 0xC0000022
             *SystemIdForUser = PhGetStatusMessage(systemIdForUserStatus, 0);
         }
 
@@ -762,7 +798,7 @@ FLOAT PhGetDisplayLogicalDpi(
     }
 
     // Requires IWindowsXamlManagerStatics_InitializeForCurrentThread (dmex)
-    // 
+    //
     //__x_ABI_CWindows_CGraphics_CDisplay_CIDisplayInformationStatics* displayInformation;
     //status = PhGetActivationFactory(
     //    L"Windows.Graphics.dll",
@@ -830,8 +866,8 @@ static BOOLEAN PhPackageImportsInitialized(
         }
 
         if (
-            OpenPackageInfoByFullNameForUser_I && 
-            GetPackageApplicationIds_I && 
+            OpenPackageInfoByFullNameForUser_I &&
+            GetPackageApplicationIds_I &&
             ClosePackageInfo_I
             )
         {
@@ -863,8 +899,8 @@ BOOLEAN PhGetPackageApplicationIds(
 
     status = OpenPackageInfoByFullNameForUser_I(
         NULL,
-        PackageFullName, 
-        0, 
+        PackageFullName,
+        0,
         &packageHandle
         );
 
@@ -1115,8 +1151,8 @@ PPH_LIST PhEnumPackageApplicationUserModelIds(
     boolean haveCurrentPackage = FALSE;
 
     status = PhActivateInstance(
-        L"AppXDeploymentClient.dll", 
-        RuntimeClass_Windows_Management_Deployment_PackageManager, 
+        L"AppXDeploymentClient.dll",
+        RuntimeClass_Windows_Management_Deployment_PackageManager,
         &IID_IPackageManager,
         &packageManager
         );
@@ -1158,7 +1194,7 @@ PPH_LIST PhEnumPackageApplicationUserModelIds(
                     list,
                     currentPackage,
                     currentPackage2,
-                    PH_QUERY_PACKAGE_INFO_NAME | PH_QUERY_PACKAGE_INFO_FULLNAME | PH_QUERY_PACKAGE_INFO_FAMILYNAME | 
+                    PH_QUERY_PACKAGE_INFO_NAME | PH_QUERY_PACKAGE_INFO_FULLNAME | PH_QUERY_PACKAGE_INFO_FAMILYNAME |
                     PH_QUERY_PACKAGE_INFO_DISPLAYNAME | PH_QUERY_PACKAGE_INFO_LOGO
                     );
 

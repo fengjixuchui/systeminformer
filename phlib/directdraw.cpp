@@ -19,6 +19,33 @@
 
 using namespace Gdiplus;
 
+//std::unique_ptr<Bitmap> make_bitmap(
+//    _In_ LONG Width,
+//    _In_ LONG Height,
+//    _In_ PixelFormat Format
+//    )
+//{
+//    return std::make_unique<Bitmap>(Width, Height, Format);
+//}
+//
+//std::unique_ptr<Bitmap> make_bitmap(
+//    _In_ LONG Width,
+//    _In_ LONG Height,
+//    _In_ LONG Stride,
+//    _In_ PixelFormat Format,
+//    _In_reads_opt_(_Inexpressible_("height * stride")) PBYTE Buffer
+//    )
+//{
+//    return std::make_unique<Bitmap>(Width, Height, Stride, Format, Buffer);
+//}
+//
+//std::unique_ptr<Graphics> make_graphics(
+//    _In_ const std::unique_ptr<Bitmap>& image
+//    )
+//{
+//    return std::unique_ptr<Graphics>(Graphics::FromImage(image.get()));
+//}
+
 static Bitmap* PhGdiplusCreateBitmapFromDIB(
     _In_ HBITMAP OriginalBitmap
     )
@@ -73,20 +100,32 @@ HICON PhGdiplusConvertBitmapToIcon(
             Bitmap* buffer = new Bitmap(Width, Height, PixelFormat32bppARGB);
             Graphics* graphics = Graphics::FromImage(buffer);
 
-            //if (Background)
-            //{
-            //    Color color(Color::DodgerBlue);
-            //    color.SetFromCOLORREF(Background); // accent color
-            //    graphics->Clear(color);
-            //}
-
-            graphics->Clear(Color::DodgerBlue);
+            if (Background)
+            {
+                Color color(Color::DodgerBlue);
+                color.SetFromCOLORREF(Background);
+                graphics->Clear(color);
+            }
+            else
+            {
+                graphics->Clear(Color::DodgerBlue);
+            }
 
             if (graphics->DrawImage(image, 0, 0) == Status::Ok)
             {
                 if (buffer->GetHICON(&icon) == Status::Ok)
+                {
+                    delete graphics;
+                    delete buffer;
+                    delete image;
+
                     return icon;
+                }
             }
+
+            delete graphics;
+            delete buffer;
+            delete image;
         }
     }
 
@@ -177,7 +216,7 @@ VOID PhUpdateTransparentBackgroundWindow(
             &blendFunction,
             ULW_ALPHA
             );
-        
+
         SelectBitmap(bufferHdc, oldBitmapHandle);
         DeleteBitmap(bitmapHandle);
         DeleteDC(bufferHdc);
@@ -218,7 +257,7 @@ LRESULT CALLBACK PhTransparentBackgroundWindowCallback(
             clientRect.top = 0;
             clientRect.right = createStruct->cx;
             clientRect.bottom = createStruct->cy;
-            
+
             PhUpdateTransparentBackgroundWindow(WindowHandle, &clientRect);
 #else
             constexpr ULONG OpacityPercent = 50;
@@ -241,7 +280,7 @@ LRESULT CALLBACK PhTransparentBackgroundWindowCallback(
             {
                 SetMenu(GetParent(WindowHandle), menu);
             }
-            
+
             PhRemoveWindowContext(WindowHandle, PH_WINDOW_CONTEXT_DEFAULT);
         }
         break;
@@ -270,7 +309,7 @@ RTL_ATOM PhInitializeBackgroundWindowClass(
     memset(&wcex, 0, sizeof(WNDCLASSEX));
     wcex.cbSize = sizeof(WNDCLASSEX);
     wcex.lpfnWndProc = PhTransparentBackgroundWindowCallback;
-    wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wcex.hCursor = PhLoadCursor(nullptr, IDC_ARROW);
     wcex.lpszClassName = L"TransparentBackgroundWindowClass";
 
     return RegisterClassEx(&wcex);

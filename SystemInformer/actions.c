@@ -23,6 +23,7 @@
 
 #include <kphuser.h>
 #include <ksisup.h>
+#include <mapldr.h>
 #include <secedit.h>
 #include <secwmi.h>
 #include <settings.h>
@@ -341,7 +342,6 @@ BOOLEAN PhpStartPhSvcProcess(
                 PH_STRINGREF_INIT(L"\\..\\Release32\\")
 #endif
             };
-
             ULONG i;
             PPH_STRING applicationDirectory;
             PPH_STRING applicationFileName;
@@ -364,14 +364,16 @@ BOOLEAN PhpStartPhSvcProcess(
                     &applicationFileName->sr
                     );
 
-                if (fileFullPath = PhGetFullPath(fileName->Buffer, NULL))
+                if (NT_SUCCESS(PhGetFullPath(PhGetString(fileName), &fileFullPath, NULL)))
+                {
                     PhMoveReference(&fileName, fileFullPath);
+                }
 
-                if (PhDoesFileExistWin32(fileName->Buffer))
+                if (PhDoesFileExistWin32(PhGetString(fileName)))
                 {
                     if (PhShellProcessHackerEx(
                         hWnd,
-                        fileName->Buffer,
+                        PhGetString(fileName),
                         L"-phsvc",
                         SW_HIDE,
                         PH_SHELL_EXECUTE_DEFAULT,
@@ -1622,6 +1624,12 @@ BOOLEAN PhUiTerminateProcesses(
         NTSTATUS status;
         HANDLE processHandle;
 
+        // Note: The current process is a special case (see GH#1770) (dmex)
+        if (Processes[i]->ProcessId == NtCurrentProcessId())
+        {
+            RtlExitUserProcess(STATUS_SUCCESS);
+        }
+
         if (NT_SUCCESS(status = PhOpenProcess(
             &processHandle,
             PROCESS_TERMINATE,
@@ -2368,7 +2376,7 @@ BOOLEAN PhUiRestartProcess(
 
     if (NT_SUCCESS(status))
     {
-        status = PhGetTokenIsUIAccessEnabled(tokenHandle, &tokenIsUIAccessEnabled);
+        status = PhGetTokenUIAccess(tokenHandle, &tokenIsUIAccessEnabled);
 
         if (!NT_SUCCESS(status))
             goto CleanupExit;
@@ -3361,13 +3369,16 @@ BOOLEAN PhUiStartServices(
 
     for (i = 0; i < NumberOfServices; i++)
     {
+        NTSTATUS status = STATUS_UNSUCCESSFUL;
         SC_HANDLE serviceHandle;
 
         success = FALSE;
 
         if (serviceHandle = PhOpenService(PhGetString(Services[i]->Name), SERVICE_START))
         {
-            if (StartService(serviceHandle, 0, NULL))
+            status = PhStartService(serviceHandle, 0, NULL);
+
+            if (NT_SUCCESS(status))
                 success = TRUE;
 
             PhCloseServiceHandle(serviceHandle);
@@ -3375,10 +3386,8 @@ BOOLEAN PhUiStartServices(
 
         if (!success)
         {
-            NTSTATUS status;
             BOOLEAN connected;
 
-            status = PhGetLastWin32ErrorAsNtStatus();
             success = FALSE;
 
             if (!cancelled && PhpShowErrorAndConnectToPhSvc(
@@ -3450,13 +3459,16 @@ BOOLEAN PhUiStartService(
     )
 {
     SC_HANDLE serviceHandle;
+    NTSTATUS status = STATUS_UNSUCCESSFUL;
     BOOLEAN success = FALSE;
 
     serviceHandle = PhOpenService(Service->Name->Buffer, SERVICE_START);
 
     if (serviceHandle)
     {
-        if (StartService(serviceHandle, 0, NULL))
+        status = PhStartService(serviceHandle, 0, NULL);
+
+        if (NT_SUCCESS(status))
             success = TRUE;
 
         PhCloseServiceHandle(serviceHandle);
@@ -3464,10 +3476,7 @@ BOOLEAN PhUiStartService(
 
     if (!success)
     {
-        NTSTATUS status;
         BOOLEAN connected;
-
-        status = PhGetLastWin32ErrorAsNtStatus();
 
         if (PhpShowErrorAndConnectToPhSvc(
             hWnd,
@@ -3517,15 +3526,16 @@ BOOLEAN PhUiContinueServices(
 
     for (i = 0; i < NumberOfServices; i++)
     {
+        NTSTATUS status = STATUS_UNSUCCESSFUL;
         SC_HANDLE serviceHandle;
 
         success = FALSE;
 
         if (serviceHandle = PhOpenService(PhGetString(Services[i]->Name), SERVICE_PAUSE_CONTINUE))
         {
-            SERVICE_STATUS serviceStatus;
+            status = PhContinueService(serviceHandle);
 
-            if (ControlService(serviceHandle, SERVICE_CONTROL_PAUSE, &serviceStatus))
+            if (NT_SUCCESS(status))
                 success = TRUE;
 
             PhCloseServiceHandle(serviceHandle);
@@ -3533,10 +3543,8 @@ BOOLEAN PhUiContinueServices(
 
         if (!success)
         {
-            NTSTATUS status;
             BOOLEAN connected;
 
-            status = PhGetLastWin32ErrorAsNtStatus();
             success = FALSE;
 
             if (!cancelled && PhpShowErrorAndConnectToPhSvc(
@@ -3610,15 +3618,16 @@ BOOLEAN PhUiContinueService(
     )
 {
     SC_HANDLE serviceHandle;
+    NTSTATUS status = STATUS_UNSUCCESSFUL;
     BOOLEAN success = FALSE;
 
     serviceHandle = PhOpenService(Service->Name->Buffer, SERVICE_PAUSE_CONTINUE);
 
     if (serviceHandle)
     {
-        SERVICE_STATUS serviceStatus;
+        status = PhContinueService(serviceHandle);
 
-        if (ControlService(serviceHandle, SERVICE_CONTROL_CONTINUE, &serviceStatus))
+        if (NT_SUCCESS(status))
             success = TRUE;
 
         PhCloseServiceHandle(serviceHandle);
@@ -3626,10 +3635,7 @@ BOOLEAN PhUiContinueService(
 
     if (!success)
     {
-        NTSTATUS status;
         BOOLEAN connected;
-
-        status = PhGetLastWin32ErrorAsNtStatus();
 
         if (PhpShowErrorAndConnectToPhSvc(
             hWnd,
@@ -3679,15 +3685,16 @@ BOOLEAN PhUiPauseServices(
 
     for (i = 0; i < NumberOfServices; i++)
     {
+        NTSTATUS status = STATUS_UNSUCCESSFUL;
         SC_HANDLE serviceHandle;
 
         success = FALSE;
 
         if (serviceHandle = PhOpenService(PhGetString(Services[i]->Name), SERVICE_PAUSE_CONTINUE))
         {
-            SERVICE_STATUS serviceStatus;
+            status = PhPauseService(serviceHandle);
 
-            if (ControlService(serviceHandle, SERVICE_CONTROL_PAUSE, &serviceStatus))
+            if (NT_SUCCESS(status))
                 success = TRUE;
 
             PhCloseServiceHandle(serviceHandle);
@@ -3695,10 +3702,8 @@ BOOLEAN PhUiPauseServices(
 
         if (!success)
         {
-            NTSTATUS status;
             BOOLEAN connected;
 
-            status = PhGetLastWin32ErrorAsNtStatus();
             success = FALSE;
 
             if (!cancelled && PhpShowErrorAndConnectToPhSvc(
@@ -3772,15 +3777,16 @@ BOOLEAN PhUiPauseService(
     )
 {
     SC_HANDLE serviceHandle;
+    NTSTATUS status = STATUS_UNSUCCESSFUL;
     BOOLEAN success = FALSE;
 
     serviceHandle = PhOpenService(Service->Name->Buffer, SERVICE_PAUSE_CONTINUE);
 
     if (serviceHandle)
     {
-        SERVICE_STATUS serviceStatus;
+        status = PhPauseService(serviceHandle);
 
-        if (ControlService(serviceHandle, SERVICE_CONTROL_PAUSE, &serviceStatus))
+        if (NT_SUCCESS(status))
             success = TRUE;
 
         PhCloseServiceHandle(serviceHandle);
@@ -3788,10 +3794,7 @@ BOOLEAN PhUiPauseService(
 
     if (!success)
     {
-        NTSTATUS status;
         BOOLEAN connected;
-
-        status = PhGetLastWin32ErrorAsNtStatus();
 
         if (PhpShowErrorAndConnectToPhSvc(
             hWnd,
@@ -3841,15 +3844,16 @@ BOOLEAN PhUiStopServices(
 
     for (i = 0; i < NumberOfServices; i++)
     {
+        NTSTATUS status = STATUS_UNSUCCESSFUL;
         SC_HANDLE serviceHandle;
 
         success = FALSE;
 
         if (serviceHandle = PhOpenService(PhGetString(Services[i]->Name), SERVICE_STOP))
         {
-            SERVICE_STATUS serviceStatus;
+            status = PhStopService(serviceHandle);
 
-            if (ControlService(serviceHandle, SERVICE_CONTROL_STOP, &serviceStatus))
+            if (NT_SUCCESS(status))
                 success = TRUE;
 
             PhCloseServiceHandle(serviceHandle);
@@ -3857,10 +3861,8 @@ BOOLEAN PhUiStopServices(
 
         if (!success)
         {
-            NTSTATUS status;
             BOOLEAN connected;
 
-            status = PhGetLastWin32ErrorAsNtStatus();
             success = FALSE;
 
             if (!cancelled && PhpShowErrorAndConnectToPhSvc(
@@ -3934,15 +3936,16 @@ BOOLEAN PhUiStopService(
     )
 {
     SC_HANDLE serviceHandle;
+    NTSTATUS status = STATUS_UNSUCCESSFUL;
     BOOLEAN success = FALSE;
 
     serviceHandle = PhOpenService(Service->Name->Buffer, SERVICE_STOP);
 
     if (serviceHandle)
     {
-        SERVICE_STATUS serviceStatus;
+        status = PhStopService(serviceHandle);
 
-        if (ControlService(serviceHandle, SERVICE_CONTROL_STOP, &serviceStatus))
+        if (NT_SUCCESS(status))
             success = TRUE;
 
         PhCloseServiceHandle(serviceHandle);
@@ -3950,10 +3953,7 @@ BOOLEAN PhUiStopService(
 
     if (!success)
     {
-        NTSTATUS status;
         BOOLEAN connected;
-
-        status = PhGetLastWin32ErrorAsNtStatus();
 
         if (PhpShowErrorAndConnectToPhSvc(
             hWnd,
@@ -3987,6 +3987,7 @@ BOOLEAN PhUiDeleteService(
     )
 {
     SC_HANDLE serviceHandle;
+    NTSTATUS status = STATUS_UNSUCCESSFUL;
     BOOLEAN success = FALSE;
 
     // Warnings cannot be disabled for service deletion.
@@ -4004,7 +4005,9 @@ BOOLEAN PhUiDeleteService(
 
     if (serviceHandle)
     {
-        if (DeleteService(serviceHandle))
+        status = PhDeleteService(serviceHandle);
+
+        if (NT_SUCCESS(status))
             success = TRUE;
 
         PhCloseServiceHandle(serviceHandle);
@@ -4012,10 +4015,7 @@ BOOLEAN PhUiDeleteService(
 
     if (!success)
     {
-        NTSTATUS status;
         BOOLEAN connected;
-
-        status = PhGetLastWin32ErrorAsNtStatus();
 
         if (PhpShowErrorAndConnectToPhSvc(
             hWnd,
@@ -4411,22 +4411,24 @@ BOOLEAN PhUiSetBoostPriorityThreads(
         NTSTATUS status;
         HANDLE threadHandle;
 
-        if (NT_SUCCESS(status = PhOpenThread(
+        status = PhOpenThread(
             &threadHandle,
             THREAD_SET_LIMITED_INFORMATION,
             Threads[i]->ThreadId
-            )))
+            );
+
+        if (NT_SUCCESS(status))
         {
             status = PhSetThreadPriorityBoost(threadHandle, PriorityBoost);
             NtClose(threadHandle);
+        }
 
-            if (!NT_SUCCESS(status))
-            {
-                success = FALSE;
+        if (!NT_SUCCESS(status))
+        {
+            success = FALSE;
 
-                if (!PhpShowErrorThread(WindowHandle, L"change boost priority of", Threads[i], status, 0))
-                    break;
-            }
+            if (!PhpShowErrorThread(WindowHandle, L"change boost priority of", Threads[i], status, 0))
+                break;
         }
     }
 
@@ -4482,22 +4484,24 @@ BOOLEAN PhUiSetPriorityThreads(
         NTSTATUS status;
         HANDLE threadHandle;
 
-        if (NT_SUCCESS(status = PhOpenThread(
+        status = PhOpenThread(
             &threadHandle,
             THREAD_SET_LIMITED_INFORMATION,
             Threads[i]->ThreadId
-            )))
+            );
+
+        if (NT_SUCCESS(status))
         {
             status = PhSetThreadBasePriority(threadHandle, Increment);
             NtClose(threadHandle);
+        }
 
-            if (!NT_SUCCESS(status))
-            {
-                success = FALSE;
+        if (!NT_SUCCESS(status))
+        {
+            success = FALSE;
 
-                if (!PhpShowErrorThread(WindowHandle, L"change priority of", Threads[i], status, 0))
-                    break;
-            }
+            if (!PhpShowErrorThread(WindowHandle, L"change priority of", Threads[i], status, 0))
+                break;
         }
     }
 

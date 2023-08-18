@@ -287,7 +287,7 @@ VOID PhNfCreateIconThreadDelayed(
 }
 
 PPH_NF_ICON PhNfRegisterIcon(
-    _In_opt_ struct _PH_PLUGIN* Plugin,
+    _In_opt_ PPH_PLUGIN Plugin,
     _In_ ULONG Id,
     _In_ GUID Guid,
     _In_opt_ PVOID Context,
@@ -318,13 +318,13 @@ PPH_NF_ICON PhNfRegisterIcon(
 }
 
 PPH_NF_ICON PhNfPluginRegisterIcon(
-    _In_ struct _PH_PLUGIN* Plugin,
+    _In_ PPH_PLUGIN Plugin,
     _In_ ULONG SubId,
     _In_ GUID Guid,
     _In_opt_ PVOID Context,
     _In_ PWSTR Text,
     _In_ ULONG Flags,
-    _In_ struct _PH_NF_ICON_REGISTRATION_DATA* RegistrationData
+    _In_ PPH_NF_ICON_REGISTRATION_DATA RegistrationData
     )
 {
     return PhNfRegisterIcon(
@@ -410,10 +410,7 @@ VOID PhNfUninitialization(
     {
         PPH_NF_ICON icon = PhTrayIconItemList->Items[i];
 
-        if (!BooleanFlagOn(icon->Flags, PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE))
-            continue;
-
-        if (RtlInterlockedClearBits(&icon->Flags, PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE))
+        if (RtlInterlockedClearBits(&icon->Flags, PH_NF_ICON_ENABLED) == PH_NF_ICON_ENABLED)
         {
             PhNfpRemoveNotifyIcon(icon);
         }
@@ -540,7 +537,7 @@ VOID PhNfForwardMessage(
 
             PhPinMiniInformation(MiniInfoIconPinType, -1, 0, 0, NULL, NULL);
             GetCursorPos(&location);
-            PhShowIconContextMenu(location);
+            PhShowIconContextMenu(WindowHandle, location);
         }
         break;
     case NIN_KEYSELECT:
@@ -557,10 +554,10 @@ VOID PhNfForwardMessage(
             if (WindowsVersion >= WINDOWS_11_22H1)
             {
                 // NIN_POPUPOPEN is sent when the user hovers the cursor over an icon BUT Windows 11 either blocks the notification
-                // or ignores the hover time and displays the popup instantly. We try and workaround the missing hover time by using 
-                // a timer to delay the popup for 1 second. If we get a NIN_POPUPCLOSE then cancel the timer and the popup. 
-                // Note: We only workaround the missing hover time not the blocked/missing NIN_POPUPOPEN notifications. If we want to workaround 
-                // the broken NIN_POPUPOPEN notifications on Win11 the tray icons also send WM_MOUSEMOSE and before NIN_POPUPOPEN existed 
+                // or ignores the hover time and displays the popup instantly. We try and workaround the missing hover time by using
+                // a timer to delay the popup for 1 second. If we get a NIN_POPUPCLOSE then cancel the timer and the popup.
+                // Note: We only workaround the missing hover time not the blocked/missing NIN_POPUPOPEN notifications. If we want to workaround
+                // the broken NIN_POPUPOPEN notifications on Win11 the tray icons also send WM_MOUSEMOSE and before NIN_POPUPOPEN existed
                 // XP applications would compare the cursor position in a timer callback to show or hide the popup. (dmex)
 
                 PopupIconIndex = iconIndex;
@@ -677,7 +674,7 @@ BOOLEAN PhNfShowBalloonTip(
     notifyIcon.uTimeout = Timeout;
     notifyIcon.dwInfoFlags = NIIF_INFO;
 
-    Shell_NotifyIcon(NIM_MODIFY, &notifyIcon);
+    PhShellNotifyIcon(NIM_MODIFY, &notifyIcon);
 
     return TRUE;
 }
@@ -740,20 +737,34 @@ BOOLEAN PhNfIconsEnabled(
     VOID
     )
 {
-    BOOLEAN enabled = FALSE;
+    // Note: We can't check the list because delayed initialization (dmex)
+    //BOOLEAN enabled = FALSE;
+    //
+    //for (ULONG i = 0; i < PhTrayIconItemList->Count; i++)
+    //{
+    //    PPH_NF_ICON icon = PhTrayIconItemList->Items[i];
+    //
+    //    if (BooleanFlagOn(icon->Flags, PH_NF_ICON_ENABLED))
+    //    {
+    //        enabled = TRUE;
+    //        break;
+    //    }
+    //}
+    //
+    //return enabled;
 
-    for (ULONG i = 0; i < PhTrayIconItemList->Count; i++)
+    PPH_STRING settingsString;
+
+    settingsString = PhGetStringSetting(L"IconSettings");
+
+    if (PhIsNullOrEmptyString(settingsString))
     {
-        PPH_NF_ICON icon = PhTrayIconItemList->Items[i];
-
-        if (BooleanFlagOn(icon->Flags, PH_NF_ICON_ENABLED))
-        {
-            enabled = TRUE;
-            break;
-        }
+        PhClearReference(&settingsString);
+        return FALSE;
     }
 
-    return enabled;
+    PhClearReference(&settingsString);
+    return TRUE;
 }
 
 VOID PhNfNotifyMiniInfoPinned(
@@ -951,9 +962,9 @@ BOOLEAN PhNfpAddNotifyIcon(
     if (!PhNfMiniInfoEnabled || PhNfMiniInfoPinned || (Icon->Flags & PH_NF_ICON_NOSHOW_MINIINFO))
         notifyIcon.uFlags |= NIF_SHOWTIP;
 
-    Shell_NotifyIcon(NIM_ADD, &notifyIcon);
+    PhShellNotifyIcon(NIM_ADD, &notifyIcon);
     notifyIcon.uVersion = NOTIFYICON_VERSION_4;
-    Shell_NotifyIcon(NIM_SETVERSION, &notifyIcon);
+    PhShellNotifyIcon(NIM_SETVERSION, &notifyIcon);
 
     return TRUE;
 }
@@ -975,7 +986,7 @@ BOOLEAN PhNfpRemoveNotifyIcon(
         notifyIcon.guidItem = Icon->IconGuid;
     }
 
-    Shell_NotifyIcon(NIM_DELETE, &notifyIcon);
+    PhShellNotifyIcon(NIM_DELETE, &notifyIcon);
 
     return TRUE;
 }
@@ -1020,11 +1031,11 @@ BOOLEAN PhNfpModifyNotifyIcon(
             );
     }
 
-    if (!Shell_NotifyIcon(NIM_MODIFY, &notifyIcon))
+    if (!PhShellNotifyIcon(NIM_MODIFY, &notifyIcon))
     {
         // Explorer probably died and we lost our icon. Try to add the icon, and try again.
         PhNfpAddNotifyIcon(Icon);
-        Shell_NotifyIcon(NIM_MODIFY, &notifyIcon);
+        PhShellNotifyIcon(NIM_MODIFY, &notifyIcon);
     }
 
     return TRUE;
@@ -1143,10 +1154,7 @@ NTSTATUS PhNfpTrayIconUpdateThread(
     {
         PPH_NF_ICON icon = PhTrayIconItemList->Items[i];
 
-        if (!BooleanFlagOn(icon->Flags, PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE))
-            continue;
-
-        if (RtlInterlockedClearBits(&icon->Flags, PH_NF_ICON_ENABLED | PH_NF_ICON_UNAVAILABLE))
+        if (RtlInterlockedClearBits(&icon->Flags, PH_NF_ICON_ENABLED) == PH_NF_ICON_ENABLED)
         {
             PhNfpRemoveNotifyIcon(icon);
         }
@@ -1163,7 +1171,7 @@ VOID PhNfpProcessesUpdatedHandler(
 {
     static ULONG processesUpdatedCount = 0;
 
-    // Update the icons on a separate thread so we don't block the main window 
+    // Update the icons on a separate thread so we don't block the main window
     // or provider threads when explorer is not responding. (dmex)
 
     if (processesUpdatedCount != 3)
@@ -1330,7 +1338,7 @@ VOID PhNfpBeginBitmap2(
 }
 
 VOID PhNfpCpuHistoryIconUpdateCallback(
-    _In_ struct _PH_NF_ICON *Icon,
+    _In_ PPH_NF_ICON Icon,
     _Out_ PVOID *NewIconOrBitmap,
     _Out_ PULONG Flags,
     _Out_ PPH_STRING *NewText,
@@ -1426,7 +1434,7 @@ VOID PhNfpCpuHistoryIconUpdateCallback(
 }
 
 VOID PhNfpIoHistoryIconUpdateCallback(
-    _In_ struct _PH_NF_ICON *Icon,
+    _In_ PPH_NF_ICON Icon,
     _Out_ PVOID *NewIconOrBitmap,
     _Out_ PULONG Flags,
     _Out_ PPH_STRING *NewText,
@@ -1538,7 +1546,7 @@ VOID PhNfpIoHistoryIconUpdateCallback(
 }
 
 VOID PhNfpCommitHistoryIconUpdateCallback(
-    _In_ struct _PH_NF_ICON *Icon,
+    _In_ PPH_NF_ICON Icon,
     _Out_ PVOID *NewIconOrBitmap,
     _Out_ PULONG Flags,
     _Out_ PPH_STRING *NewText,
@@ -1615,7 +1623,7 @@ VOID PhNfpCommitHistoryIconUpdateCallback(
 }
 
 VOID PhNfpPhysicalHistoryIconUpdateCallback(
-    _In_ struct _PH_NF_ICON *Icon,
+    _In_ PPH_NF_ICON Icon,
     _Out_ PVOID *NewIconOrBitmap,
     _Out_ PULONG Flags,
     _Out_ PPH_STRING *NewText,
@@ -1694,7 +1702,7 @@ VOID PhNfpPhysicalHistoryIconUpdateCallback(
 }
 
 VOID PhNfpCpuUsageIconUpdateCallback(
-    _In_ struct _PH_NF_ICON *Icon,
+    _In_ PPH_NF_ICON Icon,
     _Out_ PVOID *NewIconOrBitmap,
     _Out_ PULONG Flags,
     _Out_ PPH_STRING *NewText,
@@ -1841,7 +1849,7 @@ VOID PhNfpCpuUsageIconUpdateCallback(
 // Text icons
 
 VOID PhNfpCpuUsageTextIconUpdateCallback(
-    _In_ struct _PH_NF_ICON *Icon,
+    _In_ PPH_NF_ICON Icon,
     _Out_ PVOID *NewIconOrBitmap,
     _Out_ PULONG Flags,
     _Out_ PPH_STRING *NewText,
@@ -1933,7 +1941,7 @@ VOID PhNfpCpuUsageTextIconUpdateCallback(
 }
 
 VOID PhNfpIoUsageTextIconUpdateCallback(
-    _In_ struct _PH_NF_ICON *Icon,
+    _In_ PPH_NF_ICON Icon,
     _Out_ PVOID *NewIconOrBitmap,
     _Out_ PULONG Flags,
     _Out_ PPH_STRING *NewText,
@@ -2021,7 +2029,7 @@ VOID PhNfpIoUsageTextIconUpdateCallback(
 }
 
 VOID PhNfpCommitTextIconUpdateCallback(
-    _In_ struct _PH_NF_ICON *Icon,
+    _In_ PPH_NF_ICON Icon,
     _Out_ PVOID *NewIconOrBitmap,
     _Out_ PULONG Flags,
     _Out_ PPH_STRING *NewText,
@@ -2086,7 +2094,7 @@ VOID PhNfpCommitTextIconUpdateCallback(
 }
 
 VOID PhNfpPhysicalUsageTextIconUpdateCallback(
-    _In_ struct _PH_NF_ICON *Icon,
+    _In_ PPH_NF_ICON Icon,
     _Out_ PVOID *NewIconOrBitmap,
     _Out_ PULONG Flags,
     _Out_ PPH_STRING *NewText,
@@ -2156,15 +2164,23 @@ VOID PhNfpPhysicalUsageTextIconUpdateCallback(
 }
 
 VOID PhNfpPlainIconUpdateCallback(
-    _In_ struct _PH_NF_ICON *Icon,
+    _In_ PPH_NF_ICON Icon,
     _Out_ PVOID *NewIconOrBitmap,
     _Out_ PULONG Flags,
     _Out_ PPH_STRING *NewText,
     _In_opt_ PVOID Context
     )
 {
+    static PPH_STRING string = NULL;
+
+    if (!string)
+    {
+        PH_STRINGREF text = PH_STRINGREF_INIT(L"System Informer");
+        string = PhCreateString2(&text);
+    }
+
     *NewIconOrBitmap = PhGetApplicationIcon(TRUE);
-    *NewText = PhCreateString(L"System Informer");
+    *NewText = PhReferenceObject(string);
     *Flags = 0;
 }
 
@@ -2285,8 +2301,8 @@ VOID PhNfpIconShowPopupHoverTimerProc(
     POINT location;
 
     if (
-        PhNfMiniInfoEnabled && !IconDisableHover && 
-        PopupIconIndex != ULONG_MAX && PopupRegisteredIcon && 
+        PhNfMiniInfoEnabled && !IconDisableHover &&
+        PopupIconIndex != ULONG_MAX && PopupRegisteredIcon &&
         PhNfpGetShowMiniInfoSectionData(PopupIconIndex, PopupRegisteredIcon, &showMiniInfoSectionData)
         )
     {

@@ -72,7 +72,7 @@ BOOLEAN FwTabPageCallback(
                 0,
                 3,
                 3,
-                PhMainWndHandle,
+                Parameter2,
                 NULL,
                 PluginInstance->DllBase,
                 &treelistCreateParams
@@ -101,7 +101,11 @@ BOOLEAN FwTabPageCallback(
                     EtFwEnabled = TRUE;
             }
 
-            if (!EtFwEnabled)
+            if (EtFwEnabled)
+            {
+                EtFwMonitorEnumEvents();
+            }
+            else
             {
                 if (EtFwStatus != ERROR_SUCCESS)
                 {
@@ -281,6 +285,9 @@ VOID InitializeFwTreeList(
     PhAddTreeNewColumn(FwTreeNewHandle, FW_COLUMN_REMOTEADDRESSCLASS, FALSE, L"Remote address class", 80, PH_ALIGN_LEFT, FW_COLUMN_REMOTEADDRESSCLASS, 0);
     PhAddTreeNewColumn(FwTreeNewHandle, FW_COLUMN_LOCALADDRESSSSCOPE, FALSE, L"Local address scope", 80, PH_ALIGN_LEFT, FW_COLUMN_LOCALADDRESSSSCOPE, 0);
     PhAddTreeNewColumn(FwTreeNewHandle, FW_COLUMN_REMOTEADDRESSSCOPE, FALSE, L"Remote address scope", 80, PH_ALIGN_LEFT, FW_COLUMN_REMOTEADDRESSSCOPE, 0);
+    PhAddTreeNewColumn(FwTreeNewHandle, FW_COLUMN_ORIGINALNAME, FALSE, L"Original name", 100, PH_ALIGN_LEFT, FW_COLUMN_ORIGINALNAME, DT_PATH_ELLIPSIS);
+    PhAddTreeNewColumn(FwTreeNewHandle, FW_COLUMN_LOCALSERVICENAME, FALSE, L"Local port service", 80, PH_ALIGN_LEFT, FW_COLUMN_LOCALSERVICENAME, 0);
+    PhAddTreeNewColumn(FwTreeNewHandle, FW_COLUMN_REMOTESERVICENAME, FALSE, L"Remote port service", 80, PH_ALIGN_LEFT, FW_COLUMN_REMOTESERVICENAME, 0);
 
     TreeNew_SetRedraw(FwTreeNewHandle, TRUE);
     TreeNew_SetSort(FwTreeNewHandle, FW_COLUMN_TIMESTAMP, NoSortOrder);
@@ -401,7 +408,7 @@ VOID FwTickNodes(
         static ULONG64 lastTickCount = 0;
         ULONG64 tickCount = NtGetTickCount64();
 
-        if (tickCount - lastTickCount >= 120 * CLOCKS_PER_SEC)
+        if (tickCount - lastTickCount >= UInt32x32To64(240, CLOCKS_PER_SEC))
         {
             PPH_LIST newList;
             PPH_LIST oldList;
@@ -432,6 +439,67 @@ VOID FwTickNodes(
     TreeNew_NodesStructured(FwTreeNewHandle);
 }
 
+VOID FwUpdateNodeTimeStamp(
+    _In_ PFW_EVENT_ITEM FwNode
+    )
+{
+    SYSTEMTIME systemTime;
+
+    PhLargeIntegerToLocalSystemTime(&systemTime, &FwNode->TimeStamp);
+
+    PhMoveReference(&FwNode->TimeString, PhFormatDateTime(&systemTime));
+}
+
+VOID FwUpdateNodeUserSid(
+    _In_ PFW_EVENT_ITEM FwNode
+    )
+{
+    if (FwNode->UserSid)
+    {
+        PhMoveReference(&FwNode->UserName, EtFwGetSidFullNameCachedSlow(FwNode->UserSid));
+    }
+    else
+    {
+        PhClearReference(&FwNode->UserName);
+    }
+}
+
+VOID FwUpdateNodeLocalPortServiceName(
+    _In_ PFW_EVENT_ITEM FwNode
+    )
+{
+    if (!FwNode->LocalPortServiceResolved)
+    {
+        PH_STRINGREF string;
+
+        if (EtFwLookupPortServiceName(FwNode->LocalEndpoint.Port, &string))
+        {
+            FwNode->LocalPortServiceName.Buffer = string.Buffer;
+            FwNode->LocalPortServiceName.Length = string.Length;
+        }
+
+        FwNode->LocalPortServiceResolved = TRUE;
+    }
+}
+
+VOID FwUpdateNodeRemotePortServiceName(
+    _In_ PFW_EVENT_ITEM FwNode
+    )
+{
+    if (!FwNode->RemotePortServiceResolved)
+    {
+        PH_STRINGREF string;
+
+        if (EtFwLookupPortServiceName(FwNode->RemoteEndpoint.Port, &string))
+        {
+            FwNode->RemotePortServiceName.Buffer = string.Buffer;
+            FwNode->RemotePortServiceName.Length = string.Length;
+        }
+
+        FwNode->RemotePortServiceResolved = TRUE;
+    }
+}
+
 #define SORT_FUNCTION(Column) FwTreeNewCompare##Column
 #define BEGIN_SORT_FUNCTION(Column) static int __cdecl FwTreeNewCompare##Column( \
     _In_ void* _context, \
@@ -452,7 +520,7 @@ VOID FwTickNodes(
 
 BEGIN_SORT_FUNCTION(Name)
 {
-    sortResult = PhCompareStringZ(PhGetStringOrDefault(node1->ProcessBaseString, L"System"), PhGetStringOrDefault(node2->ProcessBaseString, L"System"), TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->ProcessBaseString, node2->ProcessBaseString, FwTreeNewSortOrder, FALSE);
 }
 END_SORT_FUNCTION
 
@@ -470,35 +538,44 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RuleName)
 {
-    sortResult = PhCompareStringWithNull(node1->RuleName, node2->RuleName, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->RuleName, node2->RuleName, FwTreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RuleDescription)
 {
-    sortResult = PhCompareStringWithNull(node1->RuleDescription, node2->RuleDescription, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->RuleDescription, node2->RuleDescription, FwTreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(LocalAddress)
 {
-    SOCKADDR_IN6 localAddress1 = { 0 };
-    SOCKADDR_IN6 localAddress2 = { 0 };
+    SOCKADDR_IN6 localAddress1;
+    SOCKADDR_IN6 localAddress2;
 
-    if (node1->LocalEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
+    memset(&localAddress1, 0, sizeof(SOCKADDR_IN6)); // memset for zero padding (dmex)
+    memset(&localAddress2, 0, sizeof(SOCKADDR_IN6));
+
+    if (node1->LocalEndpoint.Address.Type == PH_IPV4_NETWORK_TYPE)
     {
-        IN6ADDR_SETV4MAPPED(&localAddress1, &node1->LocalEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
+        localAddress1.sin6_family = AF_INET6;
+        IN6_SET_ADDR_V4COMPAT(&localAddress1.sin6_addr, &node1->LocalEndpoint.Address.InAddr);
+        IN4_UNCANONICALIZE_SCOPE_ID(&node1->LocalEndpoint.Address.InAddr, &localAddress1.sin6_scope_struct);
+        //IN6ADDR_SETV4MAPPED(&localAddress1, &node1->LocalEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
     }
-    else if (node1->LocalEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
+    else if (node1->LocalEndpoint.Address.Type == PH_IPV6_NETWORK_TYPE)
     {
         IN6ADDR_SETSOCKADDR(&localAddress1, &node1->LocalEndpoint.Address.In6Addr, (SCOPE_ID){ .Value = node1->ScopeId }, 0);
     }
 
-    if (node2->LocalEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
+    if (node2->LocalEndpoint.Address.Type == PH_IPV4_NETWORK_TYPE)
     {
-        IN6ADDR_SETV4MAPPED(&localAddress2, &node2->LocalEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
+        localAddress2.sin6_family = AF_INET6;
+        IN6_SET_ADDR_V4COMPAT(&localAddress2.sin6_addr, &node2->LocalEndpoint.Address.InAddr);
+        IN4_UNCANONICALIZE_SCOPE_ID(&node2->LocalEndpoint.Address.InAddr, &localAddress2.sin6_scope_struct);
+        //IN6ADDR_SETV4MAPPED(&localAddress2, &node2->LocalEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
     }
-    else if (node2->LocalEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
+    else if (node2->LocalEndpoint.Address.Type == PH_IPV6_NETWORK_TYPE)
     {
         IN6ADDR_SETSOCKADDR(&localAddress2, &node2->LocalEndpoint.Address.In6Addr, (SCOPE_ID){ .Value = node2->ScopeId }, 0);
     }
@@ -515,27 +592,36 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(LocalHostname)
 {
-    sortResult = PhCompareStringWithNull(node1->LocalHostnameString, node2->LocalHostnameString, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->LocalHostnameString, node2->LocalHostnameString, FwTreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RemoteAddress)
 {
-    SOCKADDR_IN6 remoteAddress1 = { 0 };
-    SOCKADDR_IN6 remoteAddress2 = { 0 };
+    SOCKADDR_IN6 remoteAddress1;
+    SOCKADDR_IN6 remoteAddress2;
 
-    if (node1->RemoteEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
+    memset(&remoteAddress1, 0, sizeof(SOCKADDR_IN6)); // memset for zero padding (dmex)
+    memset(&remoteAddress2, 0, sizeof(SOCKADDR_IN6));
+
+    if (node1->RemoteEndpoint.Address.Type == PH_IPV4_NETWORK_TYPE)
     {
-        IN6ADDR_SETV4MAPPED(&remoteAddress1, &node1->RemoteEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
+        remoteAddress1.sin6_family = AF_INET6;
+        IN6_SET_ADDR_V4COMPAT(&remoteAddress1.sin6_addr, &node1->RemoteEndpoint.Address.InAddr);
+        IN4_UNCANONICALIZE_SCOPE_ID(&node1->RemoteEndpoint.Address.InAddr, &remoteAddress1.sin6_scope_struct);
+        //IN6ADDR_SETV4MAPPED(&remoteAddress1, &node1->RemoteEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
     }
     else if (node1->RemoteEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
     {
         IN6ADDR_SETSOCKADDR(&remoteAddress1, &node1->RemoteEndpoint.Address.In6Addr, (SCOPE_ID){ .Value = node1->ScopeId }, 0);
     }
 
-    if (node2->RemoteEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
+    if (node2->RemoteEndpoint.Address.Type == PH_IPV4_NETWORK_TYPE)
     {
-        IN6ADDR_SETV4MAPPED(&remoteAddress2, &node2->RemoteEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
+        remoteAddress2.sin6_family = AF_INET6;
+        IN6_SET_ADDR_V4COMPAT(&remoteAddress2.sin6_addr, &node2->RemoteEndpoint.Address.InAddr);
+        IN4_UNCANONICALIZE_SCOPE_ID(&node2->RemoteEndpoint.Address.InAddr, &remoteAddress2.sin6_scope_struct);
+        //IN6ADDR_SETV4MAPPED(&remoteAddress2, &node2->RemoteEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
     }
     else if (node2->RemoteEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
     {
@@ -554,7 +640,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RemoteHostname)
 {
-    sortResult = PhCompareStringWithNull(node1->RemoteHostnameString, node2->RemoteHostnameString, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->RemoteHostnameString, node2->RemoteHostnameString, FwTreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -566,19 +652,25 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Timestamp)
 {
+    FwUpdateNodeTimeStamp(node1);
+    FwUpdateNodeTimeStamp(node2);
+
     sortResult = uint64cmp(node1->Index, node2->Index);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Filename)
 {
-    sortResult = PhCompareStringWithNull(node1->ProcessFileName, node2->ProcessFileName, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->ProcessFileName, node2->ProcessFileName, FwTreeNewSortOrder, FALSE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(User)
 {
-    sortResult = PhCompareStringWithNull(node1->UserName, node2->UserName, TRUE);
+    FwUpdateNodeUserSid(node1);
+    FwUpdateNodeUserSid(node2);
+
+    sortResult = PhCompareStringWithNullSortOrder(node1->UserName, node2->UserName, FwTreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -590,31 +682,49 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Country)
 {
-    sortResult = PhCompareStringWithNull(node1->RemoteCountryName, node2->RemoteCountryName, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->RemoteCountryName, node2->RemoteCountryName, FwTreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(LocalAddressClass)
 {
-
+    NOTHING;
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RemoteAddressClass)
 {
-
+    NOTHING;
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(LocalAddressScope)
 {
-
+    NOTHING;
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RemoteAddressScope)
 {
+    NOTHING;
+}
+END_SORT_FUNCTION
 
+BEGIN_SORT_FUNCTION(LocalPortServiceName)
+{
+    FwUpdateNodeLocalPortServiceName(node1);
+    FwUpdateNodeLocalPortServiceName(node2);
+
+    sortResult = PhCompareStringRefWithNullSortOrder(&node1->LocalPortServiceName, &node2->LocalPortServiceName, FwTreeNewSortOrder, TRUE);
+}
+END_SORT_FUNCTION
+
+BEGIN_SORT_FUNCTION(RemotePortServiceName)
+{
+    FwUpdateNodeRemotePortServiceName(node1);
+    FwUpdateNodeRemotePortServiceName(node2);
+
+    sortResult = PhCompareStringRefWithNullSortOrder(&node1->RemotePortServiceName, &node2->RemotePortServiceName, FwTreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -626,7 +736,7 @@ int __cdecl EtFwNodeNoOrderSortFunction(
 {
     PFW_EVENT_ITEM node1 = *(PFW_EVENT_ITEM*)_elem1;
     PFW_EVENT_ITEM node2 = *(PFW_EVENT_ITEM*)_elem2;
-    int sortResult = 0;
+    int sortResult;
 
     sortResult = uint64cmp(node1->Index, node2->Index);
 
@@ -687,8 +797,13 @@ BOOLEAN NTAPI FwTreeNewCallback(
                         SORT_FUNCTION(RemoteAddressClass),
                         SORT_FUNCTION(LocalAddressScope),
                         SORT_FUNCTION(RemoteAddressScope),
+                        SORT_FUNCTION(Filename),
+                        SORT_FUNCTION(LocalPortServiceName),
+                        SORT_FUNCTION(RemotePortServiceName),
                     };
                     int (__cdecl* sortFunction)(void*, void const*, void const*);
+
+                    static_assert(RTL_NUMBER_OF(sortFunctions) == FW_COLUMN_MAXIMUM, "SortFunctions must equal maximum.");
 
                     if (FwTreeNewSortColumn < FW_COLUMN_MAXIMUM)
                         sortFunction = sortFunctions[FwTreeNewSortColumn];
@@ -722,10 +837,7 @@ BOOLEAN NTAPI FwTreeNewCallback(
             {
             case FW_COLUMN_NAME:
                 {
-                    if (PhIsNullOrEmptyString(node->ProcessBaseString))
-                        PhInitializeStringRef(&getCellText->Text, L"System");
-                    else
-                        getCellText->Text = PhGetStringRef(node->ProcessBaseString);
+                    getCellText->Text = PhGetStringRef(node->ProcessBaseString);
                 }
                 break;
             case FW_COLUMN_ACTION:
@@ -765,17 +877,37 @@ BOOLEAN NTAPI FwTreeNewCallback(
                 {
                     if (node->Loopback)
                     {
-                        PhInitializeStringRef(&getCellText->Text, L"Loopback");
+                        switch (node->Direction)
+                        {
+                        case FW_EVENT_DIRECTION_INBOUND:
+                            PhInitializeStringRef(&getCellText->Text, L"Loopback [In]");
+                            break;
+                        case FW_EVENT_DIRECTION_OUTBOUND:
+                            PhInitializeStringRef(&getCellText->Text, L"Loopback [Out]");
+                            break;
+                        case FW_EVENT_DIRECTION_FORWARD:
+                            PhInitializeStringRef(&getCellText->Text, L"Loopback [Fwd]");
+                            break;
+                        case FW_EVENT_DIRECTION_BIDIRECTIONAL:
+                            PhInitializeStringRef(&getCellText->Text, L"Loopback [Bi]");
+                            break;
+                        }
                     }
                     else
                     {
                         switch (node->Direction)
                         {
-                        case FWP_DIRECTION_INBOUND:
+                        case FW_EVENT_DIRECTION_INBOUND:
                             PhInitializeStringRef(&getCellText->Text, L"In");
                             break;
-                        case FWP_DIRECTION_OUTBOUND:
+                        case FW_EVENT_DIRECTION_OUTBOUND:
                             PhInitializeStringRef(&getCellText->Text, L"Out");
+                            break;
+                        case FW_EVENT_DIRECTION_FORWARD:
+                            PhInitializeStringRef(&getCellText->Text, L"Fwd");
+                            break;
+                        case FW_EVENT_DIRECTION_BIDIRECTIONAL:
+                            PhInitializeStringRef(&getCellText->Text, L"Bi");
                             break;
                         }
                     }
@@ -1018,11 +1150,7 @@ BOOLEAN NTAPI FwTreeNewCallback(
                 break;
            case FW_COLUMN_TIMESTAMP:
                {
-                   SYSTEMTIME systemTime;
-
-                   PhLargeIntegerToLocalSystemTime(&systemTime, &node->TimeStamp);
-                   PhMoveReference(&node->TimeString, PhFormatDateTime(&systemTime));
-
+                   FwUpdateNodeTimeStamp(node);
                    getCellText->Text = PhGetStringRef(node->TimeString);
                }
                break;
@@ -1033,11 +1161,7 @@ BOOLEAN NTAPI FwTreeNewCallback(
                break;
            case FW_COLUMN_USER:
                {
-                   if (node->UserSid)
-                   {
-                       PhMoveReference(&node->UserName, EtFwGetSidFullNameCachedSlow(node->UserSid));
-                   }
-
+                   FwUpdateNodeUserSid(node);
                    getCellText->Text = PhGetStringRef(node->UserName);
                }
                break;
@@ -1113,6 +1237,23 @@ BOOLEAN NTAPI FwTreeNewCallback(
                    {
                        PhInitializeEmptyStringRef(&getCellText->Text);
                    }
+               }
+               break;
+           case FW_COLUMN_ORIGINALNAME:
+               {
+                   getCellText->Text = PhGetStringRef(node->ProcessFileName);
+               }
+               break;
+           case FW_COLUMN_LOCALSERVICENAME:
+               {
+                   FwUpdateNodeLocalPortServiceName(node);
+                   getCellText->Text = node->LocalPortServiceName;
+               }
+               break;
+           case FW_COLUMN_REMOTESERVICENAME:
+               {
+                   FwUpdateNodeRemotePortServiceName(node);
+                   getCellText->Text = node->RemotePortServiceName;
                }
                break;
             default:
@@ -1265,17 +1406,7 @@ BOOLEAN NTAPI FwTreeNewCallback(
             // Padding
             rect.left += FwTreeRightMarginPadding;
 
-            if (PhIsNullOrEmptyString(node->ProcessBaseString))
-            {
-                DrawText(
-                    hdc,
-                    L"System",
-                    (UINT)sizeof(L"System") / sizeof(WCHAR),
-                    &rect,
-                    DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS | DT_SINGLELINE
-                    );
-            }
-            else
+            if (!PhIsNullOrEmptyString(node->ProcessBaseString))
             {
                 DrawText(
                     hdc,
@@ -1395,6 +1526,7 @@ VOID EtFwWriteFwList(
 
     PhDereferenceObject(lines);
 }
+
 typedef enum _FW_ITEM_COMMAND_ID
 {
     FW_ITEM_COMMAND_ID_PING = 1,
@@ -1797,7 +1929,7 @@ BOOLEAN NTAPI FwSearchFilterCallback(
             return TRUE;
     }
 
-    if (fwNode->LocalAddressString[0] && fwNode->LocalAddressStringLength)
+    if (fwNode->LocalAddressStringLength)
     {
         PH_STRINGREF localAddressSr;
 
@@ -1814,7 +1946,7 @@ BOOLEAN NTAPI FwSearchFilterCallback(
             return TRUE;
     }
 
-    if (fwNode->RemoteAddressString[0] && fwNode->RemoteAddressStringLength)
+    if (fwNode->RemoteAddressStringLength)
     {
         PH_STRINGREF remoteAddressSr;
 

@@ -345,6 +345,8 @@ BOOLEAN NTAPI PhpHandleObjectTreeNewCallback(
                 };
                 int (__cdecl *sortFunction)(void *, const void *, const void *);
 
+                static_assert(RTL_NUMBER_OF(sortFunctions) == PH_OBJECT_SEARCH_TREE_COLUMN_MAXIMUM, "SortFunctions must equal maximum.");
+
                 if (context->TreeNewSortColumn < PH_OBJECT_SEARCH_TREE_COLUMN_MAXIMUM)
                     sortFunction = sortFunctions[context->TreeNewSortColumn];
                 else
@@ -1247,7 +1249,7 @@ INT_PTR CALLBACK PhpFindObjectsDlgProc(
             context->SearchResults = PhCreateList(128);
             context->SearchResultsAddIndex = 0;
 
-            PhSetTimer(hwndDlg, 1, 1000, NULL);
+            PhSetTimer(hwndDlg, PH_WINDOW_TIMER_DEFAULT, 1000, NULL);
 
             Edit_SetSel(context->SearchWindowHandle, 0, -1);
             Button_SetCheck(GetDlgItem(hwndDlg, IDC_REGEX), PhGetIntegerSetting(L"FindObjRegex") ? BST_CHECKED : BST_UNCHECKED);
@@ -1259,7 +1261,7 @@ INT_PTR CALLBACK PhpFindObjectsDlgProc(
         {
             context->SearchStop = TRUE;
 
-            PhKillTimer(hwndDlg, 1);
+            PhKillTimer(hwndDlg, PH_WINDOW_TIMER_DEFAULT);
 
             if (context->SearchThreadHandle)
             {
@@ -1323,7 +1325,7 @@ INT_PTR CALLBACK PhpFindObjectsDlgProc(
         {
             if (context->SearchThreadHandle)
             {
-                SetCursor(LoadCursor(NULL, IDC_APPSTARTING));
+                PhSetCursor(PhLoadCursor(NULL, IDC_APPSTARTING));
                 SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, TRUE);
                 return TRUE;
             }
@@ -1414,7 +1416,7 @@ INT_PTR CALLBACK PhpFindObjectsDlgProc(
 
                         PhSetDialogItemText(hwndDlg, IDOK, L"Cancel");
 
-                        SetCursor(LoadCursor(NULL, IDC_APPSTARTING));
+                        PhSetCursor(PhLoadCursor(NULL, IDC_APPSTARTING));
                     }
                     else
                     {
@@ -1476,8 +1478,22 @@ INT_PTR CALLBACK PhpFindObjectsDlgProc(
                 {
                     PPH_HANDLE_OBJECT_TREE_ROOT_NODE *handleObjectNodes = NULL;
                     ULONG numberOfHandleObjectNodes = 0;
+                    BOOLEAN allCanBeClosed = TRUE;
 
                     if (!PhpGetSelectedHandleObjectNodes(context, &handleObjectNodes, &numberOfHandleObjectNodes))
+                        break;
+
+                    // Check the item called by TreeNewKeyDown is valid (dmex)
+                    for (ULONG i = 0; i < numberOfHandleObjectNodes; i++)
+                    {
+                        if (handleObjectNodes[i]->ResultType != HandleSearchResult)
+                        {
+                            allCanBeClosed = FALSE;
+                            break;
+                        }
+                    }
+
+                    if (!allCanBeClosed)
                         break;
 
                     if (numberOfHandleObjectNodes != 0 && PhShowConfirmMessage(
@@ -1694,11 +1710,18 @@ INT_PTR CALLBACK PhpFindObjectsDlgProc(
         break;
     case WM_TIMER:
         {
-            if (!context->SearchThreadHandle)
-                break;
+            switch (wParam)
+            {
+            case PH_WINDOW_TIMER_DEFAULT:
+                {
+                    if (!context->SearchThreadHandle)
+                        break;
 
-            // Update the search results.
-            PhpFindObjectAddResultEntries(context);
+                    // Update the search results.
+                    PhpFindObjectAddResultEntries(context);
+                }
+                break;
+            }
         }
         break;
     case WM_PH_SEARCH_FINISHED:
@@ -1721,7 +1744,7 @@ INT_PTR CALLBACK PhpFindObjectsDlgProc(
             PhSetDialogItemText(hwndDlg, IDOK, L"Find");
             EnableWindow(GetDlgItem(hwndDlg, IDOK), TRUE);
 
-            SetCursor(LoadCursor(NULL, IDC_ARROW));
+            PhSetCursor(PhLoadCursor(NULL, IDC_ARROW));
 
             if ((NTSTATUS)wParam == STATUS_INSUFFICIENT_RESOURCES)
             {

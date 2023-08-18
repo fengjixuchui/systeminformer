@@ -8,7 +8,6 @@
  */
 
 #pragma once
-#include <kphosver.h>
 extern ULONG KphDynObDecodeShift;
 extern ULONG KphDynObAttributesShift;
 
@@ -25,6 +24,16 @@ typedef struct _CLIENT_ID64
 } CLIENT_ID64, *PCLIENT_ID64;
 
 // EX
+
+typedef struct _EX_FAST_REF
+{
+    union
+    {
+        PVOID Object;
+        ULONG_PTR RefCnt : 4;
+        ULONG_PTR Value;
+    };
+} EX_FAST_REF, *PEX_FAST_REF;
 
 typedef struct _EX_PUSH_LOCK_WAIT_BLOCK *PEX_PUSH_LOCK_WAIT_BLOCK;
 
@@ -53,19 +62,6 @@ typedef struct _HANDLE_TABLE_ENTRY
 
 typedef struct _HANDLE_TABLE HANDLE_TABLE, *PHANDLE_TABLE;
 
-typedef
-_Function_class_(EX_ENUM_HANDLE_CALLBACK_61)
-_Must_inspect_result_
-BOOLEAN
-NTAPI
-EX_ENUM_HANDLE_CALLBACK_61(
-    _Inout_ PHANDLE_TABLE_ENTRY HandleTableEntry,
-    _In_ HANDLE Handle,
-    _In_opt_ PVOID Context
-    );
-typedef EX_ENUM_HANDLE_CALLBACK_61* PEX_ENUM_HANDLE_CALLBACK_61;
-
-// since WIN8
 typedef
 _Function_class_(EX_ENUM_HANDLE_CALLBACK)
 _Must_inspect_result_
@@ -115,17 +111,6 @@ ZwQuerySection(
 extern POBJECT_TYPE *IoDriverObjectType;
 extern POBJECT_TYPE *IoDeviceObjectType;
 
-typedef
-_Function_class_(IO_QUERY_FULL_DRIVER_PATH)
-_IRQL_always_function_max_(APC_LEVEL)
-NTSTATUS
-NTAPI
-IO_QUERY_FULL_DRIVER_PATH(
-    _In_ PDRIVER_OBJECT DriverObject,
-    _Out_ PUNICODE_STRING FullPath
-    );
-typedef IO_QUERY_FULL_DRIVER_PATH *PIO_QUERY_FULL_DRIVER_PATH;
-
 // KE
 
 typedef enum _KAPC_ENVIRONMENT
@@ -134,7 +119,6 @@ typedef enum _KAPC_ENVIRONMENT
     AttachedApcEnvironment,
     CurrentApcEnvironment,
     InsertApcEnvironment
-
 } KAPC_ENVIRONMENT, *PKAPC_ENVIRONMENT;
 
 typedef
@@ -224,7 +208,8 @@ KeTestAlertThread (
     ((Access) & OBJ_GRANTED_ACCESS_MASK)
 
 FORCEINLINE
-VOID ObpSetGrantedAccess(
+VOID 
+ObpSetGrantedAccess(
     _Inout_ PACCESS_MASK GrantedAccess,
     _In_ ACCESS_MASK Access
     )
@@ -236,25 +221,20 @@ VOID ObpSetGrantedAccess(
 }
 
 FORCEINLINE
-PVOID ObpDecodeObject(
+_Must_inspect_result_
+PVOID 
+ObpDecodeObject(
     _In_ PVOID Object
     )
 {
 #if (defined _M_X64) || (defined _M_ARM64)
-    if (KphOsVersion >= KphWin8)
+    if (KphDynObDecodeShift != ULONG_MAX)
     {
-        if (KphDynObDecodeShift != ULONG_MAX)
-        {
-            return (PVOID)(((LONG_PTR)Object >> KphDynObDecodeShift) & ~(ULONG_PTR)0xf);
-        }
-        else
-        {
-            return NULL;
-        }
+        return (PVOID)(((LONG_PTR)Object >> KphDynObDecodeShift) & ~(ULONG_PTR)0xf);
     }
     else
     {
-        return (PVOID)((ULONG_PTR)Object & ~OBJ_HANDLE_ATTRIBUTES);
+        return NULL;
     }
 #else
     return (PVOID)((ULONG_PTR)Object & ~OBJ_HANDLE_ATTRIBUTES);
@@ -262,26 +242,20 @@ PVOID ObpDecodeObject(
 }
 
 FORCEINLINE
-ULONG ObpGetHandleAttributes(
+_Must_inspect_result_
+ULONG 
+ObpGetHandleAttributes(
     _In_ PHANDLE_TABLE_ENTRY HandleTableEntry
     )
 {
 #if (defined _M_X64) || (defined _M_ARM64)
-    if (KphOsVersion >= KphWin8)
+    if (KphDynObAttributesShift != ULONG_MAX)
     {
-        if (KphDynObAttributesShift != ULONG_MAX)
-        {
-            return (ULONG)(HandleTableEntry->Value >> KphDynObAttributesShift) & 0x3;
-        }
-        else
-        {
-            return 0;
-        }
+        return (ULONG)(HandleTableEntry->Value >> KphDynObAttributesShift) & 0x3;
     }
     else
     {
-        return (HandleTableEntry->ObAttributes & (OBJ_INHERIT | OBJ_AUDIT_OBJECT_CLOSE)) |
-            ((HandleTableEntry->GrantedAccess & ObpAccessProtectCloseBit) ? OBJ_PROTECT_CLOSE : 0);
+        return 0;
     }
 #else
     return (HandleTableEntry->ObAttributes & (OBJ_INHERIT | OBJ_AUDIT_OBJECT_CLOSE)) |
@@ -501,7 +475,6 @@ typedef struct _KLDR_DATA_TABLE_ENTRY
     };
     ULONG SizeOfImageNotRounded;
     ULONG TimeDateStamp;
-
 } KLDR_DATA_TABLE_ENTRY, *PKLDR_DATA_TABLE_ENTRY;
 
 // PS
@@ -583,16 +556,6 @@ PsResumeProcess(
     _In_ PEPROCESS Process
     );
 
-typedef
-_Function_class_(PS_GET_THREAD_EXIT_STATUS)
-_IRQL_requires_max_(APC_LEVEL)
-NTSTATUS
-NTAPI
-PS_GET_THREAD_EXIT_STATUS(
-    _In_ PETHREAD Thread
-    );
-typedef PS_GET_THREAD_EXIT_STATUS* PPS_GET_THREAD_EXIT_STATUS;
-
 typedef struct _PS_PROTECTION
 {
     union
@@ -605,7 +568,6 @@ typedef struct _PS_PROTECTION
             UCHAR Signer : 4;
         };
     };
-
 } PS_PROTECTION, *PPS_PROTECTION;
 
 typedef enum _PS_PROTECTED_TYPE
@@ -628,17 +590,16 @@ typedef enum _PS_PROTECTED_SIGNER
     PsProtectedSignerWinSystem,
     PsProtectedSignerApp,
     PsProtectedSignerMax
-
 } PS_PROTECTED_SIGNER, *PPS_PROTECTED_SIGNER;
 
-typedef
-_Function_class_(PS_GET_PROCESS_PROTECTION)
+#if (NTDDI_VERSION >= NTDDI_WIN10)
+NTKERNELAPI
 PS_PROTECTION
 NTAPI
-PS_GET_PROCESS_PROTECTION(
+PsGetProcessProtection(
     _In_ PEPROCESS Process
     );
-typedef PS_GET_PROCESS_PROTECTION* PPS_GET_PROCESS_PROTECTION;
+#endif
 
 typedef
 _Function_class_(PS_SET_LOAD_IMAGE_NOTIFY_ROUTINE_EX)
@@ -668,25 +629,6 @@ PS_SET_CREATE_PROCESS_NOTIFY_ROUTINE_EX2(
     _In_ BOOLEAN Remove
     );
 typedef PS_SET_CREATE_PROCESS_NOTIFY_ROUTINE_EX2* PPS_SET_CREATE_PROCESS_NOTIFY_ROUTINE_EX2;
-
-#if (NTDDI_VERSION < NTDDI_WINTHRESHOLD)
-typedef enum _PSCREATETHREADNOTIFYTYPE
-{
-    PsCreateThreadNotifyNonSystem = 0,
-    PsCreateThreadNotifySubsystems = 1
-
-} PSCREATETHREADNOTIFYTYPE;
-#endif
-
-typedef
-_Function_class_(PS_SET_CREATE_THREAD_NOTIFY_ROUTINE_EX)
-NTSTATUS
-NTAPI
-PS_SET_CREATE_THREAD_NOTIFY_ROUTINE_EX(
-    _In_ PSCREATETHREADNOTIFYTYPE NotifyType,
-    _In_ PVOID NotifyInformation
-    );
-typedef PS_SET_CREATE_THREAD_NOTIFY_ROUTINE_EX* PPS_SET_CREATE_THREAD_NOTIFY_ROUTINE_EX;
 
 #ifndef PS_IMAGE_NOTIFY_CONFLICTING_ARCHITECTURE
 #define PS_IMAGE_NOTIFY_CONFLICTING_ARCHITECTURE            0x1
@@ -748,6 +690,37 @@ ZwSetInformationProcess(
 
 #define ThreadPowerThrottlingState     49
 #define ThreadNameInformation          38
+#define ThreadExplicitCaseSensitivity  43
+
+#if (NTDDI_VERSION >= NTDDI_WIN10)
+extern PLIST_ENTRY PsLoadedModuleList;
+extern PERESOURCE PsLoadedModuleResource;
+#endif
+
+typedef struct _PROCESS_MITIGATION_POLICY_INFORMATION
+{
+    PROCESS_MITIGATION_POLICY Policy;
+    union
+    {
+        PROCESS_MITIGATION_ASLR_POLICY ASLRPolicy;
+        PROCESS_MITIGATION_STRICT_HANDLE_CHECK_POLICY StrictHandleCheckPolicy;
+        PROCESS_MITIGATION_SYSTEM_CALL_DISABLE_POLICY SystemCallDisablePolicy;
+        PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY ExtensionPointDisablePolicy;
+        PROCESS_MITIGATION_DYNAMIC_CODE_POLICY DynamicCodePolicy;
+        PROCESS_MITIGATION_CONTROL_FLOW_GUARD_POLICY ControlFlowGuardPolicy;
+        PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY SignaturePolicy;
+        PROCESS_MITIGATION_FONT_DISABLE_POLICY FontDisablePolicy;
+        PROCESS_MITIGATION_IMAGE_LOAD_POLICY ImageLoadPolicy;
+        PROCESS_MITIGATION_SYSTEM_CALL_FILTER_POLICY SystemCallFilterPolicy;
+        PROCESS_MITIGATION_PAYLOAD_RESTRICTION_POLICY PayloadRestrictionPolicy;
+        PROCESS_MITIGATION_CHILD_PROCESS_POLICY ChildProcessPolicy;
+        PROCESS_MITIGATION_SIDE_CHANNEL_ISOLATION_POLICY SideChannelIsolationPolicy;
+        PROCESS_MITIGATION_USER_SHADOW_STACK_POLICY UserShadowStackPolicy;
+        PROCESS_MITIGATION_REDIRECTION_TRUST_POLICY RedirectionTrustPolicy;
+        PROCESS_MITIGATION_USER_POINTER_AUTH_POLICY UserPointerAuthPolicy;
+        PROCESS_MITIGATION_SEHOP_POLICY SEHOPPolicy;
+    };
+} PROCESS_MITIGATION_POLICY_INFORMATION, *PPROCESS_MITIGATION_POLICY_INFORMATION;
 
 // RTL
 
@@ -768,6 +741,18 @@ RtlImageNtHeader(
     _In_ PVOID Base
     );
 
+#define RTL_IMAGE_NT_HEADER_EX_FLAG_NO_RANGE_CHECK 0x00000001
+
+NTKERNELAPI
+NTSTATUS
+NTAPI
+RtlImageNtHeaderEx(
+    _In_ ULONG Flags,
+    _In_ PVOID Base,
+    _In_ ULONG64 Size,
+    _Out_ PIMAGE_NT_HEADERS* OutHeaders
+    );
+
 NTKERNELAPI
 PVOID
 NTAPI
@@ -778,38 +763,15 @@ RtlImageDirectoryEntryToData(
     _Out_ PULONG Size
     );
 
-typedef
-_Function_class_(RTL_FIND_EXPORTED_ROUTINE_BY_NAME)
+#if (NTDDI_VERSION >= NTDDI_WIN10)
+NTKERNELAPI
 PVOID
 NTAPI
-RTL_FIND_EXPORTED_ROUTINE_BY_NAME(
+RtlFindExportedRoutineByName(
     _In_ PVOID BaseAddress,
     _In_z_ PCSTR RoutineName
     );
-typedef RTL_FIND_EXPORTED_ROUTINE_BY_NAME* PRTL_FIND_EXPORTED_ROUTINE_BY_NAME;
-
-typedef
-_Function_class_(RTL_IMAGE_NT_HEADER_EX)
-NTSTATUS
-NTAPI
-RTL_IMAGE_NT_HEADER_EX(
-    _In_ ULONG Flags,
-    _In_ PVOID Base,
-    _In_ ULONG64 Size,
-    _Out_ PIMAGE_NT_HEADERS* OutHeaders
-    );
-typedef RTL_IMAGE_NT_HEADER_EX* PRTL_IMAGE_NT_HEADER_EX;
-
-typedef
-_Function_class_(KE_REMOVE_QUEUE_DPC_EX)
-_IRQL_requires_max_(HIGH_LEVEL)
-BOOLEAN
-NTAPI
-KE_REMOVE_QUEUE_DPC_EX(
-    _Inout_ PRKDPC Dpc,
-    _In_ BOOLEAN WaitIfActive
-    );
-typedef KE_REMOVE_QUEUE_DPC_EX* PKE_REMOVE_QUEUE_DPC_EX;
+#endif
 
 // MM
 
@@ -830,10 +792,365 @@ typedef MM_PROTECT_DRIVER_SECTION* PMM_PROTECT_DRIVER_SECTION;
 #define MM_PROTECT_DRIVER_SECTION_VALID_FLAGS \
     (MM_PROTECT_DRIVER_SECTION_ALLOW_UNLOAD)
 
-// SE
+typedef struct _MMVAD_FLAGS
+{
+    ULONG Lock : 1;
+    ULONG LockContended : 1;
+    ULONG DeleteInProgress : 1;
+    ULONG NoChange : 1;
+    ULONG VadType : 3;
+    ULONG Protection : 5;
+    ULONG PreferredNode : 7;
+    ULONG PageSize : 2;
+    ULONG PrivateMemory : 1;
+} MMVAD_FLAGS, *PMMVAD_FLAGS;
 
-#define SeDebugPrivilege RtlConvertUlongToLuid(SE_DEBUG_PRIVILEGE)
-#define SeCreateTokenPrivilege RtlConvertUlongToLuid(SE_CREATE_TOKEN_PRIVILEGE)
+typedef struct _MM_PRIVATE_VAD_FLAGS
+{
+    ULONG Lock : 1;
+    ULONG LockContended : 1;
+    ULONG DeleteInProgress : 1;
+    ULONG NoChange : 1;
+    ULONG VadType : 3;
+    ULONG Protection : 5;
+    ULONG PreferredNode : 7;
+    ULONG PageSize : 2;
+    ULONG PrivateMemoryAlwaysSet : 1;
+    ULONG WriteWatch : 1;
+    ULONG FixedLargePageSize : 1;
+    ULONG ZeroFillPagesOptional : 1;
+    ULONG Graphics : 1;
+    ULONG Enclave : 1;
+    ULONG ShadowStack : 1;
+    ULONG PhysicalMemoryPfnsReferenced : 1;
+} MM_PRIVATE_VAD_FLAGS, *PMM_PRIVATE_VAD_FLAGS;
+
+typedef struct _MM_GRAPHICS_VAD_FLAGS
+{
+    ULONG Lock : 1;
+    ULONG LockContended : 1;
+    ULONG DeleteInProgress : 1;
+    ULONG NoChange : 1;
+    ULONG VadType : 3;
+    ULONG Protection : 5;
+    ULONG PreferredNode : 7;
+    ULONG PageSize : 2;
+    ULONG PrivateMemoryAlwaysSet : 1;
+    ULONG WriteWatch : 1;
+    ULONG FixedLargePageSize : 1;
+    ULONG ZeroFillPagesOptional : 1;
+    ULONG GraphicsAlwaysSet : 1;
+    ULONG GraphicsUseCoherentBus : 1;
+    ULONG GraphicsNoCache : 1;
+    ULONG GraphicsPageProtection : 3;
+} MM_GRAPHICS_VAD_FLAGS, *PMM_GRAPHICS_VAD_FLAGS;
+
+typedef struct _MM_SHARED_VAD_FLAGS
+{
+    ULONG Lock : 1;
+    ULONG LockContended : 1;
+    ULONG DeleteInProgress : 1;
+    ULONG NoChange : 1;
+    ULONG VadType : 3;
+    ULONG Protection : 5;
+    ULONG PreferredNode : 7;
+    ULONG PageSize : 2;
+    ULONG PrivateMemoryAlwaysClear : 1;
+    ULONG PrivateFixup : 1;
+    ULONG HotPatchState : 2;
+} MM_SHARED_VAD_FLAGS, *PMM_SHARED_VAD_FLAGS;
+
+typedef struct _MMVAD_FLAGS1
+{
+    ULONG CommitCharge : 31;
+    ULONG MemCommit : 1;
+}MMVAD_FLAGS1, *PMMVAD_FLAGS1;
+
+typedef struct _MMVAD_SHORT
+{
+    union
+    {
+        struct
+        {
+            struct _MMVAD_SHORT* NextVad;
+            PVOID ExtraCreateInfo;
+        };
+        RTL_BALANCED_NODE VadNode;
+    };
+    ULONG StartingVpn;
+    ULONG EndingVpn;
+#ifdef _WIN64
+    UCHAR StartingVpnHigh;
+    UCHAR EndingVpnHigh;
+    UCHAR CommitChargeHigh;
+    union
+    {
+        UCHAR SpareNT64VadUChar;
+        struct // LA57
+        {
+            UCHAR EndingVpnHigher : 4;
+            UCHAR CommitChargeHigher : 4;
+        };
+    };
+#endif
+    LONG ReferenceCount;
+    EX_PUSH_LOCK PushLock;
+    union
+    {
+        ULONG LongFlags;
+        MMVAD_FLAGS VadFlags;
+        MM_PRIVATE_VAD_FLAGS PrivateVadFlags;
+        MM_GRAPHICS_VAD_FLAGS GraphicsVadFlags;
+        MM_SHARED_VAD_FLAGS SharedVadFlags;
+        volatile ULONG VolatileVadLong;
+    } u;
+    union
+    {
+        ULONG LongFlags1;
+        MMVAD_FLAGS1 VadFlags1;
+    } u1;
+#ifdef _WIN64
+    union
+    {
+        ULONG_PTR EventListULongPtr;
+        UCHAR StartingVpnHigher : 4; // LA57
+    } u5;
+#else
+    PVOID EventList; // PMI_VAD_EVENT_BLOCK
+#endif
+} MMVAD_SHORT, *PMMVAD_SHORT;
+
+FORCEINLINE
+PVOID
+MiGetVadShortStartAddress(
+    _In_ PMMVAD_SHORT Vad
+    )
+{
+#ifdef _WIN64
+    ULONG_PTR higher = Vad->u5.StartingVpnHigher;
+    ULONG_PTR high = Vad->StartingVpnHigh;
+    ULONG_PTR low = Vad->StartingVpn;
+    return (PVOID)((low | ((high | (higher << 8)) << 32)) << PAGE_SHIFT);
+#else
+    return (PVOID)((ULONG_PTR)Vad->StartingVpn << PAGE_SHIFT);
+#endif
+}
+
+FORCEINLINE
+PVOID
+MiGetVadShortEndAddress(
+    _In_ PMMVAD_SHORT Vad
+    )
+{
+#ifdef _WIN64
+    ULONG_PTR higher = Vad->EndingVpnHigher;
+    ULONG_PTR high = Vad->EndingVpnHigh;
+    ULONG_PTR low = Vad->EndingVpn;
+    return (PVOID)(((low + 1) | ((high | (higher << 8)) << 32)) << PAGE_SHIFT);
+#else
+    return (PVOID)(((ULONG_PTR)Vad->StartingVpn + 1) << PAGE_SHIFT);
+#endif
+}
+
+typedef struct _MMVAD_FLAGS2
+{
+    ULONG FileOffset : 24;
+    ULONG Large : 1;
+    ULONG TrimBehind : 1;
+    ULONG Inherit : 1;
+    ULONG NoValidationNeeded : 1;
+    ULONG PrivateDemandZero : 1;
+    ULONG Spare : 3;
+} MMVAD_FLAGS2, *PMMVAD_FLAGS2;
+
+typedef struct _MI_VAD_SEQUENTIAL_INFO
+{
+    ULONGLONG Length : 12;
+    ULONGLONG Vpn : 52;
+} MI_VAD_SEQUENTIAL_INFO, *PMI_VAD_SEQUENTIAL_INFO;
+
+typedef struct _MMEXTEND_INFO
+{
+    ULONGLONG CommittedSize;
+    ULONG ReferenceCount;
+} MMEXTEND_INFO, *PMMEXTEND_INFO; 
+
+typedef struct _MMPTE_HIGHLOW
+{
+    ULONG LowPart;
+    ULONG HighPart;
+} MMPTE_HIGHLOW, *PMMPTE_HIGHLOW; 
+
+typedef struct _MMPTE_HARDWARE
+{
+    ULONGLONG Valid : 1;
+    ULONGLONG Dirty1 : 1;
+    ULONGLONG Owner : 1;
+    ULONGLONG WriteThrough : 1;
+    ULONGLONG CacheDisable : 1;
+    ULONGLONG Accessed : 1;
+    ULONGLONG Dirty : 1;
+    ULONGLONG LargePage : 1;
+    ULONGLONG Global : 1;
+    ULONGLONG CopyOnWrite : 1;
+    ULONGLONG Unused : 1;
+    ULONGLONG Write : 1;
+    ULONGLONG PageFrameNumber : 40;
+    ULONGLONG ReservedForSoftware : 4;
+    ULONGLONG WsleAge : 4;
+    ULONGLONG WsleProtection : 3;
+    ULONGLONG NoExecute : 1;
+} MMPTE_HARDWARE, *PMMPTE_HARDWARE;
+
+typedef struct _MMPTE_PROTOTYPE
+{
+    ULONGLONG Valid : 1;
+    ULONGLONG DemandFillProto : 1;
+    ULONGLONG HiberVerifyConverted : 1;
+    ULONGLONG ReadOnly : 1;
+    ULONGLONG SwizzleBit : 1;
+    ULONGLONG Protection : 5;
+    ULONGLONG Prototype : 1;
+    ULONGLONG Combined : 1;
+    ULONGLONG Unused1 : 4;
+    LONGLONG ProtoAddress : 48;
+} MMPTE_PROTOTYPE, * PMMPTE_PROTOTYPE;
+
+typedef struct _MMPTE_SOFTWARE
+{
+    ULONGLONG Valid : 1;
+    ULONGLONG PageFileReserved : 1;
+    ULONGLONG PageFileAllocated : 1;
+    ULONGLONG ColdPage : 1;
+    ULONGLONG SwizzleBit : 1;
+    ULONGLONG Protection : 5;
+    ULONGLONG Prototype : 1;
+    ULONGLONG Transition : 1;
+    ULONGLONG PageFileLow : 4;
+    ULONGLONG UsedPageTableEntries : 10;
+    ULONGLONG ShadowStack : 1;
+    ULONGLONG OnStandbyLookaside : 1;
+    ULONGLONG Unused : 4;
+    ULONGLONG PageFileHigh : 32;
+} MMPTE_SOFTWARE, * PMMPTE_SOFTWARE;
+
+typedef struct _MMPTE_TIMESTAMP
+{
+    ULONGLONG MustBeZero : 1;
+    ULONGLONG Unused : 3;
+    ULONGLONG SwizzleBit : 1;
+    ULONGLONG Protection : 5;
+    ULONGLONG Prototype : 1;
+    ULONGLONG Transition : 1;
+    ULONGLONG PageFileLow : 4;
+    ULONGLONG Reserved : 16;
+    ULONGLONG GlobalTimeStamp : 32;
+} MMPTE_TIMESTAMP, *PMMPTE_TIMESTAMP;
+
+typedef struct _MMPTE_TRANSITION
+{
+    ULONGLONG Valid : 1;
+    ULONGLONG Write : 1;
+    ULONGLONG OnStandbyLookaside : 1;
+    ULONGLONG IoTracker : 1;
+    ULONGLONG SwizzleBit : 1;
+    ULONGLONG Protection : 5;
+    ULONGLONG Prototype : 1;
+    ULONGLONG Transition : 1;
+    ULONGLONG PageFrameNumber : 40;
+    ULONGLONG Unused : 12;
+} MMPTE_TRANSITION, *PMMPTE_TRANSITION;
+
+typedef struct _MMPTE_SUBSECTION
+{
+    ULONGLONG Valid : 1;
+    ULONGLONG Unused0 : 2;
+    ULONGLONG OnStandbyLookaside : 1;
+    ULONGLONG SwizzleBit : 1;
+    ULONGLONG Protection : 5;
+    ULONGLONG Prototype : 1;
+    ULONGLONG ColdPage : 1;
+    ULONGLONG Unused2 : 3;
+    ULONGLONG ExecutePrivilege : 1;
+    LONGLONG SubsectionAddress : 48;
+} MMPTE_SUBSECTION, * PMMPTE_SUBSECTION;
+
+typedef struct _MMPTE_LIST
+{
+    ULONGLONG Valid : 1;
+    ULONGLONG OneEntry : 1;
+    ULONGLONG filler0 : 2;
+    ULONGLONG SwizzleBit : 1;
+    ULONGLONG Protection : 5;
+    ULONGLONG Prototype : 1;
+    ULONGLONG Transition : 1;
+    ULONGLONG filler1 : 16;
+    ULONGLONG NextEntry : 36;
+} MMPTE_LIST, *PMMPTE_LIST;
+
+typedef struct _MMPTE
+{
+    union
+    {
+        ULONGLONG Long;
+        volatile ULONGLONG VolatileLong;
+#ifndef _WIN64
+        MMPTE_HIGHLOW HighLow;
+#endif
+        MMPTE_HARDWARE Hard;
+        MMPTE_PROTOTYPE Proto;
+        MMPTE_SOFTWARE Soft;
+        MMPTE_TIMESTAMP TimeStamp;
+        MMPTE_TRANSITION Trans;
+        MMPTE_SUBSECTION Subsect;
+        MMPTE_LIST List;
+    } u;
+} MMPTE, *PMMPTE;
+
+typedef struct _MMVAD
+{
+    struct _MMVAD_SHORT Core;
+    union
+    {
+        ULONG LongFlags2;
+        MMVAD_FLAGS2 VadFlags2;
+    } u2;
+    PVOID Subsection; // PSUBSECTION 
+    PMMPTE FirstPrototypePte;
+    PMMPTE LastContiguousPte;
+    LIST_ENTRY ViewLinks;
+    union
+    {
+        PEPROCESS VadsProcess;
+        UCHAR ViewMapType : 3; // VIEW_MAP_TYPE_*
+    };
+    union
+    {
+        MI_VAD_SEQUENTIAL_INFO SequentialVa;
+        PMMEXTEND_INFO ExtendedInfo;
+    } u4;
+    PFILE_OBJECT FileObject; // since WIN10
+} MMVAD, *PMMVAD; 
+
+FORCEINLINE
+PVOID
+MiGetVadStartAddress(
+    _In_ PMMVAD Vad
+    )
+{
+    return MiGetVadShortStartAddress(&Vad->Core);
+}
+
+FORCEINLINE
+PVOID
+MiGetVadEndAddress(
+    _In_ PMMVAD Vad
+    )
+{
+    return MiGetVadShortEndAddress(&Vad->Core);
+}
+
+#define VmCfgCallTargetInformation 2
 
 // CI
 
@@ -997,7 +1314,6 @@ typedef enum _MINCRYPT_KNOWN_ROOT
     MincryptRootMicrosoftECCDevelopmentRoot2018,
     MincryptRootMicrosoftECCProduct2018,
     MincryptRootMicrosoftECCProduct2017
-
 } MINCRYPT_KNOWN_ROOT;
 
 typedef struct _MINCRYPT_STRING
@@ -1006,7 +1322,6 @@ typedef struct _MINCRYPT_STRING
     USHORT Length;
     UCHAR Asn1EncodingTag;
     UCHAR Spare[1];
-
 } MINCRYPT_STRING, *PMINCRYPT_STRING;
 
 typedef struct _MINCRYPT_CHAIN_ELEMENT
@@ -1017,7 +1332,6 @@ typedef struct _MINCRYPT_CHAIN_ELEMENT
     MINCRYPT_STRING Subject;
     MINCRYPT_STRING Issuer;
     CRYPT_DER_BLOB Certificate;
-
 } MINCRYPT_CHAIN_ELEMENT, *PMINCRYPT_CHAIN_ELEMENT;
 
 typedef struct _MINCRYPT_CHAIN_INFO
@@ -1035,7 +1349,6 @@ typedef struct _MINCRYPT_CHAIN_INFO
     MINCRYPT_KNOWN_ROOT KnownRoot;
     CRYPT_ATTR_BLOB AuthenticodeAttributes;
     UCHAR PlatformManifest[MINCRYPT_SHA256_HASH_LEN];
-
 } MINCRYPT_CHAIN_INFO, *PMINCRYPT_CHAIN_INFO;
 
 typedef struct _MINCRYPT_POLICY_INFO
@@ -1053,7 +1366,6 @@ typedef struct _MINCRYPT_POLICY_INFO
 
     LARGE_INTEGER ValidFromTime;
     LARGE_INTEGER ValidToTime;
-
 } MINCRYPT_POLICY_INFO, *PMINCRYPT_POLICY_INFO;
 
 typedef
@@ -1144,7 +1456,7 @@ extern POBJECT_TYPE *LpcPortObjectType;
 #define AlpcPortObjectType LpcPortObjectType
 
 #define PORT_CONNECT 0x0001
-#define PORT_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE | 0x1)
+#define PORT_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE | PORT_CONNECT)
 
 typedef struct _PORT_MESSAGE
 {
@@ -1236,3 +1548,84 @@ ZwAlpcConnectPort(
     _Inout_opt_ PALPC_MESSAGE_ATTRIBUTES InMessageAttributes,
     _In_opt_ PLARGE_INTEGER Timeout
     );
+
+// LXCORE
+
+typedef
+_Function_class_(LXP_PROCESS_GET_CURRENT)
+_Must_inspect_result_
+BOOLEAN
+NTAPI
+LXP_PROCESS_GET_CURRENT(
+    _Out_ PVOID* Thread
+    );
+typedef LXP_PROCESS_GET_CURRENT* PLXP_PROCESS_GET_CURRENT;
+
+typedef
+_Function_class_(LXP_THREAD_GET_CURRENT)
+_Must_inspect_result_
+BOOLEAN
+NTAPI
+LXP_THREAD_GET_CURRENT(
+    _Out_ PVOID* Thread
+    );
+typedef LXP_THREAD_GET_CURRENT* PLXP_THREAD_GET_CURRENT;
+
+// CFG
+
+
+//
+// Define flags for setting process CFG valid call target entries.
+//
+
+//
+// Call target should be made valid.  If not set, the call target is made
+// invalid.  Input flag.
+//
+
+#define CFG_CALL_TARGET_VALID                               (0x00000001) 
+
+//
+// Call target has been successfully processed.  Used to report to the caller
+// how much progress has been made.  Output flag.
+//
+
+#define CFG_CALL_TARGET_PROCESSED                           (0x00000002)
+
+//
+// Call target should be made valid only if it is suppressed export.
+// What this flag means is that it can *only* be used on a cell which is
+// currently in the CFG export suppressed state (only considered for export
+// suppressed processes and not legacy CFG processes!), and it is also
+// allowed to be used even if the process is a restricted (i.e. no ACG) process.
+//
+
+#define CFG_CALL_TARGET_CONVERT_EXPORT_SUPPRESSED_TO_VALID  (0x00000004)
+
+//
+// Call target should be made into an XFG call target.
+//
+
+#define CFG_CALL_TARGET_VALID_XFG                           (0x00000008)
+
+//
+// Call target should be made valid only if it is already an XFG target
+// in a process which has XFG audit mode enabled.
+//
+
+#define CFG_CALL_TARGET_CONVERT_XFG_TO_CFG                  (0x00000010)
+
+typedef struct _CFG_CALL_TARGET_INFO {
+    ULONG_PTR Offset;
+    ULONG_PTR Flags;
+} CFG_CALL_TARGET_INFO, *PCFG_CALL_TARGET_INFO;
+
+typedef struct _CFG_CALL_TARGET_LIST_INFORMATION
+{
+    ULONG NumberOfEntries;
+    ULONG Reserved;
+    PULONG NumberOfEntriesProcessed;
+    PCFG_CALL_TARGET_INFO CallTargetInfo;
+    PVOID Section; // since REDSTONE5
+    ULONGLONG FileOffset;
+} CFG_CALL_TARGET_LIST_INFORMATION, *PCFG_CALL_TARGET_LIST_INFORMATION;

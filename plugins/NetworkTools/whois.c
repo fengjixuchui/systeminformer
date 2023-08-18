@@ -56,9 +56,7 @@ PPH_STRING TrimString(
     )
 {
     static PH_STRINGREF whitespace = PH_STRINGREF_INIT(L"  ");
-    PH_STRINGREF sr = String->sr;
-    PhTrimStringRef(&sr, &whitespace, 0);
-    return PhCreateString2(&sr);
+    return PhCreateString3(&String->sr, 0, &whitespace);
 }
 
 PPH_STRING TrimString2(
@@ -66,9 +64,7 @@ PPH_STRING TrimString2(
     )
 {
     static PH_STRINGREF whitespace = PH_STRINGREF_INIT(L"\n\n");
-    PH_STRINGREF sr = String->sr;
-    PhTrimStringRef(&sr, &whitespace, 0);
-    return PhCreateString2(&sr);
+    return PhCreateString3(&String->sr, 0, &whitespace);
 }
 
 _Success_(return)
@@ -181,8 +177,8 @@ BOOLEAN WhoisExtractServerUrl(
 
     whoisServerName = PhSubstring(
         WhoisResponse,
-        whoisServerHostnameIndex + wcslen(L"whois:"),
-        whoisServerHostnameLength - wcslen(L"whois:")
+        whoisServerHostnameIndex + (RTL_NUMBER_OF(L"whois:") - 1),
+        whoisServerHostnameLength - (RTL_NUMBER_OF(L"whois:") - 1)
         );
 
     if (WhoisServerAddress)
@@ -217,8 +213,8 @@ BOOLEAN WhoisExtractReferralServer(
 
     whoisServerName = PhSubstring(
         WhoisResponse,
-        whoisServerHostnameIndex + wcslen(L"ReferralServer:"),
-        whoisServerHostnameLength - wcslen(L"ReferralServer:")
+        whoisServerHostnameIndex + (RTL_NUMBER_OF(L"ReferralServer:") - 1),
+        whoisServerHostnameLength - (RTL_NUMBER_OF(L"ReferralServer:") - 1)
         );
 
     whoisServerHostname = TrimString(whoisServerName);
@@ -310,6 +306,7 @@ _Success_(return)
 BOOLEAN WhoisDualStackSocketConnectByAddressList(
     _In_ PDNS_RECORD DnsRecordList,
     _In_ USHORT ServerPort,
+    _In_ BOOLEAN Ipv6Support,
     _Out_ SOCKET* SocketHandle
     )
 {
@@ -361,7 +358,7 @@ BOOLEAN WhoisDualStackSocketConnectByAddressList(
             socketAddressList->Address[socketAddressCount].iSockaddrLength = sizeof(SOCKADDR_IN6);
             socketAddressCount++;
         }
-        else if (i->wType == DNS_TYPE_AAAA)
+        else if (i->wType == DNS_TYPE_AAAA && Ipv6Support)
         {
             SOCKADDR_IN6 remoteAddress;
 
@@ -452,6 +449,7 @@ _Success_(return)
 BOOLEAN WhoisConnectByAddressList(
     _In_ PDNS_RECORD DnsRecordList,
     _In_ USHORT ServerPort,
+    _In_ BOOLEAN Ipv6Support,
     _Out_ SOCKET* SocketHandle
     )
 {
@@ -507,7 +505,7 @@ BOOLEAN WhoisConnectByAddressList(
                 socketHandle = INVALID_SOCKET;
             }
         }
-        else if (i->wType == DNS_TYPE_AAAA)
+        else if (i->wType == DNS_TYPE_AAAA && Ipv6Support)
         {
             SOCKADDR_IN6 remoteAddr;
 
@@ -571,6 +569,7 @@ BOOLEAN WhoisConnectServer(
     _In_ PWSTR WhoisServerAddress,
     _In_ USHORT WhoisServerPort,
     _In_ USHORT DnsQueryMessageType,
+    _In_ BOOLEAN Ipv6Support,
     _Out_ SOCKET* WhoisServerSocketHandle
     )
 {
@@ -598,14 +597,14 @@ BOOLEAN WhoisConnectServer(
     if (!dnsRecordList)
         return FALSE;
 
-    if (WhoisDualStackSocketConnectByAddressList(dnsRecordList, WhoisServerPort, &socketHandle))
+    if (WhoisDualStackSocketConnectByAddressList(dnsRecordList, WhoisServerPort, Ipv6Support, &socketHandle))
     {
         PhDnsFree(dnsRecordList);
         *WhoisServerSocketHandle = socketHandle;
         return TRUE;
     }
 
-    if (WhoisConnectByAddressList(dnsRecordList, WhoisServerPort, &socketHandle))
+    if (WhoisConnectByAddressList(dnsRecordList, WhoisServerPort, Ipv6Support, &socketHandle))
     {
         PhDnsFree(dnsRecordList);
         *WhoisServerSocketHandle = socketHandle;
@@ -622,6 +621,7 @@ BOOLEAN WhoisQueryServer(
     _In_ PWSTR WhoisServerAddress,
     _In_ USHORT WhoisServerPort,
     _In_ PWSTR WhoisQueryAddress,
+    _In_ BOOLEAN Ipv6Support,
     _Out_ PPH_STRING* WhoisQueryResponse
     )
 {
@@ -635,9 +635,17 @@ BOOLEAN WhoisQueryServer(
     if (WhoisServerPort == 0)
         return FALSE;
 
-    if (!WhoisConnectServer(WhoisServerAddress, WhoisServerPort, DNS_TYPE_AAAA, &whoisSocketHandle))
+    if (Ipv6Support)
     {
-        if (!WhoisConnectServer(WhoisServerAddress, WhoisServerPort, DNS_TYPE_A, &whoisSocketHandle))
+        if (!WhoisConnectServer(WhoisServerAddress, WhoisServerPort, DNS_TYPE_AAAA, TRUE, &whoisSocketHandle))
+        {
+            if (!WhoisConnectServer(WhoisServerAddress, WhoisServerPort, DNS_TYPE_A, FALSE, &whoisSocketHandle))
+                return FALSE;
+        }
+    }
+    else
+    {
+        if (!WhoisConnectServer(WhoisServerAddress, WhoisServerPort, DNS_TYPE_A, FALSE, &whoisSocketHandle))
             return FALSE;
     }
 
@@ -699,7 +707,7 @@ NTSTATUS NetworkWhoisThreadStart(
         SendMessage(context->WindowHandle, NTM_RECEIVEDWHOIS, 0, (LPARAM)PhCreateString(L"Connecting to whois.iana.org..."));
     }
 
-    if (!WhoisQueryServer(L"whois.iana.org", IPPORT_WHOIS, context->RemoteAddressString, &whoisResponse))
+    if (!WhoisQueryServer(L"whois.iana.org", IPPORT_WHOIS, context->RemoteAddressString, context->Ipv6Support, &whoisResponse))
     {
         PhAppendFormatStringBuilder(&stringBuilder, L"Connection to whois.iana.org failed.\n");
         goto CleanupExit;
@@ -720,6 +728,7 @@ NTSTATUS NetworkWhoisThreadStart(
         PhGetString(whoisServerName),
         IPPORT_WHOIS,
         context->RemoteAddressString,
+        context->Ipv6Support,
         &whoisResponse
         ))
     {
@@ -749,6 +758,7 @@ NTSTATUS NetworkWhoisThreadStart(
                 PhGetString(whoisReferralServerName),
                 whoisReferralServerPort,
                 context->RemoteAddressString,
+                context->Ipv6Support,
                 &whoisReferralResponse
                 ))
             {
@@ -872,8 +882,6 @@ INT_PTR CALLBACK WhoisDlgProc(
 
             context->WindowHandle = NULL;
             PhDereferenceObject(context);
-
-            PostQuitMessage(0);
         }
     }
 
@@ -886,6 +894,7 @@ INT_PTR CALLBACK WhoisDlgProc(
         {
             context->WindowHandle = hwndDlg;
             context->RichEditHandle = GetDlgItem(hwndDlg, IDC_NETOUTPUTEDIT);
+            context->Ipv6Support = !!PhGetIntegerSetting(SETTING_NAME_WHOIS_IPV6_SUPPORT);
 
             PhSetApplicationWindowIcon(hwndDlg);
             WhoisSetTextFont(context);
@@ -913,6 +922,11 @@ INT_PTR CALLBACK WhoisDlgProc(
 
             PhReferenceObject(context);
             PhCreateThread2(NetworkWhoisThreadStart, (PVOID)context);
+        }
+        break;
+    case WM_DESTROY:
+        {
+            PostQuitMessage(0);
         }
         break;
     case WM_COMMAND:

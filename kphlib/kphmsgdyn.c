@@ -13,7 +13,7 @@
 #include <kphmsgdyn.h>
 
 #ifndef _KERNEL_MODE
-#include "../tools/thirdparty/mssdk/ntintsafe.h"
+#include "../tools/thirdparty/winsdk/ntintsafe.h"
 #endif
 
 #include <pshpack1.h>
@@ -21,7 +21,6 @@ typedef struct _KPH_DYN_DATA_BUFFER
 {
     USHORT Size;
     CHAR Buffer[ANYSIZE_ARRAY];
-
 } KPH_DYN_DATA_BUFFER, *PKPH_DYN_DATA_BUFFER;
 #include <poppack.h>
 

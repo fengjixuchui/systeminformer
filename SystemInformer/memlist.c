@@ -535,6 +535,10 @@ VOID PhExpandAllMemoryNodes(
         TreeNew_NodesStructured(Context->TreeNewHandle);
 }
 
+extern PWSTR PhGetProcessHeapClassText(
+    _In_ ULONG HeapClass
+    );
+
 PPH_STRING PhGetMemoryRegionUseText(
     _In_ PPH_MEMORY_ITEM MemoryItem
     )
@@ -570,11 +574,13 @@ PPH_STRING PhGetMemoryRegionUseText(
             type == Stack32Region ? L" 32-bit" : L"", HandleToUlong(MemoryItem->u.Stack.ThreadId));
     case HeapRegion:
     case Heap32Region:
-        return PhFormatString(L"Heap%s (ID %lu)",
+        return PhFormatString(L"%s%s (ID %lu)",
+            MemoryItem->u.Heap.ClassValid ? PhGetProcessHeapClassText(MemoryItem->u.Heap.Class) : L"Heap",
             type == Heap32Region ? L" 32-bit" : L"", (ULONG)MemoryItem->u.Heap.Index + 1);
     case HeapSegmentRegion:
     case HeapSegment32Region:
-        return PhFormatString(L"Heap segment%s (ID %lu)",
+        return PhFormatString(L"%s Segment%s (ID %lu)",
+            MemoryItem->u.HeapSegment.HeapItem->u.Heap.ClassValid ? PhGetProcessHeapClassText(MemoryItem->u.HeapSegment.HeapItem->u.Heap.Class) : L"Heap",
             type == HeapSegment32Region ? L" 32-bit" : L"", (ULONG)MemoryItem->u.HeapSegment.HeapItem->u.Heap.Index + 1);
     case CfgBitmapRegion:
     case CfgBitmap32Region:
@@ -836,6 +842,8 @@ BOOLEAN NTAPI PhpMemoryTreeNewCallback(
                     };
                     int (__cdecl *sortFunction)(void *, const void *, const void *);
 
+                    static_assert(RTL_NUMBER_OF(sortFunctions) == PHMMTLC_MAXIMUM, "SortFunctions must equal maximum.");
+
                     if (!PhCmForwardSort(
                         (PPH_TREENEW_NODE *)context->RegionNodeList->Items,
                         context->RegionNodeList->Count,
@@ -976,7 +984,7 @@ BOOLEAN NTAPI PhpMemoryTreeNewCallback(
                 }
                 break;
             case PHMMTLC_ORIGINAL_PAGES:
-                {    
+                {
                     if (node->IsAllocationBase)
                         break;
 

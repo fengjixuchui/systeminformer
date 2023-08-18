@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
  * This file is part of System Informer.
@@ -167,11 +167,6 @@ INT_PTR CALLBACK DiskDrivePanelDialogProc(
     else
     {
         context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
-
-        if (uMsg == WM_NCDESTROY)
-        {
-            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
-        }
     }
 
     if (context == NULL)
@@ -187,6 +182,11 @@ INT_PTR CALLBACK DiskDrivePanelDialogProc(
             context->DiskDrivePanelActiveLabel = GetDlgItem(hwndDlg, IDC_STAT_ACTIVE);
             context->DiskDrivePanelTimeLabel = GetDlgItem(hwndDlg, IDC_STAT_RESPONSETIME);
             context->DiskDrivePanelBytesLabel = GetDlgItem(hwndDlg, IDC_STAT_BYTESDELTA);
+        }
+        break;
+    case WM_NCDESTROY:
+        {
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
         }
         break;
     case WM_COMMAND:
@@ -258,11 +258,6 @@ INT_PTR CALLBACK DiskDriveDialogProc(
     else
     {
         context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
-
-        if (uMsg == WM_NCDESTROY)
-        {
-            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
-        }
     }
 
     if (context == NULL)
@@ -312,6 +307,11 @@ INT_PTR CALLBACK DiskDriveDialogProc(
                 DestroyWindow(context->GraphHandle);
             if (context->PanelWindowHandle)
                 DestroyWindow(context->PanelWindowHandle);
+        }
+        break;
+    case WM_NCDESTROY:
+        {
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
         }
         break;
     case WM_DPICHANGED_AFTERPARENT:
@@ -518,7 +518,7 @@ BOOLEAN DiskDriveSectionCallback(
         return TRUE;
     case SysInfoViewChanging:
         {
-            PH_SYSINFO_VIEW_TYPE view = (PH_SYSINFO_VIEW_TYPE)Parameter1;
+            PH_SYSINFO_VIEW_TYPE view = (PH_SYSINFO_VIEW_TYPE)PtrToUlong(Parameter1);
             PPH_SYSINFO_SECTION section = (PPH_SYSINFO_SECTION)Parameter2;
 
             if (view == SysInfoSummaryView || section != Section)

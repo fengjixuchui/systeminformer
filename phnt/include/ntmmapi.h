@@ -628,6 +628,8 @@ NtQueryVirtualMemory(
     _Out_opt_ PSIZE_T ReturnLength
     );
 
+typedef struct _IO_STATUS_BLOCK* PIO_STATUS_BLOCK;
+
 NTSYSCALLAPI
 NTSTATUS
 NTAPI
@@ -635,7 +637,7 @@ NtFlushVirtualMemory(
     _In_ HANDLE ProcessHandle,
     _Inout_ PVOID *BaseAddress,
     _Inout_ PSIZE_T RegionSize,
-    _Out_ struct _IO_STATUS_BLOCK* IoStatus
+    _Out_ PIO_STATUS_BLOCK IoStatus
     );
 
 #endif
@@ -980,7 +982,7 @@ NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtCreatePartition(
-    _In_ HANDLE ParentPartitionHandle,
+    _In_opt_ HANDLE ParentPartitionHandle,
     _Out_ PHANDLE PartitionHandle,
     _In_ ACCESS_MASK DesiredAccess,
     _In_opt_ POBJECT_ATTRIBUTES ObjectAttributes,

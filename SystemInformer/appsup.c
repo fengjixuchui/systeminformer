@@ -14,7 +14,6 @@
 
 #include <cpysave.h>
 #include <emenu.h>
-#include <svcsup.h>
 #include <symprv.h>
 #include <settings.h>
 
@@ -23,13 +22,6 @@
 #include <phsvccl.h>
 
 #include "../tools/thirdparty/pcre/pcre2.h"
-
-GUID XP_CONTEXT_GUID = { 0xbeb1b341, 0x6837, 0x4c83, { 0x83, 0x66, 0x2b, 0x45, 0x1e, 0x7c, 0xe6, 0x9b } };
-GUID VISTA_CONTEXT_GUID = { 0xe2011457, 0x1546, 0x43c5, { 0xa5, 0xfe, 0x00, 0x8d, 0xee, 0xe3, 0xd3, 0xf0 } };
-GUID WIN7_CONTEXT_GUID = { 0x35138b9a, 0x5d96, 0x4fbd, { 0x8e, 0x2d, 0xa2, 0x44, 0x02, 0x25, 0xf9, 0x3a } };
-GUID WIN8_CONTEXT_GUID = { 0x4a2f28e3, 0x53b9, 0x4441, { 0xba, 0x9c, 0xd6, 0x9d, 0x4a, 0x4a, 0x6e, 0x38 } };
-GUID WINBLUE_CONTEXT_GUID = { 0x1f676c76, 0x80e1, 0x4239, { 0x95, 0xbb, 0x83, 0xd0, 0xf6, 0xd0, 0xda, 0x78 } };
-GUID WIN10_CONTEXT_GUID = { 0x8e0f7a12, 0xbfb3, 0x4fe8, { 0xb9, 0xa5, 0x48, 0xfd, 0x50, 0xa1, 0x5a, 0x9a } };
 
 /**
  * Determines whether a process is suspended.
@@ -101,8 +93,8 @@ PPH_STRINGREF PhGetProcessPriorityClassString(
         PH_STRINGREF_INIT(L"Unknown"),
         PH_STRINGREF_INIT(L"Idle"),
         PH_STRINGREF_INIT(L"Normal"),
-        PH_STRINGREF_INIT(L"High"), 
-        PH_STRINGREF_INIT(L"Real time"), 
+        PH_STRINGREF_INIT(L"High"),
+        PH_STRINGREF_INIT(L"Real time"),
         PH_STRINGREF_INIT(L"Below normal"),
         PH_STRINGREF_INIT(L"Above normal")
     };
@@ -604,18 +596,7 @@ BOOLEAN PhaGetProcessKnownCommandLine(
 
             if (PhDetermineDosPathNameType(&dllName->sr) == RtlPathTypeRelative)
             {
-                PPH_STRING systemDirectory;
-
-                if (systemDirectory = PhGetSystemDirectory())
-                {
-                    dllName = PhConcatStringRef3(
-                        &systemDirectory->sr,
-                        &PhNtPathSeperatorString,
-                        &dllName->sr
-                        );
-
-                    PhDereferenceObject(systemDirectory);
-                }
+                dllName = PhGetSystemDirectoryWin32(&dllName->sr);
             }
 
             KnownCommandLine->RunDllAsApp.FileName = dllName;
@@ -662,7 +643,7 @@ BOOLEAN PhaGetProcessKnownCommandLine(
 
             // Find "/processid:"; the GUID is just after that.
 
-            PhUpperString(argPart);
+            PhUpperStringRef(&argPart->sr);
             indexOfProcessId = PhFindStringInString(argPart, 0, L"/PROCESSID:");
 
             if (indexOfProcessId == SIZE_MAX)
@@ -1787,7 +1768,7 @@ VOID PhApplyTreeNewFilters(
 }
 
 VOID NTAPI PhpCopyCellEMenuItemDeleteFunction(
-    _In_ struct _PH_EMENU_ITEM *Item
+    _In_ PPH_EMENU_ITEM Item
     )
 {
     PPH_COPY_CELL_CONTEXT context;
@@ -1798,7 +1779,7 @@ VOID NTAPI PhpCopyCellEMenuItemDeleteFunction(
 }
 
 BOOLEAN PhInsertCopyCellEMenuItem(
-    _In_ struct _PH_EMENU_ITEM *Menu,
+    _In_ PPH_EMENU_ITEM Menu,
     _In_ ULONG InsertAfterId,
     _In_ HWND TreeNewHandle,
     _In_ PPH_TREENEW_COLUMN Column
@@ -1846,7 +1827,7 @@ BOOLEAN PhInsertCopyCellEMenuItem(
 }
 
 BOOLEAN PhHandleCopyCellEMenuItem(
-    _In_ struct _PH_EMENU_ITEM *SelectedItem
+    _In_ PPH_EMENU_ITEM SelectedItem
     )
 {
     PPH_COPY_CELL_CONTEXT context;
@@ -1897,7 +1878,7 @@ BOOLEAN PhHandleCopyCellEMenuItem(
 }
 
 VOID NTAPI PhpCopyListViewEMenuItemDeleteFunction(
-    _In_ struct _PH_EMENU_ITEM *Item
+    _In_ PPH_EMENU_ITEM Item
     )
 {
     PPH_COPY_ITEM_CONTEXT context;
@@ -1908,7 +1889,7 @@ VOID NTAPI PhpCopyListViewEMenuItemDeleteFunction(
 }
 
 BOOLEAN PhInsertCopyListViewEMenuItem(
-    _In_ struct _PH_EMENU_ITEM *Menu,
+    _In_ PPH_EMENU_ITEM Menu,
     _In_ ULONG InsertAfterId,
     _In_ HWND ListViewHandle
     )
@@ -1979,7 +1960,7 @@ BOOLEAN PhInsertCopyListViewEMenuItem(
 }
 
 BOOLEAN PhHandleCopyListViewEMenuItem(
-    _In_ struct _PH_EMENU_ITEM *SelectedItem
+    _In_ PPH_EMENU_ITEM SelectedItem
     )
 {
     PPH_COPY_ITEM_CONTEXT context;
@@ -2112,7 +2093,7 @@ BOOLEAN PhpSelectFavoriteInRegedit(
 /**
  * Opens a key in the Registry Editor.
  *
- * \param hWnd A handle to the parent window.
+ * \param WindowHandle A handle to the parent window.
  * \param KeyName The key name to open.
  */
 VOID PhShellOpenKey(
@@ -2121,12 +2102,13 @@ VOID PhShellOpenKey(
     )
 {
     static PH_STRINGREF regeditKeyName = PH_STRINGREF_INIT(L"Software\\Microsoft\\Windows\\CurrentVersion\\Applets\\Regedit");
+    NTSTATUS status;
     HANDLE regeditKeyHandle;
     PPH_STRING lastKey;
     PPH_STRING regeditFileName;
     PH_STRINGREF systemRootString;
 
-    if (!NT_SUCCESS(PhCreateKey(
+    status = PhCreateKey(
         &regeditKeyHandle,
         KEY_WRITE,
         PH_KEY_CURRENT_USER,
@@ -2134,8 +2116,13 @@ VOID PhShellOpenKey(
         0,
         0,
         NULL
-        )))
+        );
+
+    if (!NT_SUCCESS(status))
+    {
+        PhShowStatus(WindowHandle, L"Unable to execute the program.", status, 0);
         return;
+    }
 
     lastKey = PhExpandKeyName(KeyName, FALSE);
     PhSetValueKeyZ(regeditKeyHandle, L"LastKey", REG_SZ, lastKey->Buffer, (ULONG)lastKey->Length + sizeof(UNICODE_NULL));
@@ -2150,11 +2137,17 @@ VOID PhShellOpenKey(
 
     if (PhGetOwnTokenAttributes().Elevated)
     {
-        PhShellExecute(WindowHandle, regeditFileName->Buffer, NULL);
+        if (!PhShellExecuteEx(WindowHandle, regeditFileName->Buffer, NULL, NULL, SW_SHOW, 0, 0, NULL))
+        {
+            PhShowStatus(WindowHandle, L"Unable to execute the program.", 0, GetLastError());
+        }
     }
     else
     {
-        PhShellExecuteEx(WindowHandle, regeditFileName->Buffer, NULL, NULL, SW_NORMAL, PH_SHELL_EXECUTE_ADMIN, 0, NULL);
+        if (!PhShellExecuteEx(WindowHandle, regeditFileName->Buffer, NULL, NULL, SW_SHOW, PH_SHELL_EXECUTE_ADMIN, 0, NULL))
+        {
+            PhShowStatus(WindowHandle, L"Unable to execute the program.", 0, GetLastError());
+        }
     }
 
     PhDereferenceObject(regeditFileName);
@@ -2262,10 +2255,28 @@ PPH_STRING PhPcre2GetErrorMessage(
 }
 
 HBITMAP PhGetShieldBitmap(
-    _In_ LONG dpiValue
+    _In_ LONG WindowDpi,
+    _In_opt_ LONG Width,
+    _In_opt_ LONG Height
     )
 {
     static HBITMAP shieldBitmap = NULL;
+    static LONG systemDpi = 0;
+    static LONG width = 0;
+    static LONG height = 0;
+
+    if (systemDpi != WindowDpi || width != Width || height != Height)
+    {
+        if (shieldBitmap)
+        {
+            DeleteBitmap(shieldBitmap);
+            shieldBitmap = NULL;
+        }
+
+        systemDpi = WindowDpi;
+        width = Width ? Width : PhGetSystemMetrics(SM_CXSMICON, systemDpi);
+        height = Height ? Height : PhGetSystemMetrics(SM_CYSMICON, systemDpi);
+    }
 
     if (!shieldBitmap)
     {
@@ -2277,7 +2288,7 @@ HBITMAP PhGetShieldBitmap(
             PH_LOAD_ICON_SIZE_SMALL,
             0,
             0,
-            dpiValue
+            systemDpi
             );
 
         if (!shieldIcon)
@@ -2288,13 +2299,17 @@ HBITMAP PhGetShieldBitmap(
                 PH_LOAD_ICON_SIZE_SMALL,
                 0,
                 0,
-                dpiValue
+                systemDpi
                 );
         }
 
         if (shieldIcon)
         {
-            shieldBitmap = PhIconToBitmap(shieldIcon, PhGetSystemMetrics(SM_CXSMICON, dpiValue), PhGetSystemMetrics(SM_CYSMICON, dpiValue));
+            shieldBitmap = PhIconToBitmap(
+                shieldIcon,
+                width,
+                height
+                );
             DestroyIcon(shieldIcon);
         }
     }

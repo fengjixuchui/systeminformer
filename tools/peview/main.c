@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010
- *     dmex    2017-2021
+ *     dmex    2017-2023
  *
  */
 
@@ -28,6 +28,28 @@ BOOLEAN NTAPI PvpCommandLineCallback(
         PhSwapReference(&PvFileName, Value);
 
     return TRUE;
+}
+
+NTSTATUS PvpConnectKph(
+    VOID
+    )
+{
+    NTSTATUS status;
+    PPH_STRING portName = NULL;
+
+    status = KphInitialize();
+    if (!NT_SUCCESS(status))
+        return status;
+
+    // TODO: get the current configured port name from the main binary, settings aren't shared.
+    //if (PhIsNullOrEmptyString(portName = PhGetStringSetting(L"KphPortName")))
+        PhMoveReference(&portName, PhCreateString(KPH_PORT_NAME));
+
+    status = KphCommsStart(&portName->sr, NULL);
+
+    PhDereferenceObject(portName);
+
+    return status;
 }
 
 INT WINAPI wWinMain(
@@ -114,6 +136,7 @@ INT WINAPI wWinMain(
     PvPropInitialization();
     PhTreeNewInitialization();
     PvInitializeSuperclassControls();
+    PvpConnectKph();
 
     if (!NT_SUCCESS(PhGetProcessCommandLineStringRef(&commandLine)))
         return 1;
@@ -181,6 +204,9 @@ INT WINAPI wWinMain(
 
     if (PhIsNullOrEmptyString(PvFileName))
         return 1;
+
+    // Note: Resolve the filename when we're passed a native device prefix (dmex)
+    PhMoveReference(&PvFileName, PhGetFileName(PvFileName));
 
 #ifdef DEBUG
     if (!PhDoesFileExistWin32(PhGetString(PvFileName)))
@@ -274,10 +300,9 @@ INT WINAPI wWinMain(
                     status = STATUS_IMAGE_SUBSYSTEM_NOT_PRESENT;
                     break;
                 }
-            }
 
-            if (NT_SUCCESS(status))
                 PhUnloadMappedImage(&PvMappedImage);
+            }
         }
 
         if (!NT_SUCCESS(status))

@@ -23,8 +23,8 @@
 #include <mapimg.h>
 #include <mapldr.h>
 
-#include "../tools/thirdparty/msdiasdk/dia2.h"
-#include "../tools/thirdparty/msdiasdk/dia3.h"
+#include "../tools/thirdparty/winsdk/dia2.h"
+#include "../tools/thirdparty/winsdk/dia3.h"
 
 #if defined(_ARM64_)
 static const ULONG NativeMachine = IMAGE_FILE_MACHINE_ARM64;
@@ -285,8 +285,8 @@ static VOID PhpSymbolProviderEventCallback(
 
                     valueString = PhSubstring(
                         string,
-                        progressStartIndex + wcslen(L"percent=\""),
-                        progressValueLength - wcslen(L"percent=\"")
+                        progressStartIndex + (RTL_NUMBER_OF(L"percent=\"") - 1),
+                        progressValueLength - (RTL_NUMBER_OF(L"percent=\"") - 1)
                         );
 
                     if (PhStringToInteger64(&valueString->sr, 10, &integer))
@@ -565,7 +565,7 @@ VOID PhpFreeSymbolModule(
     PhFree(SymbolModule);
 }
 
-static LONG NTAPI PhpSymbolModuleCompareFunction(
+LONG NTAPI PhpSymbolModuleCompareFunction(
     _In_ PPH_AVL_LINKS Links1,
     _In_ PPH_AVL_LINKS Links2
     )
@@ -1237,7 +1237,7 @@ static BOOLEAN NTAPI PhpSymbolProviderEnumModulesCallback(
     return TRUE;
 }
 
-VOID PhLoadModulesForProcessSymbolProvider(
+VOID PhLoadModulesForVirtualSymbolProvider(
     _In_ PPH_SYMBOL_PROVIDER SymbolProvider,
     _In_opt_ HANDLE ProcessId
     )
@@ -1247,17 +1247,36 @@ VOID PhLoadModulesForProcessSymbolProvider(
     memset(&context, 0, sizeof(PHP_LOAD_PROCESS_SYMBOLS_CONTEXT));
     context.SymbolProvider = SymbolProvider;
 
-    if (SymbolProvider->IsRealHandle)
+    if (ProcessId)
     {
-        // Load symbols for the process.
-        context.LoadingSymbolsForProcessId = ProcessId;
-        PhEnumGenericModules(
-            ProcessId,
-            SymbolProvider->ProcessHandle,
-            0,
-            PhpSymbolProviderEnumModulesCallback,
-            &context
-            );
+        HANDLE processHandle = NULL;
+
+        if (SymbolProvider->IsRealHandle)
+        {
+            processHandle = SymbolProvider->ProcessHandle;
+        }
+        else
+        {
+            PhOpenProcess(&processHandle, PROCESS_QUERY_LIMITED_INFORMATION, ProcessId);
+        }
+
+        if (processHandle)
+        {
+            // Load symbols for the process.
+            context.LoadingSymbolsForProcessId = ProcessId;
+            PhEnumGenericModules(
+                ProcessId,
+                processHandle,
+                PH_ENUM_GENERIC_MAPPED_IMAGES,
+                PhpSymbolProviderEnumModulesCallback,
+                &context
+                );
+        }
+
+        if (!SymbolProvider->IsRealHandle && processHandle)
+        {
+            NtClose(processHandle);
+        }
     }
 
     // Load symbols for kernel modules.
@@ -1272,26 +1291,32 @@ VOID PhLoadModulesForProcessSymbolProvider(
 
     // Load symbols for ntdll.dll and kernel32.dll (dmex)
     {
-        static PH_STRINGREF ntdllSr = PH_STRINGREF_INIT(L"ntdll.dll");
-        static PH_STRINGREF kernel32Sr = PH_STRINGREF_INIT(L"kernel32.dll");
+        static PH_STRINGREF ntdllFileName = PH_STRINGREF_INIT(L"ntdll.dll");
+        static PH_STRINGREF kernel32FileName = PH_STRINGREF_INIT(L"kernel32.dll");
         PLDR_DATA_TABLE_ENTRY entry;
 
-        if (entry = PhFindLoaderEntry(NULL, NULL, &ntdllSr))
+        if (entry = PhFindLoaderEntry(NULL, NULL, &ntdllFileName))
         {
+            PH_STRINGREF fullName;
             PPH_STRING fileName;
 
-            if (NT_SUCCESS(PhGetProcessMappedFileName(NtCurrentProcess(), entry->DllBase, &fileName)))
+            PhUnicodeStringToStringRef(&entry->FullDllName, &fullName);
+
+            if (fileName = PhDosPathNameToNtPathName(&fullName))
             {
                 PhLoadModuleSymbolProvider(SymbolProvider, fileName, (ULONG64)entry->DllBase, entry->SizeOfImage);
                 PhDereferenceObject(fileName);
             }
         }
 
-        if (entry = PhFindLoaderEntry(NULL, NULL, &kernel32Sr))
+        if (entry = PhFindLoaderEntry(NULL, NULL, &kernel32FileName))
         {
+            PH_STRINGREF fullName;
             PPH_STRING fileName;
 
-            if (NT_SUCCESS(PhGetProcessMappedFileName(NtCurrentProcess(), entry->DllBase, &fileName)))
+            PhUnicodeStringToStringRef(&entry->FullDllName, &fullName);
+
+            if (fileName = PhDosPathNameToNtPathName(&fullName))
             {
                 PhLoadModuleSymbolProvider(SymbolProvider, fileName, (ULONG64)entry->DllBase, entry->SizeOfImage);
                 PhDereferenceObject(fileName);
@@ -1791,6 +1816,26 @@ PVOID __stdcall PhFunctionTableAccess64(
     return entry;
 }
 
+/**
+ * Walks a thread's stack.
+ *
+ * \param MachineType The architecture type of the computer for which the stack trace is generated.
+ * \param ProcessHandle A handle to the thread's parent process. The handle must have
+ * PROCESS_QUERY_INFORMATION and PROCESS_VM_READ access. If a symbol provider is being used, pass
+ * its process handle and specify the symbol provider in \a SymbolProvider.
+ * \param ThreadHandle A handle to a thread. The handle must have THREAD_QUERY_LIMITED_INFORMATION,
+ * THREAD_GET_CONTEXT and THREAD_SUSPEND_RESUME access. The handle can have any access for kernel
+ * stack walking.
+ * \param StackFrame A pointer to a STACKFRAME_EX structure. This structure receives information for the next frame, if the function call succeeds.
+ * \param ContextRecord A pointer to a CONTEXT structure.
+ * \param SymbolProvider The associated symbol provider.
+ * \param ReadMemoryRoutine A callback routine that provides memory read services.
+ * \param FunctionTableAccessRoutine A callback routine that provides access to the run-time function table for the process.
+ * \param GetModuleBaseRoutine A callback routine that provides a module base for any given virtual address.
+ * \param TranslateAddress A callback routine that provides address translation for 16-bit addresses.
+ *
+ * \return Successful or errant status.
+ */
 BOOLEAN PhStackWalk(
     _In_ ULONG MachineType,
     _In_ HANDLE ProcessHandle,
@@ -2042,7 +2087,8 @@ NTSTATUS PhWalkThreadStack(
             sizeof(stack) / sizeof(PVOID),
             stack,
             &capturedFrames,
-            NULL
+            NULL,
+            0
             )))
         {
             PH_THREAD_STACK_FRAME threadStackFrame;
@@ -2189,6 +2235,16 @@ NTSTATUS PhWalkThreadStack(
 
             if (!Callback(&threadStackFrame, Context))
                 goto ResumeExit;
+
+#if defined(_X86_)
+            // (x86 only) Allow the user to change Eip, Esp and Ebp.
+            u.Context.Eip = PtrToUlong(threadStackFrame.PcAddress);
+            stackFrame.AddrPC.Offset = PtrToUlong(threadStackFrame.PcAddress);
+            u.Context.Ebp = PtrToUlong(threadStackFrame.FrameAddress);
+            stackFrame.AddrFrame.Offset = PtrToUlong(threadStackFrame.FrameAddress);
+            u.Context.Esp = PtrToUlong(threadStackFrame.StackAddress);
+            stackFrame.AddrStack.Offset = PtrToUlong(threadStackFrame.StackAddress);
+#endif
         }
     }
 
@@ -3122,7 +3178,7 @@ PPH_STRING PhGetDiaSymbolLineInformation(
         ULONG count;
         IDiaEnumLineNumbers* enumLineNumbers;
 
-        if (IDiaSession_findLinesByVA(Session, Address, (ULONG)Length, &enumLineNumbers) == S_OK)  
+        if (IDiaSession_findLinesByVA(Session, Address, (ULONG)Length, &enumLineNumbers) == S_OK)
         {
             if (IDiaEnumLineNumbers_Next(enumLineNumbers, 1, &symbolLineNumber, &count) == S_OK)
             {
@@ -3255,8 +3311,8 @@ PPH_STRING PhGetDiaSymbolExtraInformation(
     if (IDiaSymbol_get_isOptimizedForSpeed(Symbol, &symbolBoolean) == S_OK && symbolBoolean)
     {
         PhAppendStringBuilder2(&stringBuilder, L"OptimizedForSpeed, ");
-    }   
-    
+    }
+
     if (IDiaSymbol_get_isPGO(Symbol, &symbolBoolean) == S_OK && symbolBoolean)
     {
         PhAppendStringBuilder2(&stringBuilder, L"PGO, ");
@@ -3275,7 +3331,7 @@ PPH_STRING PhGetDiaSymbolExtraInformation(
 
 _Success_(return)
 BOOLEAN PhGetDiaSymbolInformation(
-    _In_ PPH_SYMBOL_PROVIDER SymbolProvider, 
+    _In_ PPH_SYMBOL_PROVIDER SymbolProvider,
     _In_ ULONG64 Address,
     _Out_ PPH_DIA_SYMBOL_INFORMATION SymbolInformation
     )

@@ -25,7 +25,6 @@ typedef struct _KPH_ENUM_FOR_PROTECTION
     PKPH_PROCESS_CONTEXT ProcessEnum;
     PKPH_PROCESS_CONTEXT Process;
     NTSTATUS Status;
-
 } KPH_ENUM_FOR_PROTECTION, *PKPH_ENUM_FOR_PROTECTION;
 
 typedef struct _KPH_IMAGE_LOAD_APC
@@ -34,7 +33,6 @@ typedef struct _KPH_IMAGE_LOAD_APC
     PKPH_PROCESS_CONTEXT Process;
     PVOID ImageBase;
     PFILE_OBJECT FileObject;
-
 } KPH_IMAGE_LOAD_APC, *PKPH_IMAGE_LOAD_APC;
 
 typedef struct _KPH_IMAGE_LOAD_APC_INIT
@@ -42,7 +40,6 @@ typedef struct _KPH_IMAGE_LOAD_APC_INIT
     PKPH_PROCESS_CONTEXT Process;
     PVOID ImageBase;
     PFILE_OBJECT FileObject;
-
 } KPH_IMAGE_LOAD_APC_INIT, *PKPH_IMAGE_LOAD_APC_INIT;
 
 /**
@@ -184,8 +181,6 @@ BOOLEAN KphpShouldSuppressObjectProtections(
     )
 {
     NTSTATUS status;
-    SECURITY_SUBJECT_CONTEXT subjectContext;
-    BOOLEAN accessGranted;
 
     PAGED_PASSIVE();
 
@@ -216,29 +211,7 @@ BOOLEAN KphpShouldSuppressObjectProtections(
         return TRUE;
     }
 
-    if (KphOsVersion >= KphWin81)
-    {
-        return FALSE;
-    }
-
-    SeCaptureSubjectContextEx(NULL, Actor->EProcess, &subjectContext);
-
-    accessGranted = KphSinglePrivilegeCheckEx(SeDebugPrivilege,
-                                              &subjectContext,
-                                              UserMode);
-
-    SeReleaseSubjectContext(&subjectContext);
-
-    if (accessGranted)
-    {
-        KphTracePrint(TRACE_LEVEL_VERBOSE,
-                      PROTECTION,
-                      "Protected process %lu access granted to process %lu",
-                      HandleToULong(Target->ProcessId),
-                      HandleToULong(Actor->ProcessId));
-    }
-
-    return accessGranted;
+    return FALSE;
 }
 
 /**
@@ -438,6 +411,29 @@ VOID KphStopProtectingProcess(
 }
 
 /**
+ * \brief Determines if a process is protected.
+ *
+ * \param[in] Process The process to check.
+ *
+ * \return TRUE if the process is protected, FALSE otherwise.
+ */
+_IRQL_requires_max_(PASSIVE_LEVEL)
+BOOLEAN KphIsProtectedProcess(
+    _In_ PKPH_PROCESS_CONTEXT Process
+    )
+{
+    BOOLEAN isProtectedProcess;
+
+    PAGED_PASSIVE();
+
+    KphAcquireRWLockShared(&Process->ProtectionLock);
+    isProtectedProcess = Process->Protected ? TRUE : FALSE;
+    KphReleaseRWLock(&Process->ProtectionLock);
+
+    return isProtectedProcess;
+}
+
+/**
  * \brief Starts protecting a process.
  *
  * \param[in] Process The process to start protecting.
@@ -477,7 +473,7 @@ NTSTATUS KphStartProtectingProcess(
 
     SeCaptureSubjectContextEx(NULL, Process->EProcess, &subjectContext);
 
-    accessGranted = KphSinglePrivilegeCheckEx(SeDebugPrivilege,
+    accessGranted = KphSinglePrivilegeCheckEx(SeExports->SeDebugPrivilege,
                                               &subjectContext,
                                               UserMode);
 
@@ -1056,10 +1052,13 @@ VOID KphpHandleUntrustedImageLoad(
         goto Exit;
     }
 
-    if (!actor->ProcessContext->ApcNoopRoutine)
+    status = KphCheckProcessApcNoopRoutine(actor->ProcessContext);
+    if (!NT_SUCCESS(status))
     {
-        KphTracePrint(TRACE_LEVEL_ERROR, TRACKING, "APC no-op routine null.");
-        status = STATUS_BAD_FUNCTION_TABLE;
+        KphTracePrint(TRACE_LEVEL_ERROR,
+                      PROTECTION,
+                      "KphCheckProcessApcNoopRoutine failed: %!STATUS!",
+                      status);
         goto Exit;
     }
 
@@ -1442,72 +1441,6 @@ Exit:
 }
 
 /**
- * \brief Checks if we should suppress image protections.
- *
- * \param[in] Process The process where the image is being loaded.
- *
- * \return TRUE if we should suppress image protections, FALSE otherwise.
- */
-_IRQL_requires_max_(PASSIVE_LEVEL)
-BOOLEAN KphpShouldSuppressImageProtections(
-    _Inout_ PKPH_PROCESS_CONTEXT Process
-    )
-{
-    PAGED_PASSIVE();
-
-    if (KphOsVersion >= KphWin8)
-    {
-        return FALSE;
-    }
-
-    if (Process->EProcess != PsGetCurrentProcess())
-    {
-        return FALSE;
-    }
-
-#if defined(_WIN64)
-    if (PsGetCurrentProcessWow64Process())
-    {
-        __try
-        {
-            PTEB32 teb32;
-
-            teb32 = PsGetCurrentThreadTeb();
-
-            if (teb32 && teb32->SuppressDebugMsg)
-            {
-                return TRUE;
-            }
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            NOTHING;
-        }
-
-        return FALSE;
-    }
-#endif
-
-    __try
-    {
-        PTEB teb;
-
-        teb = PsGetCurrentThreadTeb();
-
-        if (teb && teb->SuppressDebugMsg)
-        {
-            return TRUE;
-        }
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER)
-    {
-        NOTHING;
-    }
-
-    return FALSE;
-}
-
-/**
  * \brief Applies image protections on verified processes.
  *
  * \param[in,out] Process The process where the image is being loaded.
@@ -1539,11 +1472,6 @@ VOID KphApplyImageProtections(
     if (ImageInfo->ImageInfo.ImageSignatureLevel == SE_SIGNING_LEVEL_ANTIMALWARE)
     {
         InterlockedIncrementSizeT(&Process->NumberOfAntimalwareImageLoads);
-        goto Exit;
-    }
-
-    if (KphpShouldSuppressImageProtections(Process))
-    {
         goto Exit;
     }
 

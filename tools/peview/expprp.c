@@ -25,6 +25,7 @@ typedef enum _PV_EXPORT_TREE_COLUMN_ITEM
     PV_EXPORT_TREE_COLUMN_ITEM_HINT,
     PV_EXPORT_TREE_COLUMN_ITEM_FWDNAME,
     PV_EXPORT_TREE_COLUMN_ITEM_SYMBOL,
+    PV_EXPORT_TREE_COLUMN_ITEM_SUPRESSION,
     PV_EXPORT_TREE_COLUMN_ITEM_MAXIMUM
 } PV_EXPORT_TREE_COLUMN_ITEM;
 
@@ -37,6 +38,7 @@ typedef struct _PV_EXPORT_NODE
     ULONG Ordinal;
     ULONG Hint;
     BOOLEAN ExportForwarded;
+    BOOLEAN ExportSuppressed;
     PPH_STRING UniqueIdString;
     PPH_STRING AddressString;
     PPH_STRING NameString;
@@ -148,10 +150,65 @@ VOID PvAddPendingExportNodes(
     TreeNew_SetRedraw(Context->TreeNewHandle, TRUE);
 }
 
+PPH_HASHTABLE PvPeCreateSuppressedGuardHashtable(
+    VOID
+    )
+{
+    PPH_HASHTABLE supressedHashTable = NULL;
+    PH_MAPPED_IMAGE_CFG cfgConfig = { 0 };
+
+    if (NT_SUCCESS(PhGetMappedImageCfg(&cfgConfig, &PvMappedImage)))
+    {
+        supressedHashTable = PhCreateSimpleHashtable(500);
+
+        for (ULONGLONG i = 0; i < cfgConfig.NumberOfGuardFunctionEntries; i++)
+        {
+            IMAGE_CFG_ENTRY cfgFunctionEntry = { 0 };
+
+            if (NT_SUCCESS(PhGetMappedImageCfgEntry(&cfgConfig, i, ControlFlowGuardFunction, &cfgFunctionEntry)))
+            {
+                if (cfgFunctionEntry.ExportSuppressed)
+                {
+                    PhAddItemSimpleHashtable(supressedHashTable, UlongToPtr(cfgFunctionEntry.Rva), UlongToPtr(TRUE));
+                }
+            }
+        }
+
+        for (ULONGLONG i = 0; i < cfgConfig.NumberOfGuardAdressIatEntries; i++)
+        {
+            IMAGE_CFG_ENTRY cfgFunctionEntry = { 0 };
+
+            if (NT_SUCCESS(PhGetMappedImageCfgEntry(&cfgConfig, i, ControlFlowGuardTakenIatEntry, &cfgFunctionEntry)))
+            {
+                if (cfgFunctionEntry.ExportSuppressed)
+                {
+                    PhAddItemSimpleHashtable(supressedHashTable, UlongToPtr(cfgFunctionEntry.Rva), UlongToPtr(TRUE));
+                }
+            }
+        }
+
+        for (ULONGLONG i = 0; i < cfgConfig.NumberOfGuardLongJumpEntries; i++)
+        {
+            IMAGE_CFG_ENTRY cfgFunctionEntry = { 0 };
+
+            if (NT_SUCCESS(PhGetMappedImageCfgEntry(&cfgConfig, i, ControlFlowGuardLongJump, &cfgFunctionEntry)))
+            {
+                if (cfgFunctionEntry.ExportSuppressed)
+                {
+                    PhAddItemSimpleHashtable(supressedHashTable, UlongToPtr(cfgFunctionEntry.Rva), UlongToPtr(TRUE));
+                }
+            }
+        }
+    }
+
+    return supressedHashTable;
+}
+
 NTSTATUS PvpPeExportsEnumerateThread(
     _In_ PPV_EXPORT_CONTEXT Context
     )
 {
+    PPH_HASHTABLE supressedHashTable = PvPeCreateSuppressedGuardHashtable();
     PH_MAPPED_IMAGE_EXPORTS exports;
     PH_MAPPED_IMAGE_EXPORT_ENTRY exportEntry;
     PH_MAPPED_IMAGE_EXPORT_FUNCTION exportFunction;
@@ -192,6 +249,7 @@ NTSTATUS PvpPeExportsEnumerateThread(
                 if (exportFunction.ForwardedName)
                 {
                     PPH_STRING forwardName;
+                    PPH_STRING importDllName;
 
                     forwardName = PhConvertUtf8ToUtf16(exportFunction.ForwardedName);
 
@@ -201,6 +259,16 @@ NTSTATUS PvpPeExportsEnumerateThread(
 
                         if (undecoratedName = PhUndecorateSymbolName(PvSymbolProvider, forwardName->Buffer))
                             PhMoveReference(&forwardName, undecoratedName);
+                    }
+
+                    if (importDllName = PhApiSetResolveToHost(&forwardName->sr))
+                    {
+                        PhMoveReference(&forwardName, PhFormatString(
+                            L"%s (%s)",
+                            PhGetString(forwardName),
+                            PhGetString(importDllName))
+                            );
+                        PhDereferenceObject(importDllName);
                     }
 
                     exportNode->ForwardString = forwardName;
@@ -216,7 +284,7 @@ NTSTATUS PvpPeExportsEnumerateThread(
                     {
                         PPH_STRING undecoratedName;
 
-                        if (undecoratedName = PhUndecorateSymbolName(PvSymbolProvider, exportName->Buffer))
+                        if (undecoratedName = PhUndecorateSymbolName(PvSymbolProvider, PhGetString(exportName)))
                             PhMoveReference(&exportName, undecoratedName);
                     }
 
@@ -252,7 +320,10 @@ NTSTATUS PvpPeExportsEnumerateThread(
                             );
                     }
 
-                    if (exportSymbolName && exportNode->NameString && !PhEqualString(exportSymbolName, exportNode->NameString, TRUE))
+                    if (
+                        (exportSymbolName && PhIsNullOrEmptyString(exportNode->NameString)) ||
+                        (exportNode->NameString && !PhEqualString(exportSymbolName, exportNode->NameString, TRUE))
+                        )
                     {
                         exportNode->SymbolString = PhReferenceObject(exportSymbolName);
                     }
@@ -261,12 +332,22 @@ NTSTATUS PvpPeExportsEnumerateThread(
                     PhClearReference(&exportSymbol);
                 }
 
+                if (exportFunction.Function && supressedHashTable)
+                {
+                    if (PhFindItemSimpleHashtable2(supressedHashTable, exportFunction.Function))
+                    {
+                        exportNode->ExportSuppressed = TRUE;
+                    }
+                }
+
                 PhAcquireQueuedLockExclusive(&Context->SearchResultsLock);
                 PhAddItemList(Context->SearchResults, exportNode);
                 PhReleaseQueuedLockExclusive(&Context->SearchResultsLock);
             }
         }
     }
+
+    PhClearReference(&supressedHashTable);
 
     PostMessage(Context->WindowHandle, WM_PV_SEARCH_FINISHED, 0, 0);
     return STATUS_SUCCESS;
@@ -680,6 +761,24 @@ BEGIN_SORT_FUNCTION(Hint)
 }
 END_SORT_FUNCTION
 
+BEGIN_SORT_FUNCTION(ForwardName)
+{
+    sortResult = PhCompareStringWithNull(node1->ForwardString, node2->ForwardString, FALSE);
+}
+END_SORT_FUNCTION
+
+BEGIN_SORT_FUNCTION(Symbol)
+{
+    sortResult = PhCompareStringWithNull(node1->SymbolString, node2->SymbolString, FALSE);
+}
+END_SORT_FUNCTION
+
+BEGIN_SORT_FUNCTION(Supression)
+{
+    sortResult = ucharcmp(node1->ExportSuppressed, node2->ExportSuppressed);
+}
+END_SORT_FUNCTION
+
 BOOLEAN NTAPI PvExportTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
@@ -707,8 +806,13 @@ BOOLEAN NTAPI PvExportTreeNewCallback(
                     SORT_FUNCTION(Name),
                     SORT_FUNCTION(Ordinal),
                     SORT_FUNCTION(Hint),
+                    SORT_FUNCTION(ForwardName),
+                    SORT_FUNCTION(Symbol),
+                    SORT_FUNCTION(Supression),
                 };
                 int (__cdecl *sortFunction)(void *, const void *, const void *);
+
+                static_assert(RTL_NUMBER_OF(sortFunctions) == PV_EXPORT_TREE_COLUMN_ITEM_MAXIMUM, "SortFunctions must equal maximum.");
 
                 if (context->TreeNewSortColumn < PV_EXPORT_TREE_COLUMN_ITEM_MAXIMUM)
                     sortFunction = sortFunctions[context->TreeNewSortColumn];
@@ -760,6 +864,14 @@ BOOLEAN NTAPI PvExportTreeNewCallback(
                 break;
             case PV_EXPORT_TREE_COLUMN_ITEM_SYMBOL:
                 getCellText->Text = PhGetStringRef(node->SymbolString);
+                break;
+            case PV_EXPORT_TREE_COLUMN_ITEM_SUPRESSION:
+                {
+                    if (node->ExportSuppressed)
+                        PhInitializeStringRef(&getCellText->Text, L"Yes");
+                    else
+                        PhInitializeEmptyStringRef(&getCellText->Text);
+                }
                 break;
             default:
                 return FALSE;
@@ -922,6 +1034,7 @@ VOID PvInitializeExportTree(
     PhAddTreeNewColumnEx2(TreeNewHandle, PV_EXPORT_TREE_COLUMN_ITEM_HINT, TRUE, L"Hint", 50, PH_ALIGN_LEFT, PV_EXPORT_TREE_COLUMN_ITEM_HINT, 0, 0);
     PhAddTreeNewColumnEx2(TreeNewHandle, PV_EXPORT_TREE_COLUMN_ITEM_FWDNAME, TRUE, L"Forwarded name", 150, PH_ALIGN_LEFT, PV_EXPORT_TREE_COLUMN_ITEM_FWDNAME, 0, 0);
     PhAddTreeNewColumnEx2(TreeNewHandle, PV_EXPORT_TREE_COLUMN_ITEM_SYMBOL, TRUE, L"Undecorated name", 150, PH_ALIGN_LEFT, PV_EXPORT_TREE_COLUMN_ITEM_SYMBOL, 0, 0);
+    PhAddTreeNewColumnEx2(TreeNewHandle, PV_EXPORT_TREE_COLUMN_ITEM_SUPRESSION, TRUE, L"CFG export suppression", 80, PH_ALIGN_LEFT, PV_EXPORT_TREE_COLUMN_ITEM_SUPRESSION, 0, 0);
 
     TreeNew_SetRedraw(TreeNewHandle, TRUE);
     TreeNew_SetSort(TreeNewHandle, PV_EXPORT_TREE_COLUMN_ITEM_INDEX, AscendingSortOrder);

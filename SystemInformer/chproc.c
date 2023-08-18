@@ -123,7 +123,7 @@ static VOID PhpRefreshProcessList(
 
         if (process->UniqueProcessId == SYSTEM_IDLE_PROCESS_ID && !userName)
         {
-            PhSetReference(&userName, PhGetSidFullName(&PhSeLocalSystemSid, TRUE, NULL));
+            PhSetReference(&userName, PhGetSidFullName((PSID)&PhSeLocalSystemSid, TRUE, NULL));
         }
 
         if (process->UniqueProcessId == SYSTEM_PROCESS_ID)
@@ -178,13 +178,23 @@ static VOID PhpChooseProcessSetImagelist(
 
     dpiValue = PhGetWindowDpi(context->ListViewHandle);
 
-    if (context->ImageList) PhImageListDestroy(context->ImageList);
-    context->ImageList = PhImageListCreate(
-        PhGetSystemMetrics(SM_CXSMICON, dpiValue),
-        PhGetSystemMetrics(SM_CYSMICON, dpiValue),
-        ILC_MASK | ILC_COLOR32,
-        0, 40
-        );
+    if (context->ImageList)
+    {
+        PhImageListSetIconSize(
+            context->ImageList,
+            PhGetSystemMetrics(SM_CXSMICON, dpiValue),
+            PhGetSystemMetrics(SM_CYSMICON, dpiValue)
+            );
+    }
+    else
+    {
+        context->ImageList = PhImageListCreate(
+            PhGetSystemMetrics(SM_CXSMICON, dpiValue),
+            PhGetSystemMetrics(SM_CYSMICON, dpiValue),
+            ILC_MASK | ILC_COLOR32,
+            0, 40
+            );
+    }
 
     ListView_SetImageList(context->ListViewHandle, context->ImageList, LVSIL_SMALL);
 }

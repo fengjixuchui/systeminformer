@@ -82,7 +82,7 @@ static VOID NTAPI ThreadsLoadingStateChangedHandler(
     //    TNM_SETCURSOR,
     //    0,
     //    // Parameter contains TRUE if loading symbols
-    //    (LPARAM)(Parameter ? LoadCursor(NULL, IDC_APPSTARTING) : NULL)
+    //    (LPARAM)(Parameter ? PhLoadCursor(NULL, IDC_APPSTARTING) : NULL)
     //    );
 }
 
@@ -704,7 +704,7 @@ VOID PhpProcessThreadsSave(
             else
                 mode = PH_EXPORT_MODE_TABS;
 
-            PhWriteStringAsUtf8FileStream(fileStream, &PhUnicodeByteOrderMark);
+            PhWriteStringAsUtf8FileStream(fileStream, (PPH_STRINGREF)&PhUnicodeByteOrderMark);
             PhWritePhTextHeader(fileStream);
 
             lines = PhpGetProcessThreadTreeListLines(
@@ -1121,7 +1121,11 @@ INT_PTR CALLBACK PhpProcessThreadsDlgProc(
                         }
                         else
                         {
-                            PhShowStatus(hwndDlg, L"Unable to open the thread", status, 0);
+                            PhShowStatus(hwndDlg, PhaFormatString(
+                                L"Unable to %s thread %lu", // string pooling optimization (dmex)
+                                L"set the boost priority of",
+                                HandleToUlong(threadItem->ThreadId)
+                                )->Buffer, status, 0);
                         }
                     }
                 }

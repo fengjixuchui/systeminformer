@@ -111,9 +111,6 @@
     <ClCompile Include="netprv.c">
       <Filter>System Informer</Filter>
     </ClCompile>
-    <ClCompile Include="netstk.c">
-      <Filter>System Informer</Filter>
-    </ClCompile>
     <ClCompile Include="notifico.c">
       <Filter>System Informer</Filter>
     </ClCompile>
@@ -324,6 +321,15 @@
     <ClCompile Include="ksyscall.c">
       <Filter>System Informer</Filter>
     </ClCompile>
+    <ClCompile Include="memmod.c">
+      <Filter>System Informer</Filter>
+    </ClCompile>
+    <ClCompile Include="devprv.c">
+      <Filter>System Informer</Filter>
+    </ClCompile>
+    <ClCompile Include="mwpgdev.c">
+      <Filter>System Informer</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\hidnproc.h">
@@ -471,6 +477,9 @@
       <Filter>Headers</Filter>
     </ClInclude>
     <ClInclude Include="include\ksisup.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\devprv.h">
       <Filter>Headers</Filter>
     </ClInclude>
   </ItemGroup>

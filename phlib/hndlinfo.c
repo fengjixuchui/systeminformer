@@ -14,7 +14,9 @@
 #include <hndlinfo.h>
 #include <json.h>
 #include <kphuser.h>
+#include <mapldr.h>
 #include <lsasup.h>
+
 #include <devquery.h>
 #include <devpkey.h>
 
@@ -600,20 +602,6 @@ PPH_STRING PhGetPnPDeviceName(
     _In_ PPH_STRING ObjectName
     )
 {
-    static PH_INITONCE initOnce = PH_INITONCE_INIT;
-    static HRESULT (WINAPI* DevGetObjects_I)(
-        _In_ DEV_OBJECT_TYPE ObjectType,
-        _In_ ULONG QueryFlags,
-        _In_ ULONG cRequestedProperties,
-        _In_reads_opt_(cRequestedProperties) const DEVPROPCOMPKEY *pRequestedProperties,
-        _In_ ULONG cFilterExpressionCount,
-        _In_reads_opt_(cFilterExpressionCount) const DEVPROP_FILTER_EXPRESSION *pFilter,
-        _Out_ PULONG pcObjectCount,
-        _Outptr_result_buffer_maybenull_(*pcObjectCount) const DEV_OBJECT **ppObjects) = NULL;
-    static HRESULT (WINAPI* DevFreeObjects_I)(
-        _In_ ULONG cObjectCount,
-        _In_reads_(cObjectCount) const DEV_OBJECT *pObjects) = NULL;
-
     PPH_STRING objectPnPDeviceName = NULL;
     ULONG deviceCount = 0;
     PDEV_OBJECT deviceObjects = NULL;
@@ -621,22 +609,6 @@ PPH_STRING PhGetPnPDeviceName(
     DEVPROP_FILTER_EXPRESSION deviceFilter[1];
     DEVPROPERTY deviceFilterProperty;
     DEVPROPCOMPKEY deviceFilterCompoundProp;
-
-    if (PhBeginInitOnce(&initOnce))
-    {
-        PVOID cfgmgr32;
-
-        if (cfgmgr32 = PhLoadLibrary(L"cfgmgr32.dll"))
-        {
-            DevGetObjects_I = PhGetDllBaseProcedureAddress(cfgmgr32, "DevGetObjects", 0);
-            DevFreeObjects_I = PhGetDllBaseProcedureAddress(cfgmgr32, "DevFreeObjects", 0);
-        }
-
-        PhEndInitOnce(&initOnce);
-    }
-
-    if (!(DevGetObjects_I && DevFreeObjects_I))
-        return NULL;
 
     memset(deviceProperties, 0, sizeof(deviceProperties));
     deviceProperties[0].Key = DEVPKEY_NAME;
@@ -659,7 +631,7 @@ PPH_STRING PhGetPnPDeviceName(
     deviceFilter[0].Operator = DEVPROP_OPERATOR_EQUALS_IGNORE_CASE;
     deviceFilter[0].Property = deviceFilterProperty;
 
-    if (SUCCEEDED(DevGetObjects_I(
+    if (HR_SUCCESS(PhDevGetObjects(
         DevObjectTypeDevice,
         DevQueryFlagNone,
         RTL_NUMBER_OF(deviceProperties),
@@ -730,7 +702,7 @@ PPH_STRING PhGetPnPDeviceName(
                 PhDereferenceObject(deviceName);
         }
 
-        DevFreeObjects_I(deviceCount, deviceObjects);
+        PhDevFreeObjects(deviceCount, deviceObjects);
     }
 
     return objectPnPDeviceName;
@@ -1622,92 +1594,76 @@ NTSTATUS PhpGetBestObjectName(
 
         if (commsInfo.ClientCommunicationPort.OwnerProcessId == processInfo.UniqueProcessId)
         {
-            PhInitFormatS(&format[formatCount], L"Client: ");
-            formatCount++;
+            PhInitFormatS(&format[formatCount++], L"Client: ");
             if (commsInfo.ServerCommunicationPort.OwnerProcessId)
             {
-                PhInitFormatS(&format[formatCount], L"Connection to ");
-                formatCount++;
+                PhInitFormatS(&format[formatCount++], L"Connection to ");
                 clientId.UniqueProcess = commsInfo.ServerCommunicationPort.OwnerProcessId;
                 clientId.UniqueThread = 0;
                 name = PhStdGetClientIdName(&clientId);
             }
             else if (commsInfo.ClientCommunicationPort.ConnectionRefused)
             {
-                PhInitFormatS(&format[formatCount], L"Refused ");
-                formatCount++;
+                PhInitFormatS(&format[formatCount++], L"Refused ");
             }
             else if (commsInfo.ClientCommunicationPort.Closed)
             {
-                PhInitFormatS(&format[formatCount], L"Closed ");
-                formatCount++;
+                PhInitFormatS(&format[formatCount++], L"Closed ");
             }
             else if (commsInfo.ClientCommunicationPort.Disconnected)
             {
-                PhInitFormatS(&format[formatCount], L"Disconnected ");
-                formatCount++;
+                PhInitFormatS(&format[formatCount++], L"Disconnected ");
             }
             else if (commsInfo.ClientCommunicationPort.ConnectionPending)
             {
-                PhInitFormatS(&format[formatCount], L"Pending ");
-                formatCount++;
+                PhInitFormatS(&format[formatCount++], L"Pending ");
             }
         }
         else if (commsInfo.ServerCommunicationPort.OwnerProcessId == processInfo.UniqueProcessId)
         {
-            PhInitFormatS(&format[formatCount], L"Server: ");
-            formatCount++;
+            PhInitFormatS(&format[formatCount++], L"Server: ");
             if (commsInfo.ClientCommunicationPort.OwnerProcessId)
             {
-                PhInitFormatS(&format[formatCount], L" Connection from ");
-                formatCount++;
+                PhInitFormatS(&format[formatCount++], L" Connection from ");
                 clientId.UniqueProcess = commsInfo.ClientCommunicationPort.OwnerProcessId;
                 clientId.UniqueThread = 0;
                 name = PhStdGetClientIdName(&clientId);
             }
             else if (commsInfo.ClientCommunicationPort.ConnectionRefused)
             {
-                PhInitFormatS(&format[formatCount], L"Refused ");
-                formatCount++;
+                PhInitFormatS(&format[formatCount++], L"Refused ");
             }
             else if (commsInfo.ServerCommunicationPort.Closed)
             {
-                PhInitFormatS(&format[formatCount], L"Closed ");
-                formatCount++;
+                PhInitFormatS(&format[formatCount++], L"Closed ");
             }
             else if (commsInfo.ServerCommunicationPort.Disconnected)
             {
-                PhInitFormatS(&format[formatCount], L"Disconnected ");
-                formatCount++;
+                PhInitFormatS(&format[formatCount++], L"Disconnected ");
             }
             else if (commsInfo.ServerCommunicationPort.ConnectionPending)
             {
-                PhInitFormatS(&format[formatCount], L"Pending ");
-                formatCount++;
+                PhInitFormatS(&format[formatCount++], L"Pending ");
             }
         }
         else if (commsInfo.ConnectionPort.OwnerProcessId == processInfo.UniqueProcessId)
         {
-            PhInitFormatS(&format[formatCount], L"Connection: ");
-            formatCount++;
+            PhInitFormatS(&format[formatCount++], L"Connection: ");
         }
 
         if (name)
         {
-            PhInitFormatSR(&format[formatCount], name->sr);
-            formatCount++;
+            PhInitFormatSR(&format[formatCount++], name->sr);
 
             if (namesInfo && namesInfo->ConnectionPort.Length > 0)
             {
-                PhInitFormatS(&format[formatCount], L" on ");
-                formatCount++;
+                PhInitFormatS(&format[formatCount++], L" on ");
             }
         }
 
         if (namesInfo && namesInfo->ConnectionPort.Length > 0)
         {
-            PhInitFormatUCS(&format[formatCount], &namesInfo->ConnectionPort);
-            formatCount++;
+            PhInitFormatUCS(&format[formatCount++], &namesInfo->ConnectionPort);
         }
 
         if (formatCount > 0)
@@ -2030,6 +1986,41 @@ NTSTATUS PhEnumObjectTypes(
     }
 
     *ObjectTypes = (POBJECT_TYPES_INFORMATION)buffer;
+
+    return status;
+}
+
+NTSTATUS PhGetObjectTypeMask(
+    _In_ PPH_STRINGREF TypeName,
+    _Out_ PGENERIC_MAPPING GenericMapping
+    )
+{
+    NTSTATUS status = STATUS_NOT_FOUND;
+    POBJECT_TYPES_INFORMATION objectTypes;
+    POBJECT_TYPE_INFORMATION objectType;
+
+    if (NT_SUCCESS(PhEnumObjectTypes(&objectTypes)))
+    {
+        objectType = PH_FIRST_OBJECT_TYPE(objectTypes);
+
+        for (ULONG i = 0; i < objectTypes->NumberOfTypes; i++)
+        {
+            PH_STRINGREF typeName;
+
+            PhUnicodeStringToStringRef(&objectType->TypeName, &typeName);
+
+            if (PhEqualStringRef(&typeName, TypeName, TRUE))
+            {
+                *GenericMapping = objectType->GenericMapping;
+                status = STATUS_SUCCESS;
+                break;
+            }
+
+            objectType = PH_NEXT_OBJECT_TYPE(objectType);
+        }
+
+        PhFree(objectTypes);
+    }
 
     return status;
 }

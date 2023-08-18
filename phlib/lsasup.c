@@ -1077,3 +1077,311 @@ BOOLEAN PhBuildTrusteeWithSid(
     ((PTRUSTEE)Trustee)->ptstrName = (LPWCH)Sid;
     return TRUE;
 }
+
+// rev from RtlMapGenericMask (dmex)
+VOID PhMapGenericMask(
+    _Inout_ PACCESS_MASK AccessMask,
+    _In_ PGENERIC_MAPPING GenericMapping
+    )
+{
+    ACCESS_MASK accessMask = *AccessMask;
+
+    if (BooleanFlagOn(accessMask, GENERIC_READ))
+        SetFlag(accessMask, GenericMapping->GenericRead);
+    if (BooleanFlagOn(accessMask, GENERIC_WRITE))
+        SetFlag(accessMask, GenericMapping->GenericWrite);
+    if (BooleanFlagOn(accessMask, GENERIC_EXECUTE))
+        SetFlag(accessMask, GenericMapping->GenericExecute);
+    if (BooleanFlagOn(accessMask, GENERIC_ALL))
+        SetFlag(accessMask, GenericMapping->GenericAll);
+
+    *AccessMask = ClearFlag(accessMask, GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
+}
+
+NTSTATUS PhEnumerateAccounts(
+    _In_ PPH_ENUM_ACCOUNT_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    )
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static ULONG (WINAPI* NetUserEnum_I)( // NET_API_STATUS
+        _In_ PCWSTR servername,
+        _In_ ULONG level,
+        _In_ ULONG filter,
+        _Out_ PVOID* bufptr,
+        _In_ ULONG prefmaxlen,
+        _Out_ PULONG entriesread,
+        _Out_ PULONG totalentries,
+        _Inout_ PULONG resume_handle
+        );
+    static ULONG (WINAPI* NetApiBufferFree_I)(
+        _Frees_ptr_opt_ PVOID Buffer
+        );
+    typedef struct _USER_INFO_0
+    {
+        PWSTR usri0_name;
+    } USER_INFO_0, *PUSER_INFO_0;
+    #define FILTER_NORMAL_ACCOUNT (0x0002)
+    ULONG status;
+    PUSER_INFO_0 userinfoArray = NULL;
+    ULONG userinfoEntriesRead = 0;
+    ULONG userinfoTotalEntries = 0;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PVOID baseAddress;
+
+        if (baseAddress = PhLoadLibrary(L"netapi32.dll"))
+        {
+            NetUserEnum_I = PhGetDllBaseProcedureAddress(baseAddress, "NetUserEnum", 0);
+            NetApiBufferFree_I = PhGetDllBaseProcedureAddress(baseAddress, "NetApiBufferFree", 0);
+        }
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (!(NetUserEnum_I && NetApiBufferFree_I))
+        return STATUS_UNSUCCESSFUL;
+
+    NetUserEnum_I(
+        NULL,
+        0,
+        FILTER_NORMAL_ACCOUNT,
+        &userinfoArray,
+        ULONG_MAX,
+        &userinfoEntriesRead,
+        &userinfoTotalEntries,
+        NULL
+        );
+
+    if (userinfoArray)
+    {
+        NetApiBufferFree_I(userinfoArray);
+        userinfoArray = NULL;
+    }
+
+    status = NetUserEnum_I(
+        NULL,
+        0,
+        FILTER_NORMAL_ACCOUNT,
+        &userinfoArray,
+        ULONG_MAX,
+        &userinfoEntriesRead,
+        &userinfoTotalEntries,
+        NULL
+        );
+
+    if (status == ERROR_SUCCESS)
+    {
+        PPH_STRING userName;
+        PPH_STRING userDomainName = NULL;
+
+        if (userName = PhGetSidFullName(PhGetOwnTokenAttributes().TokenSid, TRUE, NULL))
+        {
+            userDomainName = PhGetBaseDirectory(userName);
+            PhDereferenceObject(userName);
+        }
+
+        if (userDomainName)
+        {
+            for (ULONG i = 0; i < userinfoEntriesRead; i++)
+            {
+                PUSER_INFO_0 entry = PTR_ADD_OFFSET(userinfoArray, sizeof(USER_INFO_0) * i);
+
+                if (entry->usri0_name)
+                {
+                    PPH_STRING usernameString;
+                    PH_STRINGREF usri10String;
+
+                    PhInitializeStringRefLongHint(&usri10String, entry->usri0_name);
+
+                    usernameString = PhConcatStringRef3(
+                        &userDomainName->sr,
+                        &PhNtPathSeperatorString,
+                        &usri10String
+                        );
+
+                    if (!NT_SUCCESS(Callback(usernameString, Context)))
+                    {
+                        PhDereferenceObject(usernameString);
+                        break;
+                    }
+
+                    PhDereferenceObject(usernameString);
+                }
+            }
+
+            PhDereferenceObject(userDomainName);
+        }
+    }
+
+    if (userinfoArray)
+        NetApiBufferFree_I(userinfoArray);
+
+    //LSA_HANDLE policyHandle;
+    //LSA_ENUMERATION_HANDLE enumerationContext = 0;
+    //PLSA_ENUMERATION_INFORMATION buffer;
+    //ULONG count;
+    //PPH_STRING name;
+    //SID_NAME_USE nameUse;
+    //
+    //if (NT_SUCCESS(PhOpenLsaPolicy(&policyHandle, POLICY_VIEW_LOCAL_INFORMATION, NULL)))
+    //{
+    //    while (NT_SUCCESS(LsaEnumerateAccounts(
+    //        policyHandle,
+    //        &enumerationContext,
+    //        &buffer,
+    //        0x100,
+    //        &count
+    //        )))
+    //    {
+    //        for (i = 0; i < count; i++)
+    //        {
+    //            name = PhGetSidFullName(buffer[i].Sid, TRUE, &nameUse);
+    //            if (name)
+    //            {
+    //                if (nameUse == SidTypeUser)
+    //                    ComboBox_AddString(ComboBoxHandle, name->Buffer);
+    //                PhDereferenceObject(name);
+    //            }
+    //        }
+    //        LsaFreeMemory(buffer);
+    //    }
+    //
+    //    LsaClose(policyHandle);
+    //}
+
+    return STATUS_UNSUCCESSFUL;
+}
+
+//NTSTATUS PhQueryLogonInformation(
+//    _In_ PWSTR DomainName,
+//    _In_ PWSTR UserName,
+//    _Out_ PUSER_LOGON_INFORMATION* LogonInfo
+//    )
+//{
+//    NTSTATUS status;
+//    PPOLICY_ACCOUNT_DOMAIN_INFO lsaDomainInfo = NULL;
+//    PUSER_LOGON_INFORMATION samLogonInfo = NULL;
+//    LSA_OBJECT_ATTRIBUTES objectAttributes;
+//    LSA_HANDLE lookupPolicyHandle = NULL;
+//    SAM_HANDLE lookupServerHandle = NULL;
+//    SAM_HANDLE lookupDomainHandle = NULL;
+//    SAM_HANDLE lookupUserHandle = NULL;
+//    UNICODE_STRING unicodeString;
+//    PULONG lookupRelativeId = NULL;
+//    PSID_NAME_USE Use = NULL;
+//
+//    RtlInitUnicodeString(&unicodeString, DomainName);
+//    InitializeObjectAttributes(
+//        &objectAttributes,
+//        NULL,
+//        OBJ_CASE_INSENSITIVE,
+//        NULL,
+//        NULL
+//        );
+//
+//    status = LsaOpenPolicy(
+//        &unicodeString,
+//        &objectAttributes,
+//        POLICY_VIEW_LOCAL_INFORMATION,
+//        &lookupPolicyHandle
+//        );
+//
+//    if (!NT_SUCCESS(status))
+//        goto CleanupExit;
+//
+//    status = LsaQueryInformationPolicy(
+//        lookupPolicyHandle,
+//        PolicyAccountDomainInformation,
+//        &lsaDomainInfo
+//        );
+//
+//    if (!NT_SUCCESS(status))
+//        goto CleanupExit;
+//
+//    InitializeObjectAttributes(
+//        &objectAttributes,
+//        NULL,
+//        OBJ_CASE_INSENSITIVE,
+//        NULL,
+//        NULL
+//        );
+//
+//    status = SamConnect(
+//        &unicodeString,
+//        &lookupServerHandle,
+//        SAM_SERVER_CONNECT | SAM_SERVER_LOOKUP_DOMAIN,
+//        &objectAttributes
+//        );
+//
+//    if (!NT_SUCCESS(status))
+//        goto CleanupExit;
+//
+//    status = SamOpenDomain(
+//        lookupServerHandle,
+//        DOMAIN_LOOKUP | DOMAIN_READ_OTHER_PARAMETERS,
+//        lsaDomainInfo->DomainSid,
+//        &lookupDomainHandle
+//        );
+//
+//    if (!NT_SUCCESS(status))
+//        goto CleanupExit;
+//
+//    RtlInitUnicodeString(&unicodeString, UserName);
+//    status = SamLookupNamesInDomain(
+//        lookupDomainHandle,
+//        1,
+//        &unicodeString,
+//        &lookupRelativeId,
+//        &Use
+//        );
+//
+//    if (!NT_SUCCESS(status))
+//        goto CleanupExit;
+//
+//    status = SamOpenUser(
+//        lookupDomainHandle,
+//        USER_READ_GENERAL | USER_READ_PREFERENCES |
+//        USER_READ_LOGON | USER_READ_ACCOUNT |
+//        USER_LIST_GROUPS | USER_READ_GROUP_INFORMATION,
+//        lookupRelativeId[0],
+//        &lookupUserHandle
+//        );
+//
+//    if (!NT_SUCCESS(status))
+//        goto CleanupExit;
+//
+//    status = SamQueryInformationUser(
+//        lookupUserHandle,
+//        UserAllInformation,
+//        &samLogonInfo
+//        );
+//
+//    if (!NT_SUCCESS(status))
+//        goto CleanupExit;
+//
+//    *LogonInfo = PhAllocateCopy(samLogonInfo, sizeof(USER_LOGON_INFORMATION));
+//
+//CleanupExit:
+//    if (samLogonInfo)
+//        SamFreeMemory(samLogonInfo);
+//    if (lookupRelativeId)
+//        SamFreeMemory(lookupRelativeId);
+//    if (Use)
+//        SamFreeMemory(Use);
+//
+//    if (lookupUserHandle)
+//        SamCloseHandle(lookupUserHandle);
+//    if (lookupDomainHandle)
+//        SamCloseHandle(lookupDomainHandle);
+//    if (lookupServerHandle)
+//        SamCloseHandle(lookupServerHandle);
+//
+//    if (lsaDomainInfo)
+//        LsaFreeMemory(lsaDomainInfo);
+//    if (lookupPolicyHandle)
+//        LsaClose(lookupPolicyHandle);
+//
+//    return status;
+//}

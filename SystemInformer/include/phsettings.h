@@ -44,6 +44,7 @@ EXT BOOLEAN PhEnableTooltipSupport;
 EXT BOOLEAN PhEnableLinuxSubsystemSupport;
 EXT BOOLEAN PhEnableNetworkResolveDoHSupport;
 EXT BOOLEAN PhEnableVersionShortText;
+EXT BOOLEAN PhEnableDeferredLayout;
 
 EXT ULONG PhCsForceNoParent;
 EXT ULONG PhCsHighlightingDuration;
@@ -123,6 +124,7 @@ EXT BOOLEAN PhEnableImageCoherencySupport;
 EXT ULONG PhCsImageCoherencyScanLevel;
 EXT BOOLEAN PhCsEnableGraphMaxScale;
 EXT BOOLEAN PhCsEnableGraphMaxText;
+EXT BOOLEAN PhCsEnableAvxSupport;
 
 #define PH_SET_INTEGER_CACHED_SETTING(Name, Value) (PhSetIntegerSetting(TEXT(#Name), PhCs##Name = (Value)))
 

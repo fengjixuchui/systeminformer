@@ -176,6 +176,9 @@ NTSTATUS LoadDb(
     PVOID topNode;
     PVOID currentNode;
 
+    if (PhIsNullOrEmptyString(ObjectDbPath))
+        return STATUS_UNSUCCESSFUL;
+
     status = PhLoadXmlObjectFromFile(&ObjectDbPath->sr, &topNode);
 
     if (!NT_SUCCESS(status))
@@ -184,7 +187,7 @@ NTSTATUS LoadDb(
     if (!topNode)
     {
         // Delete the corrupted file. (dmex)
-        PhDeleteFileWin32(PhGetString(ObjectDbPath));
+        PhDeleteFile(&ObjectDbPath->sr);
         return STATUS_FILE_CORRUPT_ERROR;
     }
 
@@ -324,7 +327,7 @@ NTSTATUS LoadDb(
     if (GetNumberOfDbObjects() == 0)
     {
         // Delete the empty DB to improve performance (dmex)
-        PhDeleteFileWin32(PhGetString(ObjectDbPath));
+        PhDeleteFile(&ObjectDbPath->sr);
     }
 
     return STATUS_SUCCESS;
@@ -374,13 +377,16 @@ NTSTATUS SaveDb(
     ULONG enumerationKey = 0;
     PDB_OBJECT *object;
 
+    if (PhIsNullOrEmptyString(ObjectDbPath))
+        return STATUS_UNSUCCESSFUL;
+
     // Skip saving the DB when there's no objects (dmex)
     if (GetNumberOfDbObjects() == 0)
     {
         // Delete the empty DB to improve performance (dmex)
-        if (PhDoesFileExistWin32(PhGetString(ObjectDbPath)))
+        if (PhDoesFileExist(&ObjectDbPath->sr))
         {
-            PhDeleteFileWin32(PhGetString(ObjectDbPath));
+            PhDeleteFile(&ObjectDbPath->sr);
         }
         return STATUS_SUCCESS;
     }

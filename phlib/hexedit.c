@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2015
- *     dmex    2017
+ *     dmex    2017-2023
  *
  */
 
@@ -26,11 +26,11 @@ BOOLEAN PhHexEditInitialization(
     memset(&c, 0, sizeof(WNDCLASSEX));
     c.cbSize = sizeof(WNDCLASSEX);
     c.lpszClassName = PH_HEXEDIT_CLASSNAME;
-    c.style = CS_PARENTDC | CS_GLOBALCLASS;
+    c.style = CS_GLOBALCLASS;
     c.cbWndExtra = sizeof(PVOID);
     c.hInstance = PhInstanceHandle;
     c.lpfnWndProc = PhpHexEditWndProc;
-    c.hCursor = LoadCursor(NULL, IDC_ARROW);
+    c.hCursor = PhLoadCursor(NULL, IDC_ARROW);
 
     if (!RegisterClassEx(&c))
         return FALSE;
@@ -97,12 +97,12 @@ LRESULT CALLBACK PhpHexEditWndProc(
 {
     PPHP_HEXEDIT_CONTEXT context;
 
-    context = PhGetWindowContext(hwnd, MAXCHAR);
+    context = PhGetWindowContextEx(hwnd);
 
     if (uMsg == WM_CREATE)
     {
         PhpCreateHexEditContext(&context);
-        PhSetWindowContext(hwnd, MAXCHAR, context);
+        PhSetWindowContextEx(hwnd, context);
     }
 
     if (!context)
@@ -136,7 +136,7 @@ LRESULT CALLBACK PhpHexEditWndProc(
         break;
     case WM_DESTROY:
         {
-            PhRemoveWindowContext(hwnd, MAXCHAR);
+            PhRemoveWindowContextEx(hwnd);
             PhpFreeHexEditContext(context);
         }
         break;

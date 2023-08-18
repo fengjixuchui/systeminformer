@@ -37,7 +37,7 @@ static PPH_TN_FILTER_ENTRY DriverFilterEntry = NULL;
 static PPH_TN_FILTER_ENTRY MicrosoftFilterEntry = NULL;
 
 BOOLEAN PhMwpServicesPageCallback(
-    _In_ struct _PH_MAIN_TAB_PAGE *Page,
+    _In_ PPH_MAIN_TAB_PAGE Page,
     _In_ PH_MAIN_TAB_PAGE_MESSAGE Message,
     _In_ PVOID Parameter1,
     _In_ PVOID Parameter2
@@ -634,7 +634,7 @@ VOID PhMwpOnServiceRemoved(
 {
     PhLogServiceEntry(PH_LOG_ENTRY_SERVICE_DELETE, ServiceItem->Name, ServiceItem->DisplayName);
 
-    if (PhMwpNotifyIconNotifyMask & PH_NOTIFY_SERVICE_CREATE)
+    if (PhMwpNotifyIconNotifyMask & PH_NOTIFY_SERVICE_DELETE)
     {
         if (!PhPluginsEnabled || !PhMwpPluginNotifyEvent(PH_NOTIFY_SERVICE_DELETE, ServiceItem))
         {

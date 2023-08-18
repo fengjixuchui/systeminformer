@@ -56,7 +56,7 @@ PWSTR EtFirmwareGuidToNameString(
     for (ULONG i = 0; i < ARRAYSIZE(table); i++)
     {
         if (IsEqualGUID(VendorGuid, &table[i].Guid))
-            return table[i].Name;
+            return (PWSTR)table[i].Name;
     }
 
     return L"";
@@ -161,7 +161,7 @@ VOID EtFirmwareDeleteEntry(
     NTSTATUS status;
 
     status = PhSetFirmwareEnvironmentVariable(
-        &Entry->Name->sr, 
+        &Entry->Name->sr,
         &Entry->GuidString->sr,
         NULL,
         0,

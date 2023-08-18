@@ -22,6 +22,7 @@ extern PH_QUEUED_LOCK PhProcessRecordListLock;
 extern ULONG PhStatisticsSampleCount;
 extern BOOLEAN PhEnablePurgeProcessRecords;
 extern BOOLEAN PhEnableCycleCpuUsage;
+extern BOOLEAN PhEnableInterruptCpuUsage;
 extern BOOLEAN PhEnablePackageIconSupport;
 
 typedef enum _PH_PROCESS_PROVIDER_FLAG
@@ -63,8 +64,8 @@ extern ULONG PhTotalHandles;
 extern ULONG PhTotalCpuQueueLength;
 
 extern ULONG64 PhCpuTotalCycleDelta;
-extern PLARGE_INTEGER PhCpuIdleCycleTime; // cycle time for Idle
-extern PLARGE_INTEGER PhCpuSystemCycleTime; // cycle time for DPCs and Interrupts
+extern PSYSTEM_PROCESSOR_IDLE_CYCLE_TIME_INFORMATION PhCpuIdleCycleTime; // cycle time for Idle
+extern PSYSTEM_PROCESSOR_CYCLE_TIME_INFORMATION PhCpuSystemCycleTime; // cycle time for DPCs and Interrupts
 extern PH_UINT64_DELTA PhCpuIdleCycleDelta;
 extern PH_UINT64_DELTA PhCpuSystemCycleDelta;
 
@@ -122,9 +123,6 @@ extern PH_CIRCULAR_BUFFER_ULONG64 PhMaxIoWriteHistory;
 // The process item has been removed.
 #define PH_PROCESS_ITEM_REMOVED 0x1
 // end_phapppub
-
-#define PH_INTEGRITY_STR_LEN 10
-#define PH_INTEGRITY_STR_LEN_1 (PH_INTEGRITY_STR_LEN + 1)
 
 // begin_phapppub
 typedef enum _VERIFY_RESULT VERIFY_RESULT;
@@ -291,6 +289,8 @@ typedef struct _PH_PROCESS_ITEM
 
     NTSTATUS ImageCoherencyStatus;
     FLOAT ImageCoherency;
+
+    ULONG LxssProcessId;
 
 } PH_PROCESS_ITEM, *PPH_PROCESS_ITEM;
 // end_phapppub
@@ -478,7 +478,8 @@ PHAPPAPI
 VOID
 NTAPI
 PhProcessImageListInitialization(
-    _In_ HWND hwnd
+    _In_ HWND WindowHandle,
+    _In_ LONG WindowDpi
     );
 
 PHAPPAPI

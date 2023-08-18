@@ -89,7 +89,6 @@ PH_DEFINE_IMPORT(L"dnsapi.dll", DnsWriteQuestionToBuffer_W);
 PH_DEFINE_IMPORT(L"dnsapi.dll", DnsFree);
 
 PH_DEFINE_IMPORT(L"shlwapi.dll", SHAutoComplete);
-PH_DEFINE_IMPORT(L"shell32.dll", SHGetFileInfoW);
 
 PH_DEFINE_IMPORT(L"kernel32.dll", PssCaptureSnapshot);
 PH_DEFINE_IMPORT(L"kernel32.dll", PssQuerySnapshot);
@@ -100,7 +99,6 @@ PH_DEFINE_IMPORT(L"userenv.dll", DestroyEnvironmentBlock);
 PH_DEFINE_IMPORT(L"userenv.dll", GetAppContainerRegistryLocation);
 PH_DEFINE_IMPORT(L"userenv.dll", GetAppContainerFolderPath);
 
-PH_DEFINE_IMPORT(L"user32.dll", MessageBoxW);
 PH_DEFINE_IMPORT(L"user32.dll", MessageBeep);
 PH_DEFINE_IMPORT(L"user32.dll", SetWindowDisplayAffinity);
 

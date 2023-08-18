@@ -15,8 +15,8 @@
 
 #include <trace.h>
 
-KPH_PROTECTED_DATA_SECTION_PUSH();
-static BYTE KphpTrustedPublicKey[] =
+KPH_PROTECTED_DATA_SECTION_RO_PUSH();
+static const BYTE KphpTrustedPublicKey[] =
 {
     0x45, 0x43, 0x53, 0x31, 0x20, 0x00, 0x00, 0x00,
     0x7C, 0x32, 0xAB, 0xA6, 0x40, 0x79, 0x9C, 0x00,
@@ -28,7 +28,7 @@ static BYTE KphpTrustedPublicKey[] =
     0xA2, 0x55, 0x38, 0x71, 0xF0, 0x0F, 0xCC, 0x8F,
     0x84, 0xF4, 0x2B, 0x60, 0x38, 0xA6, 0xE7, 0x37,
 };
-KPH_PROTECTED_DATA_SECTION_POP();
+KPH_PROTECTED_DATA_SECTION_RO_POP();
 
 PAGED_FILE();
 
@@ -71,7 +71,7 @@ NTSTATUS KphInitializeVerify(
                                  NULL,
                                  BCRYPT_ECCPUBLIC_BLOB,
                                  &KphpTrustedPublicKeyHandle,
-                                 KphpTrustedPublicKey,
+                                 (PUCHAR)KphpTrustedPublicKey,
                                  sizeof(KphpTrustedPublicKey),
                                  0);
     if (!NT_SUCCESS(status))
@@ -259,21 +259,19 @@ NTSTATUS KphVerifyFile(
                                NULL,
                                NULL);
 
-    status = IoCreateFileEx(&signatureFileHandle,
-                            FILE_READ_ACCESS,
-                            &objectAttributes,
-                            &ioStatusBlock,
-                            NULL,
-                            FILE_ATTRIBUTE_NORMAL,
-                            FILE_SHARE_READ,
-                            FILE_OPEN,
-                            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
-                            NULL,
-                            0,
-                            CreateFileTypeNone,
-                            NULL,
-                            IO_IGNORE_SHARE_ACCESS_CHECK,
-                            NULL);
+    status = KphCreateFile(&signatureFileHandle,
+                           FILE_READ_ACCESS | SYNCHRONIZE,
+                           &objectAttributes,
+                           &ioStatusBlock,
+                           NULL,
+                           FILE_ATTRIBUTE_NORMAL,
+                           FILE_SHARE_READ,
+                           FILE_OPEN,
+                           FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
+                           NULL,
+                           0,
+                           IO_IGNORE_SHARE_ACCESS_CHECK,
+                           KernelMode);
     if (!NT_SUCCESS(status))
     {
         KphTracePrint(TRACE_LEVEL_VERBOSE,
@@ -395,9 +393,10 @@ NTSTATUS KphDominationCheck(
     // we'll do a very strict check here:
     //
 
-    if (NT_SUCCESS(KphGetProcessProtection(Process, &processProtection)) &&
-        NT_SUCCESS(KphGetProcessProtection(ProcessTarget, &targetProtection)) &&
-        (targetProtection.Type != PsProtectedTypeNone) &&
+    processProtection = PsGetProcessProtection(Process);
+    targetProtection = PsGetProcessProtection(ProcessTarget);
+
+    if ((targetProtection.Type != PsProtectedTypeNone) &&
         (targetProtection.Type >= processProtection.Type))
     {
         //
@@ -410,11 +409,6 @@ NTSTATUS KphDominationCheck(
         //
         return STATUS_ACCESS_DENIED;
     }
-
-    //
-    // Either the protected process check is not exported or the verified
-    // process dominates the target. Our domination check succeeded.
-    //
 
     return STATUS_SUCCESS;
 }
@@ -435,12 +429,12 @@ KPH_PROCESS_STATE KphGetProcessState(
 
     PAGED_CODE();
 
-    if (KphKdPresent())
+    if (KphSuppressProtections())
     {
         //
-        // There is an active kernel debugger. This ultimately permits low
-        // state callers into the driver. But still check for verification.
-        // We still want to exercise the code below, regardless.
+        // This ultimately permits low state callers into the driver. But still
+        // check for verification. We still want to exercise the code below,
+        // regardless.
         //
         processState = ~KPH_PROCESS_VERIFIED_PROCESS;
     }

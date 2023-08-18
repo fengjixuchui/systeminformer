@@ -23,6 +23,7 @@
 #include <svcsup.h>
 #include <symprv.h>
 #include <workqueue.h>
+#include <kphuser.h>
 
 #include <extmgri.h>
 #include <procprv.h>
@@ -673,7 +674,7 @@ static NTSTATUS PhpGetThreadCycleTime(
     {
         if (HandleToUlong(ThreadItem->ThreadId) < PhSystemProcessorInformation.NumberOfProcessors)
         {
-            *CycleTime = PhCpuIdleCycleTime[HandleToUlong(ThreadItem->ThreadId)].QuadPart;
+            *CycleTime = PhCpuIdleCycleTime[HandleToUlong(ThreadItem->ThreadId)].CycleTime;
             return STATUS_SUCCESS;
         }
     }
@@ -955,6 +956,25 @@ VOID PhpThreadProviderUpdate(
                 threadItem->IsGuiThread = !!GetGUIThreadInfo(HandleToUlong(threadItem->ThreadId), &info);
             }
 
+            if (WindowsVersion >= WINDOWS_10_22H2 && threadItem->ThreadHandle)
+            {
+                if (KphLevel() >= KphLevelMed) // threadItem->IsSubsystemProcess
+                {
+                    ULONG lxssThreadId;
+
+                    if (NT_SUCCESS(KphQueryInformationThread(
+                        threadItem->ThreadHandle,
+                        KphThreadWSLThreadId,
+                        &lxssThreadId,
+                        sizeof(ULONG),
+                        NULL
+                        )))
+                    {
+                        threadItem->LxssThreadId = lxssThreadId;
+                    }
+                }
+            }
+
             PhpQueueThreadQuery(threadProvider, threadItem);
 
             // Add the thread item to the hashtable.
@@ -1161,6 +1181,18 @@ VOID PhpThreadProviderUpdate(
 
                 if (threadItem->IsGuiThread != oldIsGuiThread)
                     modified = TRUE;
+            }
+
+            if (!threadItem->ThreadHandle || KphLevel() < KphLevelMed ||
+                !NT_SUCCESS(KphQueryInformationThread(
+                    threadItem->ThreadHandle,
+                    KphThreadIoCounters,
+                    &threadItem->IoCounters,
+                    sizeof(IO_COUNTERS),
+                    NULL
+                    )))
+            {
+                RtlZeroMemory(&threadItem->IoCounters, sizeof(IO_COUNTERS));
             }
 
             threadItem->JustResolved = FALSE;

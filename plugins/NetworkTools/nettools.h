@@ -37,12 +37,16 @@
 #define SETTING_NAME_TRACERT_MAX_HOPS (PLUGIN_NAME L".TracertMaxHops")
 #define SETTING_NAME_WHOIS_WINDOW_POSITION (PLUGIN_NAME L".WhoisWindowPosition")
 #define SETTING_NAME_WHOIS_WINDOW_SIZE (PLUGIN_NAME L".WhoisWindowSize")
+#define SETTING_NAME_WHOIS_IPV6_SUPPORT (PLUGIN_NAME L".WhoisProtocalSupport")
 #define SETTING_NAME_EXTENDED_TCP_STATS (PLUGIN_NAME L".EnableExtendedTcpStats")
 #define SETTING_NAME_GEOLITE_API_KEY (PLUGIN_NAME L".MaxMindApiKey")
+#define SETTING_NAME_GEOLITE_DB_TYPE (PLUGIN_NAME L".MaxMindType")
 
 extern PPH_PLUGIN PluginInstance;
 extern BOOLEAN GeoDbInitialized;
-extern PH_STRINGREF GeoDbFileName;
+extern BOOLEAN GeoDbDatabaseType;
+extern PH_STRINGREF GeoDbCityFileName;
+extern PH_STRINGREF GeoDbCountryFileName;
 extern PPH_STRING SearchboxText;
 
 // ICMP Packet Length: (msdn: IcmpSendEcho2/Icmp6SendEcho2)
@@ -144,6 +148,7 @@ typedef struct _NETWORK_WHOIS_CONTEXT
     HWND RichEditHandle;
     HFONT FontHandle;
 
+    BOOLEAN Ipv6Support;
     PH_NETWORK_ACTION Action;
     PH_LAYOUT_MANAGER LayoutManager;
 
@@ -234,8 +239,8 @@ typedef struct _NETWORK_EXTENSION
         };
     };
 
-    PPH_STRING LocalServiceName;
-    PPH_STRING RemoteServiceName;
+    PH_STRINGREF LocalServiceName;
+    PH_STRINGREF RemoteServiceName;
 
     PPH_STRING RemoteCountryName;
     INT CountryIconIndex;
@@ -272,26 +277,26 @@ VOID FreeGeoLiteDb(
 _Success_(return)
 BOOLEAN LookupCountryCode(
     _In_ PH_IP_ADDRESS RemoteAddress,
-    _Out_ PPH_STRING *CountryCode,
+    _Out_ ULONG *CountryNameId,
     _Out_ PPH_STRING *CountryName
     );
 
 _Success_(return)
 BOOLEAN LookupSockInAddr4CountryCode(
     _In_ IN_ADDR RemoteAddress,
-    _Out_ PPH_STRING *CountryCode,
+    _Out_ ULONG *CountryNameId,
     _Out_ PPH_STRING *CountryName
     );
 
 _Success_(return)
 BOOLEAN LookupSockInAddr6CountryCode(
     _In_ IN6_ADDR RemoteAddress,
-    _Out_ PPH_STRING *CountryCode,
+    _Out_ ULONG *CountryNameId,
     _Out_ PPH_STRING *CountryName
     );
 
 INT LookupCountryIcon(
-    _In_ PPH_STRING Name
+    _In_ ULONG Name
     );
 
 VOID DrawCountryIcon(
@@ -351,6 +356,11 @@ typedef struct _RESOLVED_PORT
     USHORT Port;
 } RESOLVED_PORT;
 
-extern RESOLVED_PORT ResolvedPortsTable[6265];
+extern CONST RESOLVED_PORT ResolvedPortsTable[6265];
+
+BOOLEAN LookupPortServiceName(
+    _In_ ULONG Port,
+    _Out_ PPH_STRINGREF ServiceName
+    );
 
 #endif

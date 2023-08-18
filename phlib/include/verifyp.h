@@ -33,10 +33,10 @@ ULONG PhpVerifyCacheHashtableHashFunction(
 typedef struct _CATALOG_INFO
 {
     ULONG cbStruct;
-    WCHAR wszCatalogFile[MAX_PATH];
+    _Field_z_ WCHAR wszCatalogFile[MAX_PATH];
 } CATALOG_INFO, *PCATALOG_INFO;
 
-typedef struct tagCRYPTUI_VIEWSIGNERINFO_STRUCT 
+typedef struct tagCRYPTUI_VIEWSIGNERINFO_STRUCT
 {
     ULONG dwSize;
     HWND hwndParent;
@@ -79,13 +79,13 @@ typedef BOOL (WINAPI *_CryptCATAdminCalcHashFromFileHandle3)(
 
 typedef BOOL (WINAPI *_CryptCATAdminAcquireContext)(
     _Out_ HCATADMIN *phCatAdmin,
-    _In_opt_ PGUID pgSubsystem,
+    _In_opt_ PCGUID pgSubsystem,
     _Reserved_ ULONG dwFlags
     );
 
 typedef BOOL (WINAPI *_CryptCATAdminAcquireContext2)(
     _Out_ HCATADMIN *phCatAdmin,
-    _In_opt_ PGUID pgSubsystem,
+    _In_opt_ PCGUID pgSubsystem,
     _In_opt_ PCWSTR pwszHashAlgorithm,
     _In_opt_ PCCERT_STRONG_SIGN_PARA pStrongHashPolicy,
     _Reserved_ ULONG dwFlags
@@ -144,7 +144,7 @@ typedef BOOL (WINAPI* _WTHelperCheckCertUsage)(
 
 typedef LONG (WINAPI *_WinVerifyTrust)(
     _In_ HWND hWnd,
-    _In_ GUID *pgActionID,
+    _In_ PCGUID pgActionID,
     _In_ PVOID pWVTData
     );
 
@@ -181,7 +181,7 @@ typedef BOOL (WINAPI *_CryptUIDlgViewSignerInfo)(
 
 // C689AAB8-8E78-11D0-8C47-00C04FC295EE
 DEFINE_GUID(WINTRUST_KNOWN_SUBJECT_PE_IMAGE, 0xC689AAB8, 0x8E78, 0x11D0, 0x8C, 0x47, 0x0, 0xC0, 0x4F, 0xC2, 0x95, 0xEE);
-            
+
 typedef enum _SIGNATURE_STATE
 {
     SIGNATURE_STATE_UNSIGNED_MISSING,

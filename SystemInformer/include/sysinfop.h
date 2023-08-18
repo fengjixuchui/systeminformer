@@ -1,3 +1,15 @@
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
+ *
+ * This file is part of System Informer.
+ *
+ * Authors:
+ *
+ *     wj32    2011-2016
+ *     dmex    2016-2023
+ *
+ */
+
 #ifndef PH_SYSINFOP_H
 #define PH_SYSINFOP_H
 
@@ -417,7 +429,17 @@ VOID PhSipCreateIoGraph(
     VOID
     );
 
-VOID PhSipNotifyIoGraph(
+VOID PhSipLayoutIoGraphs(
+    _In_ HWND WindowHandle
+    );
+
+VOID PhSipNotifyIoReadGraph(
+    _In_ NMHDR *Header
+    );
+VOID PhSipNotifyIoWriteGraph(
+    _In_ NMHDR *Header
+    );
+VOID PhSipNotifyIoOtherGraph(
     _In_ NMHDR *Header
     );
 

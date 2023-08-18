@@ -342,7 +342,7 @@ VOID PhpUpdateProcessStatistics(
                 //    PhMoveReference(&Context->PrivateCommitLimit, PhFormatSize(appMemoryInfo.PrivateCommitLimit, ULONG_MAX));
                 //if (appMemoryInfo.TotalCommitLimit)
                 //    PhMoveReference(&Context->TotalCommitLimit, PhFormatSize(appMemoryInfo.TotalCommitLimit, ULONG_MAX));
-            }          
+            }
         }
 
         if (!Context->GotCycles)
@@ -477,7 +477,10 @@ INT_PTR CALLBACK PhpProcessStatisticsDlgProc(
                 PhGetGeneralCallback(GeneralCallbackProcessProviderUpdatedEvent),
                 &statisticsContext->ProcessesUpdatedRegistration
                 );
-
+        }
+        break;
+    case WM_NCDESTROY:
+        {
             if (statisticsContext->ProcessHandle)
                 NtClose(statisticsContext->ProcessHandle);
 
@@ -796,7 +799,7 @@ INT_PTR CALLBACK PhpProcessStatisticsDlgProc(
                             case PH_PROCESS_STATISTICS_INDEX_HARDFAULTSDELTA:
                                 {
                                     PPH_STRING value;
-                             
+
                                     value = PhFormatUInt64(statisticsContext->ProcessItem->HardFaultsDelta.Delta, TRUE);
                                     wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, value->Buffer, _TRUNCATE);
                                     PhDereferenceObject(value);
@@ -838,9 +841,15 @@ INT_PTR CALLBACK PhpProcessStatisticsDlgProc(
                             case PH_PROCESS_STATISTICS_INDEX_PAGEPRIORITY:
                                 {
                                     if (statisticsContext->PagePriority != ULONG_MAX && statisticsContext->PagePriority <= MEMORY_PRIORITY_NORMAL)
-                                        wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, PhPagePriorityNames[statisticsContext->PagePriority], _TRUNCATE);
+                                    {
+                                        const PH_STRINGREF pagePriority = PhPagePriorityNames[statisticsContext->PagePriority];
+
+                                        wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, pagePriority.Buffer, _TRUNCATE);
+                                    }
                                     else
+                                    {
                                         wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, L"N/A", _TRUNCATE);
+                                    }
                                 }
                                 break;
                             case PH_PROCESS_STATISTICS_INDEX_SHAREDCOMMIT:
@@ -971,7 +980,7 @@ INT_PTR CALLBACK PhpProcessStatisticsDlgProc(
                                     ULONG64 value = 0;
                                     WCHAR buffer[PH_INT64_STR_LEN_1];
 
-                                    value = statisticsContext->ProcessItem->IoReadDelta.Value + 
+                                    value = statisticsContext->ProcessItem->IoReadDelta.Value +
                                         statisticsContext->ProcessItem->IoWriteDelta.Value +
                                         statisticsContext->ProcessItem->IoOtherDelta.Value;
 
@@ -990,7 +999,7 @@ INT_PTR CALLBACK PhpProcessStatisticsDlgProc(
                                     ULONG64 value = 0;
                                     WCHAR buffer[PH_INT64_STR_LEN_1];
 
-                                    value = statisticsContext->ProcessItem->IoReadDelta.Delta + 
+                                    value = statisticsContext->ProcessItem->IoReadDelta.Delta +
                                         statisticsContext->ProcessItem->IoWriteDelta.Delta +
                                         statisticsContext->ProcessItem->IoOtherDelta.Delta;
 
@@ -1042,9 +1051,15 @@ INT_PTR CALLBACK PhpProcessStatisticsDlgProc(
                             case PH_PROCESS_STATISTICS_INDEX_IOPRIORITY:
                                 {
                                     if (statisticsContext->IoPriority != LONG_MAX && statisticsContext->IoPriority >= IoPriorityVeryLow && statisticsContext->IoPriority <= MaxIoPriorityTypes)
-                                        wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, PhIoPriorityHintNames[statisticsContext->IoPriority], _TRUNCATE);
+                                    {
+                                        const PH_STRINGREF ioPriority = PhIoPriorityHintNames[statisticsContext->IoPriority];
+
+                                        wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, ioPriority.Buffer, _TRUNCATE);
+                                    }
                                     else
+                                    {
                                         wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, L"N/A", _TRUNCATE);
+                                    }
                                 }
                                 break;
                             case PH_PROCESS_STATISTICS_INDEX_HANDLES:

@@ -141,7 +141,7 @@ PHLIBAPI
 VOID
 NTAPI
 PhAdjustRectangleToWorkingArea(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _Inout_ PPH_RECTANGLE Rectangle
     );
 
@@ -151,77 +151,6 @@ NTAPI
 PhCenterWindow(
     _In_ HWND WindowHandle,
     _In_opt_ HWND ParentWindowHandle
-    );
-
-PHLIBAPI
-LONG
-NTAPI
-PhGetDpi(
-    _In_ LONG Number,
-    _In_ LONG DpiValue
-    );
-
-PHLIBAPI
-LONG
-NTAPI
-PhGetMonitorDpi(
-    _In_ LPCRECT rect
-    );
-
-PHLIBAPI
-LONG
-NTAPI
-PhGetSystemDpi(
-    VOID
-    );
-
-PHLIBAPI
-LONG
-NTAPI
-PhGetTaskbarDpi(
-    VOID
-    );
-
-PHLIBAPI
-LONG
-NTAPI
-PhGetWindowDpi(
-    _In_ HWND WindowHandle
-    );
-
-PHLIBAPI
-LONG
-NTAPI
-PhGetDpiValue(
-    _In_opt_ HWND WindowHandle,
-    _In_opt_ LPCRECT Rect
-    );
-
-PHLIBAPI
-LONG
-NTAPI
-PhGetSystemMetrics(
-    _In_ INT Index,
-    _In_opt_ LONG DpiValue
-    );
-
-PHLIBAPI
-BOOL
-NTAPI
-PhGetSystemParametersInfo(
-    _In_ INT Action,
-    _In_ UINT Param1,
-    _Pre_maybenull_ _Post_valid_ PVOID Param2,
-    _In_opt_ LONG DpiValue
-    );
-
-PHLIBAPI
-VOID
-NTAPI
-PhGetSizeDpiValue(
-    _Inout_ PRECT rect,
-    _In_ LONG DpiValue,
-    _In_ BOOLEAN isUnpack
     );
 
 // NLS
@@ -273,6 +202,14 @@ PhLargeIntegerToLocalSystemTime(
     _In_ PLARGE_INTEGER LargeInteger
     );
 
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhLocalSystemTimeToLargeInteger(
+    _Out_ PLARGE_INTEGER LargeInteger,
+    _In_ PSYSTEMTIME SystemTime
+    );
+
 // Error messages
 
 PHLIBAPI
@@ -310,21 +247,21 @@ PHLIBAPI
 INT
 NTAPI
 PhShowMessage(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_ ULONG Type,
     _In_ PWSTR Format,
     ...
     );
 
-#define PhShowError(hWnd, Format, ...) PhShowMessage(hWnd, MB_OK | MB_ICONERROR, Format, ##__VA_ARGS__)
-#define PhShowWarning(hWnd, Format, ...) PhShowMessage(hWnd, MB_OK | MB_ICONWARNING, Format, ##__VA_ARGS__)
-#define PhShowInformation(hWnd, Format, ...) PhShowMessage(hWnd, MB_OK | MB_ICONINFORMATION, Format, ##__VA_ARGS__)
+#define PhShowError(WindowHandle, Format, ...) PhShowMessage(WindowHandle, MB_OK | MB_ICONERROR, Format, ##__VA_ARGS__)
+#define PhShowWarning(WindowHandle, Format, ...) PhShowMessage(WindowHandle, MB_OK | MB_ICONWARNING, Format, ##__VA_ARGS__)
+#define PhShowInformation(WindowHandle, Format, ...) PhShowMessage(WindowHandle, MB_OK | MB_ICONINFORMATION, Format, ##__VA_ARGS__)
 
 PHLIBAPI
 INT
 NTAPI
 PhShowMessage2(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_ ULONG Buttons,
     _In_opt_ PWSTR Icon,
     _In_opt_ PWSTR Title,
@@ -352,15 +289,15 @@ PhShowMessage2(
 #define TD_SHIELD_ICON          MAKEINTRESOURCEW(-4)
 #endif
 
-#define PhShowError2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, TD_CLOSE_BUTTON, TD_ERROR_ICON, Title, Format, ##__VA_ARGS__)
-#define PhShowWarning2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, TD_CLOSE_BUTTON, TD_WARNING_ICON, Title, Format, ##__VA_ARGS__)
-#define PhShowInformation2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, TD_CLOSE_BUTTON, TD_INFORMATION_ICON, Title, Format, ##__VA_ARGS__)
+#define PhShowError2(WindowHandle, Title, Format, ...) PhShowMessage2(WindowHandle, TD_CLOSE_BUTTON, TD_ERROR_ICON, Title, Format, ##__VA_ARGS__)
+#define PhShowWarning2(WindowHandle, Title, Format, ...) PhShowMessage2(WindowHandle, TD_CLOSE_BUTTON, TD_WARNING_ICON, Title, Format, ##__VA_ARGS__)
+#define PhShowInformation2(WindowHandle, Title, Format, ...) PhShowMessage2(WindowHandle, TD_CLOSE_BUTTON, TD_INFORMATION_ICON, Title, Format, ##__VA_ARGS__)
 
 PHLIBAPI
 BOOLEAN
 NTAPI
 PhShowMessageOneTime(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_ ULONG Buttons,
     _In_opt_ PWSTR Icon,
     _In_opt_ PWSTR Title,
@@ -380,7 +317,7 @@ PHLIBAPI
 VOID
 NTAPI
 PhShowStatus(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_opt_ PWSTR Message,
     _In_ NTSTATUS Status,
     _In_opt_ ULONG Win32Result
@@ -390,7 +327,7 @@ PHLIBAPI
 BOOLEAN
 NTAPI
 PhShowContinueStatus(
-    _In_ HWND hWnd,
+    _In_ HWND WindowHandle,
     _In_opt_ PWSTR Message,
     _In_ NTSTATUS Status,
     _In_opt_ ULONG Win32Result
@@ -400,7 +337,7 @@ PHLIBAPI
 BOOLEAN
 NTAPI
 PhShowConfirmMessage(
-    _In_ HWND hWnd,
+    _In_ HWND WindowHandle,
     _In_ PWSTR Verb,
     _In_ PWSTR Object,
     _In_opt_ PWSTR Message,
@@ -822,21 +759,12 @@ PhFlushImageVersionInfoCache(
     );
 
 PHLIBAPI
-_Success_(return != NULL)
-PPH_STRING
+NTSTATUS
 NTAPI
 PhGetFullPath(
     _In_ PWSTR FileName,
+    _Out_ PPH_STRING *FullPath,
     _Out_opt_ PULONG IndexOfFileName
-    );
-
-PHLIBAPI
-NTSTATUS
-NTAPI
-PhGetFullPathEx(
-    _In_ PWSTR FileName,
-    _Out_opt_ PULONG IndexOfFileName,
-    _Out_ PPH_STRING *FullPath
     );
 
 PHLIBAPI
@@ -897,6 +825,26 @@ NTAPI
 PhGetSystemDirectory(
     VOID
     );
+
+PHLIBAPI
+PPH_STRING
+NTAPI
+PhGetSystemDirectoryWin32(
+    _In_opt_ PPH_STRINGREF AppendPath
+    );
+
+FORCEINLINE
+PPH_STRING
+PhGetSystemDirectoryWin32Z(
+    _In_ PWSTR AppendPath
+    )
+{
+    PH_STRINGREF string;
+
+    PhInitializeStringRef(&string, AppendPath);
+
+    return PhGetSystemDirectoryWin32(&string);
+}
 
 PHLIBAPI
 VOID
@@ -966,20 +914,22 @@ PHLIBAPI
 PPH_STRING
 NTAPI
 PhGetRoamingAppDataDirectory(
-    _In_ PPH_STRINGREF FileName
+    _In_ PPH_STRINGREF FileName,
+    _In_ BOOLEAN NativeFileName
     );
 
 FORCEINLINE
 PPH_STRING
 PhGetRoamingAppDataDirectoryZ(
-    _In_ PWSTR String
+    _In_ PWSTR String,
+    _In_ BOOLEAN NativeFileName
     )
 {
     PH_STRINGREF string;
 
     PhInitializeStringRef(&string, String);
 
-    return PhGetRoamingAppDataDirectory(&string);
+    return PhGetRoamingAppDataDirectory(&string, NativeFileName);
 }
 
 PHLIBAPI
@@ -999,26 +949,28 @@ PPH_STRING
 NTAPI
 PhGetKnownLocation(
     _In_ ULONG Folder,
-    _In_opt_ PPH_STRINGREF AppendPath
+    _In_opt_ PPH_STRINGREF AppendPath,
+    _In_ BOOLEAN NativeFileName
     );
 
 FORCEINLINE
 PPH_STRING
 PhGetKnownLocationZ(
     _In_ ULONG Folder,
-    _In_ PWSTR AppendPath
+    _In_ PWSTR AppendPath,
+    _In_ BOOLEAN NativeFileName
     )
 {
     PH_STRINGREF string;
 
     PhInitializeStringRef(&string, AppendPath);
 
-    return PhGetKnownLocation(Folder, &string);
+    return PhGetKnownLocation(Folder, &string, NativeFileName);
 }
 
-DECLSPEC_SELECTANY GUID FOLDERID_LocalAppData = { 0xF1B32785, 0x6FBA, 0x4FCF, 0x9D, 0x55, 0x7B, 0x8E, 0x7F, 0x15, 0x70, 0x91 };
-DECLSPEC_SELECTANY GUID FOLDERID_RoamingAppData = { 0x3EB685DB, 0x65F9, 0x4CF6, 0xA0, 0x3A, 0xE3, 0xEF, 0x65, 0x72, 0x9F, 0x3D };
-DECLSPEC_SELECTANY GUID FOLDERID_ProgramFiles = { 0x905e63b6, 0xc1bf, 0x494e, 0xb2, 0x9c, 0x65, 0xb7, 0x32, 0xd3, 0xd2, 0x1a };
+DEFINE_GUID(FOLDERID_LocalAppData, 0xF1B32785, 0x6FBA, 0x4FCF, 0x9D, 0x55, 0x7B, 0x8E, 0x7F, 0x15, 0x70, 0x91);
+DEFINE_GUID(FOLDERID_RoamingAppData, 0x3EB685DB, 0x65F9, 0x4CF6, 0xA0, 0x3A, 0xE3, 0xEF, 0x65, 0x72, 0x9F, 0x3D);
+DEFINE_GUID(FOLDERID_ProgramFiles, 0x905e63b6, 0xc1bf, 0x494e, 0xb2, 0x9c, 0x65, 0xb7, 0x32, 0xd3, 0xd2, 0x1a);
 
 #define PH_KF_FLAG_FORCE_PACKAGE_REDIRECTION 0x1
 #define PH_KF_FLAG_FORCE_APPCONTAINER_REDIRECTION 0x2
@@ -1027,7 +979,7 @@ PHLIBAPI
 PPH_STRING
 NTAPI
 PhGetKnownFolderPath(
-    _In_ PGUID Folder,
+    _In_ PCGUID Folder,
     _In_opt_ PPH_STRINGREF AppendPath
     );
 
@@ -1035,7 +987,7 @@ PHLIBAPI
 PPH_STRING
 NTAPI
 PhGetKnownFolderPathEx(
-    _In_ PGUID Folder,
+    _In_ PCGUID Folder,
     _In_ ULONG Flags,
     _In_opt_ HANDLE TokenHandle,
     _In_opt_ PPH_STRINGREF AppendPath
@@ -1044,7 +996,7 @@ PhGetKnownFolderPathEx(
 FORCEINLINE
 PPH_STRING
 PhGetKnownFolderPathZ(
-    _In_ PGUID Folder,
+    _In_ PCGUID Folder,
     _In_ PWSTR AppendPath
     )
 {
@@ -1058,7 +1010,7 @@ PhGetKnownFolderPathZ(
 FORCEINLINE
 PPH_STRING
 PhGetKnownFolderPathExZ(
-    _In_ PGUID Folder,
+    _In_ PCGUID Folder,
     _In_ ULONG Flags,
     _In_opt_ HANDLE TokenHandle,
     _In_ PWSTR AppendPath
@@ -1082,10 +1034,11 @@ PHLIBAPI
 NTSTATUS
 NTAPI
 PhWaitForMultipleObjectsAndPump(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_ ULONG NumberOfHandles,
     _In_ PHANDLE Handles,
-    _In_ ULONG Timeout
+    _In_ ULONG Timeout,
+    _In_ ULONG WakeMask
     );
 
 typedef struct _PH_CREATE_PROCESS_INFO
@@ -1180,6 +1133,7 @@ typedef struct _PH_CREATE_PROCESS_AS_USER_INFO
 #define PH_CREATE_PROCESS_USE_LINKED_TOKEN 0x10000
 #define PH_CREATE_PROCESS_SET_SESSION_ID 0x20000
 #define PH_CREATE_PROCESS_WITH_PROFILE 0x40000
+#define PH_CREATE_PROCESS_SET_UIACCESS 0x80000
 
 PHLIBAPI
 NTSTATUS
@@ -1224,11 +1178,20 @@ PhGetObjectSecurityDescriptorAsString(
     _Out_ PPH_STRING* SecurityDescriptorString
     );
 
+typedef struct _SHELLEXECUTEINFOW SHELLEXECUTEINFOW, *PSHELLEXECUTEINFOW;
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhShellExecuteWin32(
+    _Inout_ PSHELLEXECUTEINFOW ExecInfo
+    );
+
 PHLIBAPI
 VOID
 NTAPI
 PhShellExecute(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_ PWSTR FileName,
     _In_opt_ PWSTR Parameters
     );
@@ -1242,7 +1205,7 @@ _Success_(return)
 BOOLEAN
 NTAPI
 PhShellExecuteEx(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_ PWSTR FileName,
     _In_opt_ PWSTR Parameters,
     _In_opt_ PWSTR Directory,
@@ -1256,7 +1219,7 @@ PHLIBAPI
 VOID
 NTAPI
 PhShellExploreFile(
-    _In_ HWND hWnd,
+    _In_ HWND WindowHandle,
     _In_ PWSTR FileName
     );
 
@@ -1264,8 +1227,39 @@ PHLIBAPI
 VOID
 NTAPI
 PhShellProperties(
-    _In_ HWND hWnd,
+    _In_ HWND WindowHandle,
     _In_ PWSTR FileName
+    );
+
+typedef struct _NOTIFYICONDATAW NOTIFYICONDATAW, *PNOTIFYICONDATAW;
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhShellNotifyIcon(
+    _In_ ULONG Message,
+    _In_ PNOTIFYICONDATAW NotifyIconData
+    );
+
+PHLIBAPI
+HRESULT
+NTAPI
+PhShellGetKnownFolderPath(
+    _In_ PCGUID rfid, // REFKNOWNFOLDERID
+    _In_ ULONG Flags,
+    _In_opt_ HANDLE TokenHandle,
+    _Outptr_ PWSTR * FolderPath
+    );
+
+PHLIBAPI
+HRESULT
+NTAPI
+PhShellGetKnownFolderItem(
+    _In_ PCGUID rfid, // REFKNOWNFOLDERID
+    _In_ ULONG Flags,
+    _In_opt_ HANDLE TokenHandle,
+    _In_ REFIID riid,
+    _Outptr_ PVOID* ppv
     );
 
 PHLIBAPI
@@ -1396,7 +1390,7 @@ PHLIBAPI
 BOOLEAN
 NTAPI
 PhShowFileDialog(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_ PVOID FileDialog
     );
 
@@ -1504,7 +1498,13 @@ typedef enum _PH_IMGCOHERENCY_SCAN_TYPE
     * - .NET manifests if appropriate
     * - Scans for code caves in tail of mapped sections (virtual mapping > size on disk)
     */
-    PhImageCoherencyFull
+    PhImageCoherencyFull,
+
+    /**
+     * Fast scan of the image coherency
+     * - only checks for shared original pages using NtQueryVirtualMemory
+     */
+    PhImageCoherencySharedOriginal,
 
 } PH_IMAGE_COHERENCY_SCAN_TYPE;
 
@@ -1529,6 +1529,17 @@ PhGetProcessModuleImageCoherency(
     _In_ BOOLEAN IsKernelModule,
     _In_ PH_IMAGE_COHERENCY_SCAN_TYPE Type,
     _Out_ PFLOAT ImageCoherency
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhCheckImagePagesForTampering(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID BaseAddress,
+    _In_ SIZE_T SizeOfImage,
+    _Out_ PSIZE_T NumberOfPages,
+    _Out_ PSIZE_T NumberOfTamperedPages
     );
 
 PHLIBAPI
@@ -1669,14 +1680,23 @@ PHLIBAPI
 PPH_STRING
 NTAPI
 PhCreateCacheFile(
-    _In_ PPH_STRING FileName
+    _In_ PPH_STRING FileName,
+    _In_ BOOLEAN NativeFileName
     );
 
 PHLIBAPI
 VOID
 NTAPI
 PhDeleteCacheFile(
-    _In_ PPH_STRING FileName
+    _In_ PPH_STRING FileName,
+    _In_ BOOLEAN NativeFileName
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhClearCacheDirectory(
+    VOID
     );
 
 PHLIBAPI
@@ -1865,6 +1885,42 @@ PhUpdateProcThreadAttribute(
     _In_ ULONG_PTR Attribute,
     _In_ PVOID Buffer,
     _In_ SIZE_T BufferLength
+    );
+
+PHLIBAPI
+PPH_STRING
+NTAPI
+PhGetActiveComputerName(
+    VOID
+    );
+
+typedef enum _DEV_OBJECT_TYPE DEV_OBJECT_TYPE, *PDEV_OBJECT_TYPE;
+typedef enum _DEV_QUERY_FLAGS DEV_QUERY_FLAGS, *PDEV_QUERY_FLAGS;
+typedef struct _DEVPROPCOMPKEY DEVPROPCOMPKEY, *PDEVPROPCOMPKEY;
+typedef struct _DEVPROP_FILTER_EXPRESSION DEVPROP_FILTER_EXPRESSION, *PDEVPROP_FILTER_EXPRESSION;
+typedef struct _DEV_OBJECT DEV_OBJECT, *PDEV_OBJECT;
+
+PHLIBAPI
+_Check_return_
+HRESULT
+NTAPI
+PhDevGetObjects(
+    _In_ DEV_OBJECT_TYPE ObjectType,
+    _In_ DEV_QUERY_FLAGS QueryFlags,
+    _In_ ULONG RequestedPropertiesCount,
+    _In_reads_opt_(RequestedPropertiesCount) const DEVPROPCOMPKEY* RequestedProperties,
+    _In_ ULONG FilterExpressionCount,
+    _In_reads_opt_(FilterExpressionCount) const DEVPROP_FILTER_EXPRESSION* FilterExpressions,
+    _Out_ PULONG ObjectCount,
+    _Outptr_result_buffer_maybenull_(*ObjectCount) const DEV_OBJECT** Objects
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhDevFreeObjects(
+    _In_ ULONG ObjectCount,
+    _In_reads_(ObjectCount) const DEV_OBJECT* Objects
     );
 
 FORCEINLINE

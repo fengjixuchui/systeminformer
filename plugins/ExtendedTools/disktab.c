@@ -11,7 +11,6 @@
  */
 
 #include "exttools.h"
-#include "etwmon.h"
 #include <toolstatusintf.h>
 #include "disktabp.h"
 
@@ -103,7 +102,7 @@ BOOLEAN EtpDiskPageCallback(
                 0,
                 3,
                 3,
-                PhMainWndHandle,
+                Parameter2,
                 NULL,
                 NULL,
                 &treelistCreateParams
@@ -190,9 +189,7 @@ BOOLEAN EtpDiskPageCallback(
                 &DiskItemsUpdatedRegistration
                 );
 
-            SetCursor(LoadCursor(NULL, IDC_WAIT));
             EtInitializeDiskInformation();
-            SetCursor(LoadCursor(NULL, IDC_ARROW));
 
             if (Parameter1)
             {
@@ -280,13 +277,13 @@ VOID EtInitializeDiskTreeList(
 
     // Default columns
     PhAddTreeNewColumn(hwnd, ETDSTNC_NAME, TRUE, L"Name", 100, PH_ALIGN_LEFT, 0, 0);
-    PhAddTreeNewColumn(hwnd, ETDSTNC_FILE, TRUE, L"File", 400, PH_ALIGN_LEFT, 1, DT_PATH_ELLIPSIS);
-    PhAddTreeNewColumnEx(hwnd, ETDSTNC_READRATEAVERAGE, TRUE, L"Read rate average", 70, PH_ALIGN_RIGHT, 2, DT_RIGHT, TRUE);
-    PhAddTreeNewColumnEx(hwnd, ETDSTNC_WRITERATEAVERAGE, TRUE, L"Write rate average", 70, PH_ALIGN_RIGHT, 3, DT_RIGHT, TRUE);
-    PhAddTreeNewColumnEx(hwnd, ETDSTNC_TOTALRATEAVERAGE, TRUE, L"Total rate average", 70, PH_ALIGN_RIGHT, 4, DT_RIGHT, TRUE);
-    PhAddTreeNewColumnEx(hwnd, ETDSTNC_IOPRIORITY, TRUE, L"I/O priority", 70, PH_ALIGN_LEFT, 5, 0, TRUE);
-    PhAddTreeNewColumnEx(hwnd, ETDSTNC_RESPONSETIME, TRUE, L"Response time (ms)", 70, PH_ALIGN_RIGHT, 6, 0, TRUE);
-    PhAddTreeNewColumn(hwnd, ETDSTNC_PID, FALSE, L"PID", 50, PH_ALIGN_RIGHT, ULONG_MAX, DT_RIGHT);
+    PhAddTreeNewColumn(hwnd, ETDSTNC_PID, TRUE, L"PID", 50, PH_ALIGN_RIGHT, 1, DT_RIGHT);
+    PhAddTreeNewColumn(hwnd, ETDSTNC_FILE, TRUE, L"File", 400, PH_ALIGN_LEFT, 2, DT_PATH_ELLIPSIS);
+    PhAddTreeNewColumnEx(hwnd, ETDSTNC_READRATEAVERAGE, TRUE, L"Read rate average", 70, PH_ALIGN_RIGHT, 3, DT_RIGHT, TRUE);
+    PhAddTreeNewColumnEx(hwnd, ETDSTNC_WRITERATEAVERAGE, TRUE, L"Write rate average", 70, PH_ALIGN_RIGHT, 4, DT_RIGHT, TRUE);
+    PhAddTreeNewColumnEx(hwnd, ETDSTNC_TOTALRATEAVERAGE, TRUE, L"Total rate average", 70, PH_ALIGN_RIGHT, 5, DT_RIGHT, TRUE);
+    PhAddTreeNewColumnEx(hwnd, ETDSTNC_IOPRIORITY, TRUE, L"I/O priority", 70, PH_ALIGN_LEFT, 6, 0, TRUE);
+    PhAddTreeNewColumnEx(hwnd, ETDSTNC_RESPONSETIME, TRUE, L"Response time (ms)", 70, PH_ALIGN_RIGHT, 7, 0, TRUE);
     PhAddTreeNewColumn(hwnd, ETDSTNC_ORIGINALNAME, FALSE, L"Original name", 200, PH_ALIGN_LEFT, ULONG_MAX, DT_PATH_ELLIPSIS);
 
     TreeNew_SetRedraw(hwnd, TRUE);
@@ -443,7 +440,6 @@ VOID EtTickDiskNodes(
 }
 
 #define SORT_FUNCTION(Column) EtpDiskTreeNewCompare##Column
-
 #define BEGIN_SORT_FUNCTION(Column) static int __cdecl EtpDiskTreeNewCompare##Column( \
     _In_ const void *_elem1, \
     _In_ const void *_elem2 \
@@ -467,6 +463,12 @@ VOID EtTickDiskNodes(
 BEGIN_SORT_FUNCTION(Process)
 {
     sortResult = PhCompareString(node1->ProcessNameText, node2->ProcessNameText, TRUE);
+}
+END_SORT_FUNCTION
+
+BEGIN_SORT_FUNCTION(Pid)
+{
+    sortResult = intptrcmp((LONG_PTR)diskItem1->ProcessId, (LONG_PTR)diskItem2->ProcessId);
 }
 END_SORT_FUNCTION
 
@@ -506,12 +508,6 @@ BEGIN_SORT_FUNCTION(ResponseTime)
 }
 END_SORT_FUNCTION
 
-BEGIN_SORT_FUNCTION(Pid)
-{
-    sortResult = intptrcmp((LONG_PTR)diskItem1->ProcessId, (LONG_PTR)diskItem2->ProcessId);
-}
-END_SORT_FUNCTION
-
 BOOLEAN NTAPI EtpDiskTreeNewCallback(
     _In_ HWND WindowHandle,
     _In_ PH_TREENEW_MESSAGE Message,
@@ -533,16 +529,18 @@ BOOLEAN NTAPI EtpDiskTreeNewCallback(
                 static PVOID sortFunctions[] =
                 {
                     SORT_FUNCTION(Process),
+                    SORT_FUNCTION(Pid),
                     SORT_FUNCTION(File),
                     SORT_FUNCTION(ReadRateAverage),
                     SORT_FUNCTION(WriteRateAverage),
                     SORT_FUNCTION(TotalRateAverage),
                     SORT_FUNCTION(IoPriority),
                     SORT_FUNCTION(ResponseTime),
-                    SORT_FUNCTION(Pid),
                     SORT_FUNCTION(File),
                 };
                 int (__cdecl *sortFunction)(const void *, const void *);
+
+                static_assert(RTL_NUMBER_OF(sortFunctions) == ETDSTNC_MAXIMUM, "SortFunctions must equal maximum.");
 
                 if (DiskTreeNewSortColumn < ETDSTNC_MAXIMUM)
                     sortFunction = sortFunctions[DiskTreeNewSortColumn];
@@ -578,6 +576,9 @@ BOOLEAN NTAPI EtpDiskTreeNewCallback(
             {
             case ETDSTNC_NAME:
                 getCellText->Text = PhGetStringRef(node->ProcessNameText);
+                break;
+            case ETDSTNC_PID:
+                PhInitializeStringRefLongHint(&getCellText->Text, diskItem->ProcessIdString);
                 break;
             case ETDSTNC_FILE:
                 getCellText->Text = PhGetStringRef(diskItem->FileNameWin32);
@@ -690,9 +691,6 @@ BOOLEAN NTAPI EtpDiskTreeNewCallback(
                         getCellText->Text.Length = returnLength - sizeof(UNICODE_NULL);
                     }
                 }
-                break;
-            case ETDSTNC_PID:
-                PhInitializeStringRefLongHint(&getCellText->Text, diskItem->ProcessIdString);
                 break;
             case ETDSTNC_ORIGINALNAME:
                 getCellText->Text = PhGetStringRef(diskItem->FileName);

@@ -109,8 +109,10 @@
 #define IDD_HEAPS                       255
 #define IDD_PROCVDMHOST                 257
 #define IDD_OPTSYMBOLS                  258
+#define IDD_OBJMAPPINGS                 258
 #define IDI_UACSHIELD                   261
 #define IDD_RUNPACKAGE                  263
+#define IDD_MODIFIEDPAGES               264
 #define IDB_SEARCH_ACTIVE_SMALL         265
 #define IDB_SEARCH_INACTIVE_SMALL       266
 #define IDC_TERMINATE                   1003
@@ -400,6 +402,7 @@
 #define IDC_TOGGLEELEVATION             1254
 #define IDC_TOGGLESUSPENDED             1255
 #define IDC_TRUSTEDINSTALLER            1255
+#define IDC_TOGGLEUIACCESS              1256
 #define IDC_PARENT                      1263
 #define IDC_PROCESSNAME                 1264
 #define IDC_SERVICES_LAYOUT             1266
@@ -515,6 +518,9 @@
 #define IDC_SECTION                     1375
 #define IDC_REGEX                       1377
 #define IDC_DESCRIPTIONLABEL            1378
+#define IDC_IOREAD_L                    1378
+#define IDC_IOWRITE_L                   1379
+#define IDC_IOOTHER_L                   1380
 #define IDC_VIEWCOMMANDLINE             1381
 #define IDC_DELETE                      1382
 #define IDC_EDIT                        1383
@@ -690,6 +696,8 @@
 #define ID_MISCELLANEOUS_GDIHANDLES     40188
 #define ID_MISCELLANEOUS_HEAPS          40189
 #define ID_ESC_EXIT                     40190
+#define ID_NOTIFICATIONS_ARRIVEDDEVICES 40191
+#define ID_NOTIFICATIONS_REMOVEDDEVICES 40192
 #define ID_PROCESS_COPY                 40194
 #define ID_THREAD_COPY                  40195
 #define ID_NETWORK_COPY                 40197
@@ -711,6 +719,7 @@
 #define ID_TAB_PREV                     40224
 #define ID_MISCELLANEOUS_RUNAS          40229
 #define ID_MISCELLANEOUS_RUNASTHISUSER  40230
+#define ID_MISCELLANEOUS_PAGESMODIFIED  40231
 #define ID_VIEW_HIDEPROCESSESFROMOTHERUSERS 40232
 #define ID_THREAD_AFFINITY              40233
 #define ID_THREAD_BOOST                 40234
@@ -797,9 +806,9 @@
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        267
+#define _APS_NEXT_RESOURCE_VALUE        273
 #define _APS_NEXT_COMMAND_VALUE         40298
-#define _APS_NEXT_CONTROL_VALUE         1416
+#define _APS_NEXT_CONTROL_VALUE         1418
 #define _APS_NEXT_SYMED_VALUE           170
 #endif
 #endif

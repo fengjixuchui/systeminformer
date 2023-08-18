@@ -500,6 +500,8 @@ VOID PhSipOnDestroy(
 
     PhSaveWindowPlacementToSetting(L"SysInfoWindowPosition", L"SysInfoWindowSize", PhSipWindow);
     PhSipSaveWindowState();
+
+    PostQuitMessage(0);
 }
 
 VOID PhSipOnNcDestroy(
@@ -524,8 +526,6 @@ VOID PhSipOnNcDestroy(
         PhCloseThemeData(ThemeData);
         ThemeData = NULL;
     }
-
-    PostQuitMessage(0);
 }
 
 BOOLEAN PhSipOnSysCommand(
@@ -934,7 +934,7 @@ VOID PhSiSetColorsGraphDrawInfo(
     )
 {
     static PH_QUEUED_LOCK lock = PH_QUEUED_LOCK_INIT;
-    static ULONG lastDpi = ULONG_MAX;
+    static LONG lastDpi = ULONG_MAX;
     static HFONT iconTitleFont = NULL;
 
     // Get the appropriate fonts.
@@ -1007,7 +1007,7 @@ PPH_STRING PhSiSizeLabelYFunction(
 {
     ULONG64 size;
 
-    size = (ULONG64)((DOUBLE)Value * Parameter);
+    size = (ULONG64)(Value * Parameter);
 
     if (size != 0)
     {
@@ -1035,7 +1035,7 @@ PPH_STRING PhSiDoubleLabelYFunction(
 {
     DOUBLE value;
 
-    value = (DOUBLE)((DOUBLE)Value * Parameter);
+    value = (DOUBLE)(Value * Parameter);
 
     if (value != 0)
     {
@@ -1045,6 +1045,25 @@ PPH_STRING PhSiDoubleLabelYFunction(
         PhInitFormatC(&format[1], L'%');
 
         return PhFormat(format, RTL_NUMBER_OF(format), 0);
+    }
+    else
+    {
+        return PhReferenceEmptyString();
+    }
+}
+
+PPH_STRING PhSiUInt64LabelYFunction(
+    _In_ PPH_GRAPH_DRAW_INFO DrawInfo,
+    _In_ ULONG DataIndex,
+    _In_ FLOAT Value,
+    _In_ FLOAT Parameter
+    )
+{
+    ULONG64 value = (ULONG64)Value * (ULONG64)Parameter;
+
+    if (value != 0)
+    {
+        return PhFormatUInt64(value, TRUE);
     }
     else
     {
@@ -1214,7 +1233,7 @@ PPH_SYSINFO_SECTION PhSipCreateSection(
     Graph_GetOptions(section->GraphHandle, &options);
     options.FadeOutBackColor = CurrentParameters.GraphBackColor;
     options.FadeOutWidth = CurrentParameters.PanelWidth + PH_SYSINFO_FADE_ADD;
-    options.DefaultCursor = LoadCursor(NULL, IDC_HAND);
+    options.DefaultCursor = PhLoadCursor(NULL, IDC_HAND);
     Graph_SetOptions(section->GraphHandle, &options);
     if (PhEnableTooltipSupport) Graph_SetTooltip(section->GraphHandle, TRUE);
 
@@ -1954,7 +1973,7 @@ VOID PhSipEnterSectionViewInner(
     )
 {
     Section->HasFocus = FALSE;
-    Section->Callback(Section, SysInfoViewChanging, (PVOID)CurrentView, CurrentSection);
+    Section->Callback(Section, SysInfoViewChanging, UlongToPtr(CurrentView), CurrentSection);
 
     if (FromSummaryView)
     {
@@ -1991,7 +2010,7 @@ VOID PhSipRestoreSummaryView(
     {
         section = SectionList->Items[i];
 
-        section->Callback(section, SysInfoViewChanging, (PVOID)CurrentView, NULL);
+        section->Callback(section, SysInfoViewChanging, UlongToPtr(CurrentView), NULL);
 
         PhSetWindowStyle(section->GraphHandle, GC_STYLE_FADEOUT | GC_STYLE_DRAW_PANEL, GC_STYLE_FADEOUT | GC_STYLE_DRAW_PANEL);
         ShowWindow(section->PanelHandle, SW_HIDE);
@@ -2244,7 +2263,7 @@ LRESULT CALLBACK PhSipPanelHookWndProc(
         break;
     case WM_SETCURSOR:
         {
-            SetCursor(LoadCursor(NULL, IDC_HAND));
+            PhSetCursor(PhLoadCursor(NULL, IDC_HAND));
         }
         return TRUE;
     case WM_GETDLGCODE:

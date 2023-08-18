@@ -90,7 +90,7 @@ BOOLEAN PhSipCpuSectionCallback(
         return TRUE;
     case SysInfoViewChanging:
         {
-            PH_SYSINFO_VIEW_TYPE view = (PH_SYSINFO_VIEW_TYPE)Parameter1;
+            PH_SYSINFO_VIEW_TYPE view = (PH_SYSINFO_VIEW_TYPE)PtrToUlong(Parameter1);
             PPH_SYSINFO_SECTION section = (PPH_SYSINFO_SECTION)Parameter2;
 
             if (view == SysInfoSummaryView || section != Section)
@@ -145,12 +145,23 @@ BOOLEAN PhSipCpuSectionCallback(
                 {
                     FLOAT max = 0;
 
-                    for (ULONG i = 0; i < drawInfo->LineDataCount; i++)
+                    if (PhCsEnableAvxSupport && drawInfo->LineDataCount > 128)
                     {
-                        FLOAT data = Section->GraphState.Data1[i] + Section->GraphState.Data2[i]; // HACK
+                        max = PhAddPlusMaxMemorySingles(
+                            Section->GraphState.Data1,
+                            Section->GraphState.Data2,
+                            drawInfo->LineDataCount
+                            );
+                    }
+                    else
+                    {
+                        for (ULONG i = 0; i < drawInfo->LineDataCount; i++)
+                        {
+                            FLOAT data = Section->GraphState.Data1[i] + Section->GraphState.Data2[i];
 
-                        if (max < data)
-                            max = data;
+                            if (max < data)
+                                max = data;
+                        }
                     }
 
                     if (max != 0)
@@ -179,9 +190,6 @@ BOOLEAN PhSipCpuSectionCallback(
             FLOAT cpuUser;
             PH_FORMAT format[9];
 
-            if (!getTooltipText)
-                break;
-
             cpuKernel = PhGetItemCircularBuffer_FLOAT(&PhCpuKernelHistory, getTooltipText->Index);
             cpuUser = PhGetItemCircularBuffer_FLOAT(&PhCpuUserHistory, getTooltipText->Index);
 
@@ -204,9 +212,6 @@ BOOLEAN PhSipCpuSectionCallback(
         {
             PPH_SYSINFO_DRAW_PANEL drawPanel = Parameter1;
             PH_FORMAT format[2];
-
-            if (!drawPanel)
-                break;
 
             // %.2f%%
             PhInitFormatF(&format[0], ((DOUBLE)PhCpuKernelUsage + PhCpuUserUsage) * 100, PhMaxPrecisionUnit);
@@ -440,7 +445,7 @@ VOID PhSipTickCpuDialog(
     CurrentPerformanceDistribution = NULL;
     PhSipQueryProcessorPerformanceDistribution(&CurrentPerformanceDistribution);
     //PhGetSystemLogicalProcessorRelationInformation(&LogicalProcessorInformation);
-    
+
     if (CpuTicked < 2)
         CpuTicked++;
 
@@ -843,12 +848,23 @@ VOID PhSipNotifyCpuGraph(
                     {
                         FLOAT max = 0;
 
-                        for (ULONG i = 0; i < drawInfo->LineDataCount; i++)
+                        if (PhCsEnableAvxSupport && drawInfo->LineDataCount > 128)
                         {
-                            FLOAT data = CpuGraphState.Data1[i] + CpuGraphState.Data2[i]; // HACK
+                            max = PhAddPlusMaxMemorySingles(
+                                CpuGraphState.Data1,
+                                CpuGraphState.Data2,
+                                drawInfo->LineDataCount
+                                );
+                        }
+                        else
+                        {
+                            for (ULONG i = 0; i < drawInfo->LineDataCount; i++)
+                            {
+                                FLOAT data = CpuGraphState.Data1[i] + CpuGraphState.Data2[i];
 
-                            if (max < data)
-                                max = data;
+                                if (max < data)
+                                    max = data;
+                            }
                         }
 
                         if (max != 0)
@@ -886,12 +902,23 @@ VOID PhSipNotifyCpuGraph(
                     {
                         FLOAT max = 0;
 
-                        for (ULONG i = 0; i < drawInfo->LineDataCount; i++)
+                        if (PhCsEnableAvxSupport && drawInfo->LineDataCount > 128)
                         {
-                            FLOAT data = CpusGraphState[Index].Data1[i] + CpusGraphState[Index].Data2[i]; // HACK
+                            max = PhAddPlusMaxMemorySingles(
+                                CpusGraphState[Index].Data1,
+                                CpusGraphState[Index].Data2,
+                                drawInfo->LineDataCount
+                                );
+                        }
+                        else
+                        {
+                            for (ULONG i = 0; i < drawInfo->LineDataCount; i++)
+                            {
+                                FLOAT data = CpusGraphState[Index].Data1[i] + CpusGraphState[Index].Data2[i];
 
-                            if (max < data)
-                                max = data;
+                                if (max < data)
+                                    max = data;
+                            }
                         }
 
                         if (max != 0)
@@ -1120,7 +1147,7 @@ VOID PhSipUpdateCpuPanel(
     DOUBLE cpuFrequency;
     DOUBLE cpuGhz = 0;
     BOOLEAN distributionSucceeded = FALSE;
-    SYSTEM_TIMEOFDAY_INFORMATION timeOfDayInfo;
+    LARGE_INTEGER systemUptime;
     LARGE_INTEGER performanceCounterStart;
     LARGE_INTEGER performanceCounterEnd;
     LARGE_INTEGER performanceCounterTicks;
@@ -1192,20 +1219,9 @@ VOID PhSipUpdateCpuPanel(
     else
         PhSetWindowText(CpuPanelHandlesLabel, PhaFormatUInt64(PhTotalHandles, TRUE)->Buffer);
 
-    if (NT_SUCCESS(NtQuerySystemInformation(
-        SystemTimeOfDayInformation,
-        &timeOfDayInfo,
-        sizeof(SYSTEM_TIMEOFDAY_INFORMATION),
-        NULL
-        )))
+    if (NT_SUCCESS(PhGetSystemUptime(&systemUptime)))
     {
-        ULARGE_INTEGER bootTime;
-
-        bootTime.LowPart = timeOfDayInfo.BootTime.LowPart;
-        bootTime.HighPart = timeOfDayInfo.BootTime.HighPart;
-        bootTime.QuadPart -= timeOfDayInfo.BootTimeBias;
-
-        PhPrintTimeSpan(uptimeString, timeOfDayInfo.CurrentTime.QuadPart - bootTime.QuadPart, PH_TIMESPAN_DHMS);
+        PhPrintTimeSpan(uptimeString, systemUptime.QuadPart, PH_TIMESPAN_DHMS);
     }
 
     PhSetWindowText(CpuPanelUptimeLabel, uptimeString);
@@ -1291,6 +1307,7 @@ VOID PhSipUpdateCpuPanel(
 
     // Do not optimize (dmex)
     PhQueryPerformanceCounter(&performanceCounterStart);
+    MemoryBarrier();
     timeStampCounterStart = PhReadTimeStampCounter();
     MemoryBarrier();
 #ifdef _ARM64_
@@ -1430,7 +1447,6 @@ PPH_STRING PhSipGetCpuBrandString(
 {
     static PH_STRINGREF whitespace = PH_STRINGREF_INIT(L" ");
     PPH_STRING brand = NULL;
-    PH_STRINGREF brandSr;
     ULONG brandLength;
     CHAR brandString[49];
 
@@ -1473,9 +1489,7 @@ PPH_STRING PhSipGetCpuBrandString(
     PhTrimToNullTerminatorString(brand);
 
     // Trim empty space (#611) (dmex)
-    brandSr = brand->sr;
-    PhTrimStringRef(&brandSr, &whitespace, PH_TRIM_END_ONLY);
-    PhMoveReference(&brand, PhCreateString2(&brandSr));
+    PhMoveReference(&brand, PhCreateString3(&brand->sr, PH_TRIM_END_ONLY, &whitespace));
 
     return brand;
 }

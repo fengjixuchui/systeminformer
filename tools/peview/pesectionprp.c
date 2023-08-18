@@ -273,7 +273,7 @@ NTSTATUS PvpPeSectionsEnumerateThread(
     {
         PPV_SECTION_NODE sectionNode;
         ULONG sectionNameLength = 0;
-        WCHAR sectionName[IMAGE_SIZEOF_SHORT_NAME + 1];
+        WCHAR sectionName[PH_INT64_STR_LEN_1];
         WCHAR value[PH_INT64_STR_LEN_1];
 
         sectionNode = PhAllocateZero(sizeof(PV_SECTION_NODE));
@@ -288,7 +288,7 @@ NTSTATUS PvpPeSectionsEnumerateThread(
             &sectionNameLength
             ))
         {
-            sectionNode->SectionNameString = PhCreateStringEx(sectionName, sectionNameLength * sizeof(WCHAR));
+            sectionNode->SectionNameString = PhCreateStringEx(sectionName, sectionNameLength * sizeof(WCHAR) - sizeof(UNICODE_NULL));
         }
 
         // RAW
@@ -1029,6 +1029,8 @@ BOOLEAN NTAPI PvSectionTreeNewCallback(
                     SORT_FUNCTION(Tlsh),
                 };
                 int (__cdecl *sortFunction)(void *, const void *, const void *);
+
+                static_assert(RTL_NUMBER_OF(sortFunctions) == PV_SECTION_TREE_COLUMN_ITEM_MAXIMUM, "SortFunctions must equal maximum.");
 
                 if (context->TreeNewSortColumn < PV_SECTION_TREE_COLUMN_ITEM_MAXIMUM)
                     sortFunction = sortFunctions[context->TreeNewSortColumn];

@@ -214,7 +214,7 @@ typedef enum _PROCESSINFOCLASS
     ProcessDynamicEnforcedCetCompatibleRanges, // PROCESS_DYNAMIC_ENFORCED_ADDRESS_RANGE_INFORMATION // since 20H2
     ProcessCreateStateChange, // since WIN11
     ProcessApplyStateChange,
-    ProcessEnableOptionalXStateFeatures,
+    ProcessEnableOptionalXStateFeatures, // ULONG64 // optional XState feature bitmask
     ProcessAltPrefetchParam, // since 22H1
     ProcessAssignCpuPartitions,
     ProcessPriorityClassEx, // s: PROCESS_PRIORITY_CLASS_EX
@@ -685,7 +685,32 @@ typedef struct _PROCESS_MITIGATION_REDIRECTION_TRUST_POLICY
             ULONG ReservedFlags : 30;
         };
     };
-} PROCESS_MITIGATION_REDIRECTION_TRUST_POLICY, * PPROCESS_MITIGATION_REDIRECTION_TRUST_POLICY;
+} PROCESS_MITIGATION_REDIRECTION_TRUST_POLICY, *PPROCESS_MITIGATION_REDIRECTION_TRUST_POLICY;
+#endif
+
+#if !defined(NTDDI_WIN10_NI) || (NTDDI_VERSION < NTDDI_WIN10_NI)
+#define ProcessUserPointerAuthPolicy 17
+#define ProcessSEHOPPolicy 18
+
+typedef struct _PROCESS_MITIGATION_USER_POINTER_AUTH_POLICY {
+    union {
+        ULONG Flags;
+        struct {
+            ULONG EnablePointerAuthUserIp : 1;
+            ULONG ReservedFlags : 31;
+        };
+    };
+} PROCESS_MITIGATION_USER_POINTER_AUTH_POLICY, *PPROCESS_MITIGATION_USER_POINTER_AUTH_POLICY;
+
+typedef struct _PROCESS_MITIGATION_SEHOP_POLICY {
+    union {
+        ULONG Flags;
+        struct {
+            ULONG EnableSehop : 1;
+            ULONG ReservedFlags : 31;
+        };
+    };
+} PROCESS_MITIGATION_SEHOP_POLICY, *PPROCESS_MITIGATION_SEHOP_POLICY;
 #endif
 
 // private
@@ -877,11 +902,13 @@ typedef struct _WIN32K_SYSCALL_FILTER
     ULONG FilterSet;
 } WIN32K_SYSCALL_FILTER, *PWIN32K_SYSCALL_FILTER;
 
+typedef struct _JOBOBJECT_WAKE_FILTER *PJOBOBJECT_WAKE_FILTER; // from ntpsapi.h
+
 typedef struct _PROCESS_WAKE_INFORMATION
 {
     ULONGLONG NotificationChannel;
     ULONG WakeCounters[7];
-    struct _JOBOBJECT_WAKE_FILTER* WakeFilter;
+    PJOBOBJECT_WAKE_FILTER WakeFilter;
 } PROCESS_WAKE_INFORMATION, *PPROCESS_WAKE_INFORMATION;
 
 typedef struct _PROCESS_ENERGY_TRACKING_STATE
@@ -978,7 +1005,9 @@ typedef union _PROCESS_LOGGING_INFORMATION
         ULONG EnableWriteVmLogging : 1;
         ULONG EnableProcessSuspendResumeLogging : 1;
         ULONG EnableThreadSuspendResumeLogging : 1;
-        ULONG Reserved : 28;
+        ULONG EnableLocalExecProtectVmLogging : 1;
+        ULONG EnableRemoteExecProtectVmLogging : 1;
+        ULONG Reserved : 26;
     };
 } PROCESS_LOGGING_INFORMATION, *PPROCESS_LOGGING_INFORMATION;
 
@@ -1405,6 +1434,10 @@ NtResumeProcess(
 #define NtCurrentSilo() ((HANDLE)(LONG_PTR)-1)
 
 // Not NT, but useful.
+EXTERN_C IMAGE_DOS_HEADER __ImageBase;
+#define NtCurrentImageBase() ((PVOID)&__ImageBase)
+
+// Not NT, but useful.
 #define NtCurrentProcessId() (NtCurrentTeb()->ClientId.UniqueProcess)
 #define NtCurrentThreadId() (NtCurrentTeb()->ClientId.UniqueThread)
 
@@ -1711,19 +1744,20 @@ NtQueueApcThread(
 
 #if (PHNT_VERSION >= PHNT_WIN7)
 
-#define APC_FORCE_THREAD_SIGNAL ((HANDLE)1) // ReserveHandle
+#define QUEUE_USER_APC_SPECIAL_USER_APC ((HANDLE)0x1)
 
 NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtQueueApcThreadEx(
     _In_ HANDLE ThreadHandle,
-    _In_opt_ HANDLE ReserveHandle, // NtAllocateReserveObject
+    _In_opt_ HANDLE ReserveHandle, // NtAllocateReserveObject // SPECIAL_USER_APC
     _In_ PPS_APC_ROUTINE ApcRoutine,
     _In_opt_ PVOID ApcArgument1,
     _In_opt_ PVOID ApcArgument2,
     _In_opt_ PVOID ApcArgument3
     );
+
 #endif
 
 #if (PHNT_VERSION >= PHNT_WIN11)
@@ -1885,7 +1919,8 @@ typedef enum _SE_SAFE_OPEN_PROMPT_EXPERIENCE_RESULTS
     SeSafeOpenExperienceUninstaller = 0x10,
     SeSafeOpenExperienceIgnoreUnknownOrBad = 0x20,
     SeSafeOpenExperienceDefenderTrustedInstaller = 0x40,
-    SeSafeOpenExperienceMOTWPresent = 0x80
+    SeSafeOpenExperienceMOTWPresent = 0x80,
+    SeSafeOpenExperienceElevatedNoPropagation = 0x100
 } SE_SAFE_OPEN_PROMPT_EXPERIENCE_RESULTS;
 
 // private
@@ -1959,12 +1994,12 @@ typedef enum _PS_ATTRIBUTE_NUM
     PsAttributeChildProcessPolicy, // 20, in PULONG (PROCESS_CREATION_CHILD_PROCESS_*) // since THRESHOLD2
     PsAttributeAllApplicationPackagesPolicy, // in PULONG (PROCESS_CREATION_ALL_APPLICATION_PACKAGES_*) // since REDSTONE
     PsAttributeWin32kFilter, // in PWIN32K_SYSCALL_FILTER
-    PsAttributeSafeOpenPromptOriginClaim, // in
+    PsAttributeSafeOpenPromptOriginClaim, // in SE_SAFE_OPEN_PROMPT_RESULTS
     PsAttributeBnoIsolation, // in PPS_BNO_ISOLATION_PARAMETERS // since REDSTONE2
     PsAttributeDesktopAppPolicy, // in PULONG (PROCESS_CREATION_DESKTOP_APP_*)
     PsAttributeChpe, // in BOOLEAN // since REDSTONE3
     PsAttributeMitigationAuditOptions, // in PPS_MITIGATION_AUDIT_OPTIONS_MAP (PROCESS_CREATION_MITIGATION_AUDIT_POLICY_*) // since 21H1
-    PsAttributeMachineType, // in WORD // since 21H2
+    PsAttributeMachineType, // in USHORT // since 21H2
     PsAttributeComponentFilter,
     PsAttributeEnableOptionalXStateFeatures, // since WIN11
     PsAttributeMax
@@ -2195,6 +2230,7 @@ typedef enum _PS_MITIGATION_OPTION
     PS_MITIGATION_OPTION_BLOCK_NON_CET_BINARIES,
     PS_MITIGATION_OPTION_CET_DYNAMIC_APIS_OUT_OF_PROC_ONLY,
     PS_MITIGATION_OPTION_REDIRECTION_TRUST, // since 22H1
+    PS_MITIGATION_OPTION_RESTRICT_CORE_SHARING,
 } PS_MITIGATION_OPTION;
 
 // windows-internals-book:"Chapter 5"
@@ -2317,6 +2353,11 @@ NtCreateUserProcess(
 // end_rev
 
 #if (PHNT_VERSION >= PHNT_VISTA)
+
+typedef NTSTATUS (NTAPI *PUSER_THREAD_START_ROUTINE)(
+    _In_ PVOID ThreadParameter
+    );
+
 NTSYSCALLAPI
 NTSTATUS
 NTAPI
@@ -2325,7 +2366,7 @@ NtCreateThreadEx(
     _In_ ACCESS_MASK DesiredAccess,
     _In_opt_ POBJECT_ATTRIBUTES ObjectAttributes,
     _In_ HANDLE ProcessHandle,
-    _In_ PVOID StartRoutine, // PUSER_THREAD_START_ROUTINE
+    _In_ PUSER_THREAD_START_ROUTINE StartRoutine,
     _In_opt_ PVOID Argument,
     _In_ ULONG CreateFlags, // THREAD_CREATE_FLAGS_*
     _In_ SIZE_T ZeroBits,
@@ -2333,6 +2374,7 @@ NtCreateThreadEx(
     _In_ SIZE_T MaximumStackSize,
     _In_opt_ PPS_ATTRIBUTE_LIST AttributeList
     );
+
 #endif
 
 #endif
@@ -2343,15 +2385,15 @@ NtCreateThreadEx(
 
 // JOBOBJECTINFOCLASS
 // Note: We don't use an enum since it conflicts with the Windows SDK.
-#define JobObjectBasicAccountingInformation 1 // JOBOBJECT_BASIC_ACCOUNTING_INFORMATION
-#define JobObjectBasicLimitInformation 2 // JOBOBJECT_BASIC_LIMIT_INFORMATION
-#define JobObjectBasicProcessIdList 3 // JOBOBJECT_BASIC_PROCESS_ID_LIST
-#define JobObjectBasicUIRestrictions 4 // JOBOBJECT_BASIC_UI_RESTRICTIONS
+#define JobObjectBasicAccountingInformation 1 // q: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION
+#define JobObjectBasicLimitInformation 2 // q; s: JOBOBJECT_BASIC_LIMIT_INFORMATION
+#define JobObjectBasicProcessIdList 3 // q: JOBOBJECT_BASIC_PROCESS_ID_LIST
+#define JobObjectBasicUIRestrictions 4 // q; s: JOBOBJECT_BASIC_UI_RESTRICTIONS
 #define JobObjectSecurityLimitInformation 5 // JOBOBJECT_SECURITY_LIMIT_INFORMATION
-#define JobObjectEndOfJobTimeInformation 6 // JOBOBJECT_END_OF_JOB_TIME_INFORMATION
-#define JobObjectAssociateCompletionPortInformation 7 // JOBOBJECT_ASSOCIATE_COMPLETION_PORT
-#define JobObjectBasicAndIoAccountingInformation 8 // JOBOBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION
-#define JobObjectExtendedLimitInformation 9 // JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+#define JobObjectEndOfJobTimeInformation 6 // q; s: JOBOBJECT_END_OF_JOB_TIME_INFORMATION
+#define JobObjectAssociateCompletionPortInformation 7 // s: JOBOBJECT_ASSOCIATE_COMPLETION_PORT
+#define JobObjectBasicAndIoAccountingInformation 8 // q: JOBOBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION
+#define JobObjectExtendedLimitInformation 9 // q; s: JOBOBJECT_EXTENDED_LIMIT_INFORMATION[V2]
 #define JobObjectJobSetInformation 10 // JOBOBJECT_JOBSET_INFORMATION
 #define JobObjectGroupInformation 11 // USHORT
 #define JobObjectNotificationLimitInformation 12 // JOBOBJECT_NOTIFICATION_LIMIT_INFORMATION
@@ -2372,8 +2414,8 @@ NtCreateThreadEx(
 #define JobObjectClearPeakJobMemoryUsed 27
 #define JobObjectMemoryUsageInformation 28 // JOBOBJECT_MEMORY_USAGE_INFORMATION // JOBOBJECT_MEMORY_USAGE_INFORMATION_V2
 #define JobObjectSharedCommit 29
-#define JobObjectContainerId 30
-#define JobObjectIoRateControlInformation 31
+#define JobObjectContainerId 30 // JOBOBJECT_CONTAINER_IDENTIFIER_V2
+#define JobObjectIoRateControlInformation 31 // JOBOBJECT_IO_RATE_CONTROL_INFORMATION_NATIVE, JOBOBJECT_IO_RATE_CONTROL_INFORMATION_NATIVE_V2, JOBOBJECT_IO_RATE_CONTROL_INFORMATION_NATIVE_V3
 #define JobObjectNetRateControlInformation 32 // JOBOBJECT_NET_RATE_CONTROL_INFORMATION
 #define JobObjectNotificationLimitInformation2 33 // JOBOBJECT_NOTIFICATION_LIMIT_INFORMATION_2
 #define JobObjectLimitViolationInformation2 34 // JOBOBJECT_LIMIT_VIOLATION_INFORMATION_2
@@ -2382,17 +2424,32 @@ NtCreateThreadEx(
 #define JobObjectSiloRootDirectory 37 // SILOOBJECT_ROOT_DIRECTORY
 #define JobObjectServerSiloBasicInformation 38 // SERVERSILO_BASIC_INFORMATION
 #define JobObjectServerSiloUserSharedData 39 // SILO_USER_SHARED_DATA
-#define JobObjectServerSiloInitialize 40
+#define JobObjectServerSiloInitialize 40 // SERVERSILO_INIT_INFORMATION
 #define JobObjectServerSiloRunningState 41
-#define JobObjectIoAttribution 42
+#define JobObjectIoAttribution 42 // JOBOBJECT_IO_ATTRIBUTION_INFORMATION
 #define JobObjectMemoryPartitionInformation 43
 #define JobObjectContainerTelemetryId 44
 #define JobObjectSiloSystemRoot 45
 #define JobObjectEnergyTrackingState 46 // JOBOBJECT_ENERGY_TRACKING_STATE
 #define JobObjectThreadImpersonationInformation 47
-#define JobObjectIoPriorityLimit 48
-#define JobObjectPagePriorityLimit 49
+#define JobObjectIoPriorityLimit 48 // JOBOBJECT_IO_PRIORITY_LIMIT
+#define JobObjectPagePriorityLimit 49 // JOBOBJECT_PAGE_PRIORITY_LIMIT
 #define MaxJobObjectInfoClass 50
+
+// rev // extended limit v2
+#define JOB_OBJECT_LIMIT_SILO_READY 0x00400000
+
+// private
+typedef struct _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_V2
+{
+    JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+    IO_COUNTERS IoInfo;
+    SIZE_T ProcessMemoryLimit;
+    SIZE_T JobMemoryLimit;
+    SIZE_T PeakProcessMemoryUsed;
+    SIZE_T PeakJobMemoryUsed;
+    SIZE_T JobTotalMemoryLimit;
+} JOBOBJECT_EXTENDED_LIMIT_INFORMATION_V2, *PJOBOBJECT_EXTENDED_LIMIT_INFORMATION_V2;
 
 // private
 typedef struct _JOBOBJECT_EXTENDED_ACCOUNTING_INFORMATION
@@ -2454,6 +2511,14 @@ typedef struct _JOBOBJECT_FREEZE_INFORMATION
 } JOBOBJECT_FREEZE_INFORMATION, *PJOBOBJECT_FREEZE_INFORMATION;
 
 // private
+typedef struct _JOBOBJECT_CONTAINER_IDENTIFIER_V2
+{
+    GUID ContainerId;
+    GUID ContainerTelemetryId;
+    ULONG JobId;
+} JOBOBJECT_CONTAINER_IDENTIFIER_V2, *PJOBOBJECT_CONTAINER_IDENTIFIER_V2;
+
+// private
 typedef struct _JOBOBJECT_MEMORY_USAGE_INFORMATION
 {
     ULONG64 JobMemory;
@@ -2487,12 +2552,27 @@ typedef struct _SILO_USER_SHARED_DATA
     LARGE_INTEGER TimeZoneBiasEffectiveEnd;
 } SILO_USER_SHARED_DATA, *PSILO_USER_SHARED_DATA;
 
+// rev
+#define SILO_OBJECT_ROOT_DIRECTORY_SHADOW_ROOT 0x00000001
+#define SILO_OBJECT_ROOT_DIRECTORY_INITIALIZE 0x00000002
+#define SILO_OBJECT_ROOT_DIRECTORY_SHADOW_DOS_DEVICES 0x00000004
+
 // private
 typedef struct _SILOOBJECT_ROOT_DIRECTORY
 {
-    ULONG ControlFlags;
-    UNICODE_STRING Path;
+    union
+    {
+        ULONG ControlFlags; // SILO_OBJECT_ROOT_DIRECTORY_*
+        UNICODE_STRING Path;
+    };
 } SILOOBJECT_ROOT_DIRECTORY, *PSILOOBJECT_ROOT_DIRECTORY;
+
+// private
+typedef struct _SERVERSILO_INIT_INFORMATION
+{
+    HANDLE DeleteEvent;
+    BOOLEAN IsDownlevelContainer;
+} SERVERSILO_INIT_INFORMATION, * PSERVERSILO_INIT_INFORMATION;
 
 // private
 typedef struct _JOBOBJECT_ENERGY_TRACKING_STATE
@@ -2501,6 +2581,34 @@ typedef struct _JOBOBJECT_ENERGY_TRACKING_STATE
     ULONG UpdateMask;
     ULONG DesiredState;
 } JOBOBJECT_ENERGY_TRACKING_STATE, *PJOBOBJECT_ENERGY_TRACKING_STATE;
+
+// private
+typedef enum _JOBOBJECT_IO_PRIORITY_LIMIT_FLAGS
+{
+    JOBOBJECT_IO_PRIORITY_LIMIT_ENABLE = 0x1,
+    JOBOBJECT_IO_PRIORITY_LIMIT_VALID_FLAGS = 0x1,
+} JOBOBJECT_IO_PRIORITY_LIMIT_FLAGS;
+
+// private
+typedef struct _JOBOBJECT_IO_PRIORITY_LIMIT
+{
+    JOBOBJECT_IO_PRIORITY_LIMIT_FLAGS Flags;
+    ULONG Priority;
+} JOBOBJECT_IO_PRIORITY_LIMIT, *PJOBOBJECT_IO_PRIORITY_LIMIT;
+
+// private
+typedef enum _JOBOBJECT_PAGE_PRIORITY_LIMIT_FLAGS
+{
+    JOBOBJECT_PAGE_PRIORITY_LIMIT_ENABLE = 0x1,
+    JOBOBJECT_PAGE_PRIORITY_LIMIT_VALID_FLAGS = 0x1,
+} JOBOBJECT_PAGE_PRIORITY_LIMIT_FLAGS;
+
+// private
+typedef struct _JOBOBJECT_PAGE_PRIORITY_LIMIT
+{
+    JOBOBJECT_PAGE_PRIORITY_LIMIT_FLAGS Flags;
+    ULONG Priority;
+} JOBOBJECT_PAGE_PRIORITY_LIMIT, *PJOBOBJECT_PAGE_PRIORITY_LIMIT;
 
 NTSYSCALLAPI
 NTSTATUS
@@ -2620,6 +2728,31 @@ PssNtCaptureSnapshot(
     _In_ HANDLE ProcessHandle,
     _In_ ULONG CaptureFlags,
     _In_ ULONG ThreadContextFlags
+    );
+#endif
+
+#if (PHNT_VERSION >= PHNT_20H1)
+// rev
+#define MEMORY_BULK_INFORMATION_FLAG_BASIC 0x00000001
+
+// rev
+typedef struct _NTPSS_MEMORY_BULK_INFORMATION
+{
+    ULONG QueryFlags;
+    ULONG NumberOfEntries;
+    PVOID NextValidAddress;
+} NTPSS_MEMORY_BULK_INFORMATION, *PNTPSS_MEMORY_BULK_INFORMATION;
+
+// rev
+NTSYSCALLAPI
+NTSTATUS
+NTAPI
+NtPssCaptureVaSpaceBulk(
+    _In_ HANDLE ProcessHandle,
+    _In_opt_ PVOID BaseAddress,
+    _In_ PNTPSS_MEMORY_BULK_INFORMATION BulkInformation,
+    _In_ SIZE_T BulkInformationLength,
+    _Out_opt_ PSIZE_T ReturnLength
     );
 #endif
 

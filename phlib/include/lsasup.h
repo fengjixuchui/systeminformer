@@ -180,6 +180,29 @@ PhBuildTrusteeWithSid(
     _In_opt_ PSID Sid
     );
 
+PHLIBAPI
+VOID
+NTAPI
+PhMapGenericMask(
+    _Inout_ PACCESS_MASK AccessMask,
+    _In_ PGENERIC_MAPPING GenericMapping
+    );
+
+_Function_class_(PH_ENUM_ACCOUNT_CALLBACK)
+typedef NTSTATUS (NTAPI PH_ENUM_ACCOUNT_CALLBACK)(
+    _In_ PPH_STRING AccountName,
+    _In_opt_ PVOID Context
+    );
+typedef PH_ENUM_ACCOUNT_CALLBACK *PPH_ENUM_ACCOUNT_CALLBACK;
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhEnumerateAccounts(
+    _In_ PPH_ENUM_ACCOUNT_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    );
+
 #ifdef __cplusplus
 }
 #endif

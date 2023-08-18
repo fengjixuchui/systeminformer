@@ -61,6 +61,7 @@ BOOLEAN EtGraphShowText = FALSE;
 BOOLEAN EtEnableScaleGraph = FALSE;
 BOOLEAN EtEnableScaleText = FALSE;
 BOOLEAN EtPropagateCpuUsage = FALSE;
+BOOLEAN EtEnableAvxSupport = FALSE;
 
 VOID NTAPI LoadCallback(
     _In_opt_ PVOID Parameter,
@@ -151,9 +152,14 @@ VOID NTAPI MenuItemCallback(
             EtShowReparseDialog(menuItem->OwnerWindow, UlongToPtr(menuItem->Id));
         }
         break;
-    case ID_WCT_MENUITEM:
+    case ID_PROCESS_WAITCHAIN:
         {
-            EtShowWaitChainDialog(menuItem->OwnerWindow, menuItem->Context);
+            EtShowWaitChainProcessDialog(menuItem->OwnerWindow, menuItem->Context);
+        }
+        break;
+    case ID_THREAD_WAITCHAIN:
+        {
+            EtShowWaitChainThreadDialog(menuItem->OwnerWindow, menuItem->Context);
         }
         break;
     case ID_PIPE_ENUM:
@@ -174,6 +180,11 @@ VOID NTAPI MenuItemCallback(
     case ID_POOL_TABLE:
         {
             EtShowPoolTableDialog(menuItem->OwnerWindow);
+        }
+        break;
+    case ID_TPM:
+        {
+            EtShowTpmDialog(menuItem->OwnerWindow);
         }
         break;
     }
@@ -211,6 +222,7 @@ VOID NTAPI MainMenuInitializingCallback(
     PPH_PLUGIN_MENU_INFORMATION menuInfo = Parameter;
     PPH_EMENU_ITEM systemMenu;
     PPH_EMENU_ITEM bootMenuItem;
+    PPH_EMENU_ITEM tpmMenuItem;
     PPH_EMENU_ITEM reparsePointsMenu;
     PPH_EMENU_ITEM reparseObjIdMenu;
     PPH_EMENU_ITEM reparseSsdlMenu;
@@ -226,6 +238,7 @@ VOID NTAPI MainMenuInitializingCallback(
     PhInsertEMenuItem(systemMenu, PhPluginCreateEMenuItem(PluginInstance, 0, ID_POOL_TABLE, L"Poo&l Table", NULL), ULONG_MAX);
     PhInsertEMenuItem(systemMenu, PhPluginCreateEMenuItem(PluginInstance, 0, ID_OBJMGR, L"&Object Manager", NULL), ULONG_MAX);
     PhInsertEMenuItem(systemMenu, bootMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_FIRMWARE, L"Firm&ware Table", NULL), ULONG_MAX);
+    PhInsertEMenuItem(systemMenu, tpmMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_TPM, L"&Trusted Platform Module", NULL), ULONG_MAX);
     PhInsertEMenuItem(systemMenu, PhPluginCreateEMenuItem(PluginInstance, 0, ID_PIPE_ENUM, L"&Named Pipes", NULL), ULONG_MAX);
     PhInsertEMenuItem(systemMenu, reparsePointsMenu = PhPluginCreateEMenuItem(PluginInstance, 0, ID_REPARSE_POINTS, L"NTFS Reparse Points", NULL), ULONG_MAX);
     PhInsertEMenuItem(systemMenu, reparseObjIdMenu = PhPluginCreateEMenuItem(PluginInstance, 0, ID_REPARSE_OBJID, L"NTFS Object Identifiers", NULL), ULONG_MAX);
@@ -234,10 +247,14 @@ VOID NTAPI MainMenuInitializingCallback(
     if (!PhGetOwnTokenAttributes().Elevated)
     {
         bootMenuItem->Flags |= PH_EMENU_DISABLED;
+        tpmMenuItem->Flags |= PH_EMENU_DISABLED;
         reparsePointsMenu->Flags |= PH_EMENU_DISABLED;
         reparseObjIdMenu->Flags |= PH_EMENU_DISABLED;
         reparseSsdlMenu->Flags |= PH_EMENU_DISABLED;
     }
+
+    if (EtWindowsVersion < WINDOWS_8 || !EtTpmIsReady())
+        tpmMenuItem->Flags |= PH_EMENU_DISABLED;
 }
 
 VOID NTAPI MainWindowShowingCallback(
@@ -247,6 +264,7 @@ VOID NTAPI MainWindowShowingCallback(
 {
     EtInitializeDiskTab();
     EtInitializeFirewallTab();
+
     EtRegisterToolbarGraphs();
 
     EtFramesMonitorStart();
@@ -260,7 +278,6 @@ VOID NTAPI ProcessesUpdatedCallback(
     if (ProcessesUpdatedCount != 3)
     {
         ProcessesUpdatedCount++;
-        return;
     }
 }
 
@@ -295,8 +312,7 @@ VOID NTAPI ProcessMenuInitializingCallback(
     PPH_PROCESS_ITEM processItem;
     ULONG flags;
     PPH_EMENU_ITEM miscMenu;
-
-    WctProcessMenuInitializingCallback(Parameter, Context);
+    PPH_EMENU_ITEM menuItem;
 
     if (menuInfo->u.Process.NumberOfProcesses == 1)
         processItem = menuInfo->u.Process.Processes[0];
@@ -324,6 +340,14 @@ VOID NTAPI ProcessMenuInitializingCallback(
     {
         PhInsertEMenuItem(miscMenu, PhPluginCreateEMenuItem(PluginInstance, flags, ID_PROCESS_UNLOADEDMODULES, L"&Unloaded modules", processItem), ULONG_MAX);
         PhInsertEMenuItem(miscMenu, PhPluginCreateEMenuItem(PluginInstance, flags, ID_PROCESS_WSWATCH, L"&WS watch", processItem), ULONG_MAX);
+        menuItem = PhPluginCreateEMenuItem(PluginInstance, flags, ID_PROCESS_WAITCHAIN, L"Wait Chain Tra&versal", processItem);
+        PhInsertEMenuItem(miscMenu, menuItem, ULONG_MAX);
+
+        if (!processItem || !processItem->QueryHandle || processItem->ProcessId == NtCurrentProcessId())
+            menuItem->Flags |= PH_EMENU_DISABLED;
+
+        if (!PhGetOwnTokenAttributes().Elevated)
+            menuItem->Flags |= PH_EMENU_DISABLED;
     }
 }
 
@@ -336,8 +360,6 @@ VOID NTAPI ThreadMenuInitializingCallback(
     PPH_THREAD_ITEM threadItem;
     ULONG insertIndex;
     PPH_EMENU_ITEM menuItem;
-
-    WctThreadMenuInitializingCallback(Parameter, Context);
 
     if (menuInfo->u.Thread.NumberOfThreads == 1)
         threadItem = menuInfo->u.Thread.Threads[0];
@@ -355,6 +377,19 @@ VOID NTAPI ThreadMenuInitializingCallback(
     if (!threadItem)
         PhSetDisabledEMenuItem(menuItem);
     if (menuInfo->u.Thread.ProcessId == SYSTEM_IDLE_PROCESS_ID)
+        PhSetDisabledEMenuItem(menuItem);
+
+    if (menuItem = PhFindEMenuItem(menuInfo->Menu, 0, NULL, PHAPP_ID_ANALYZE_WAIT))
+        insertIndex = PhIndexOfEMenuItem(menuInfo->Menu, menuItem) + 1;
+    else
+        insertIndex = ULONG_MAX;
+
+    menuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_THREAD_WAITCHAIN, L"Wait Chain Tra&versal", threadItem);
+    PhInsertEMenuItem(menuInfo->Menu, menuItem, insertIndex);
+
+    if (!threadItem)
+        PhSetDisabledEMenuItem(menuItem);
+    if (menuInfo->u.Thread.ProcessId == SYSTEM_IDLE_PROCESS_ID || menuInfo->u.Thread.ProcessId == NtCurrentProcessId())
         PhSetDisabledEMenuItem(menuItem);
 }
 
@@ -519,14 +554,12 @@ VOID NTAPI NetworkItemsUpdatedCallback(
 }
 
 VOID NTAPI ProcessStatsEventCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_PROCESS_STATS_EVENT event = Parameter;
 
-    if (!event)
-        return;
     if (event->Version)
         return;
 
@@ -845,6 +878,7 @@ VOID EtLoadSettings(
     EtEnableScaleGraph = !!PhGetIntegerSetting(L"EnableGraphMaxScale");
     EtEnableScaleText = !!PhGetIntegerSetting(L"EnableGraphMaxText");
     EtPropagateCpuUsage = !!PhGetIntegerSetting(L"PropagateCpuUsage");
+    EtEnableAvxSupport = !!PhGetIntegerSetting(L"EnableAvxSupport");
     EtTrayIconTransparencyEnabled = !!PhGetIntegerSetting(L"IconTransparencyEnabled");
 }
 
@@ -1087,6 +1121,8 @@ LOGICAL DllMain(
                 { StringSettingType, SETTING_NAME_FW_TREE_LIST_COLUMNS, L"" },
                 { IntegerPairSettingType, SETTING_NAME_FW_TREE_LIST_SORT, L"12,2" },
                 { IntegerSettingType, SETTING_NAME_FW_IGNORE_PORTSCAN, L"0" },
+                { IntegerSettingType, SETTING_NAME_FW_IGNORE_LOOPBACK, L"1" },
+                { IntegerSettingType, SETTING_NAME_FW_IGNORE_ALLOW, L"0" },
                 { IntegerSettingType, SETTING_NAME_SHOWSYSINFOGRAPH, L"1" },
                 { StringSettingType, SETTING_NAME_WCT_TREE_LIST_COLUMNS, L"" },
                 { IntegerPairSettingType, SETTING_NAME_WCT_WINDOW_POSITION, L"0,0" },
@@ -1099,6 +1135,7 @@ LOGICAL DllMain(
                 { IntegerPairSettingType, SETTING_NAME_PIPE_ENUM_WINDOW_POSITION, L"0,0" },
                 { ScalableIntegerPairSettingType, SETTING_NAME_PIPE_ENUM_WINDOW_SIZE, L"@96|510,380" },
                 { StringSettingType, SETTING_NAME_PIPE_ENUM_LISTVIEW_COLUMNS, L"" },
+                { StringSettingType, SETTING_NAME_PIPE_ENUM_LISTVIEW_COLUMNS_WITH_KPH, L"" },
                 { IntegerPairSettingType, SETTING_NAME_FIRMWARE_WINDOW_POSITION, L"0,0" },
                 { ScalableIntegerPairSettingType, SETTING_NAME_FIRMWARE_WINDOW_SIZE, L"@96|490,340" },
                 { StringSettingType, SETTING_NAME_FIRMWARE_LISTVIEW_COLUMNS, L"" },
@@ -1111,6 +1148,9 @@ LOGICAL DllMain(
                 { IntegerPairSettingType, SETTING_NAME_POOL_TREE_LIST_SORT, L"0,0" },
                 { IntegerPairSettingType, SETTING_NAME_BIGPOOL_WINDOW_POSITION, L"0,0" },
                 { ScalableIntegerPairSettingType, SETTING_NAME_BIGPOOL_WINDOW_SIZE, L"@96|510,380" },
+                { IntegerPairSettingType, SETTING_NAME_TPM_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_TPM_WINDOW_SIZE, L"@96|490,340" },
+                { StringSettingType, SETTING_NAME_TPM_LISTVIEW_COLUMNS, L"" },
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);

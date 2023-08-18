@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2016
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *     jxy-s   2021
  *
  */
@@ -30,11 +30,14 @@ VOID PhAddDefaultSettings(
     PhpAddStringSetting(L"DisabledPlugins", L"");
     PhpAddIntegerSetting(L"ElevationLevel", L"1"); // PromptElevateAction
     PhpAddIntegerSetting(L"EnableAdvancedOptions", L"0");
+    PhpAddIntegerSetting(L"EnableArmCycleCpuUsage", L"0");
+    PhpAddIntegerSetting(L"EnableAvxSupport", L"0");
     PhpAddIntegerSetting(L"EnableBitmapSupport", L"1");
     PhpAddIntegerSetting(L"EnableBreakOnTermination", L"0");
     PhpAddIntegerSetting(L"EnableBootObjectsEnumerate", L"0");
     PhpAddIntegerSetting(L"EnableCycleCpuUsage", L"1");
-    PhpAddIntegerSetting(L"EnableArmCycleCpuUsage", L"0");
+    PhpAddIntegerSetting(L"EnableDeferredLayout", L"1");
+    PhpAddIntegerSetting(L"EnableDeviceSupport", L"1");
     PhpAddIntegerSetting(L"EnableImageCoherencySupport", L"0");
     PhpAddIntegerSetting(L"EnableInstantTooltips", L"0");
     PhpAddIntegerSetting(L"EnableHeapReflection", L"0");
@@ -61,6 +64,7 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"EnableStreamerMode", L"0");
     PhpAddIntegerSetting(L"EnableServiceStage2", L"0");
     PhpAddIntegerSetting(L"EnableStartAsAdmin", L"0");
+    PhpAddIntegerSetting(L"EnableStartAsAdminAlwaysOnTop", L"0");
     PhpAddIntegerSetting(L"EnableDefaultSafePlugins", L"1");
     PhpAddIntegerSetting(L"EnableSecurityAdvancedDialog", L"1");
     PhpAddIntegerSetting(L"EnableShortRelativeStartTime", L"1");
@@ -116,7 +120,7 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"IconTrayLazyStartDelay", L"1");
     PhpAddIntegerSetting(L"IconIgnoreBalloonClick", L"0");
     PhpAddStringSetting(L"IconSettings", L"2|1");
-    PhpAddIntegerSetting(L"IconNotifyMask", L"c"); // PH_NOTIFY_SERVICE_CREATE | PH_NOTIFY_SERVICE_DELETE
+    PhpAddIntegerSetting(L"IconNotifyMask", L"18c"); // PH_NOTIFY_SERVICE_CREATE | PH_NOTIFY_SERVICE_DELETE | PH_NOTIFY_DEVICE_ARRIVED | PH_NOTIFY_DEVICE_REMOVED
     PhpAddIntegerSetting(L"IconProcesses", L"f"); // 15
     PhpAddIntegerSetting(L"IconSingleClick", L"0");
     PhpAddIntegerSetting(L"IconTogglesVisibility", L"1");
@@ -153,6 +157,11 @@ VOID PhAddDefaultSettings(
     PhpAddStringSetting(L"MemoryTreeListSort", L"0,0"); // 0, NoSortOrder
     PhpAddIntegerPairSetting(L"MemoryListsWindowPosition", L"400,400");
     PhpAddStringSetting(L"MemoryReadWriteAddressChoices", L"");
+    PhpAddIntegerPairSetting(L"MemoryModifiedWindowPosition", L"0,0");
+    PhpAddScalableIntegerPairSetting(L"MemoryModifiedWindowSize", L"@96|450,500");
+    PhpAddStringSetting(L"MemoryModifiedListViewColumns", L"");
+    PhpAddStringSetting(L"MemoryModifiedListViewSort", L"0,0"); // 0, NoSortOrder
+    PhpAddStringSetting(L"MiniInfoContainerClassName", L"MiniInfoContainerClassName");
     PhpAddStringSetting(L"MiniInfoWindowClassName", L"MiniInfoWindowClassName");
     PhpAddIntegerSetting(L"MiniInfoWindowEnabled", L"1");
     PhpAddIntegerSetting(L"MiniInfoWindowOpacity", L"0"); // means 100%
@@ -329,6 +338,7 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"KsiEnableLoadNative", L"0");
     PhpAddIntegerSetting(L"KsiEnableLoadFilter", L"0");
     PhpAddIntegerSetting(L"KsiUnloadOnExitTest", L"0");
+    PhpAddIntegerSetting(L"KphRandomizedPoolTag", L"0");
 }
 
 VOID PhUpdateCachedSettings(
@@ -412,9 +422,9 @@ VOID PhUpdateCachedSettings(
 
     PH_UPDATE_SETTING(ImageCoherencyScanLevel);
 
+    PhCsEnableAvxSupport = !!PhGetIntegerSetting(L"EnableAvxSupport");
     PhCsEnableGraphMaxScale = !!PhGetIntegerSetting(L"EnableGraphMaxScale");
     PhCsEnableGraphMaxText = !!PhGetIntegerSetting(L"EnableGraphMaxText");
     PhEnableNetworkResolveDoHSupport = !!PhGetIntegerSetting(L"EnableNetworkResolveDoH");
     PhEnableVersionShortText = !!PhGetIntegerSetting(L"EnableVersionSupport");
-    PhEnableWindowText = !!PhGetIntegerSetting(L"EnableWindowText");
 }

@@ -17,15 +17,18 @@
 #include <trace.h>
 
 PDRIVER_OBJECT KphDriverObject = NULL;
-KPH_INFORMER_SETTINGS KphInformerSettings;
+KPH_INFORMER_SETTINGS KphInformerSettings = { 0 };
 KPH_PROTECTED_DATA_SECTION_PUSH();
 static BYTE KphpProtectedSection = 0;
-BOOLEAN KphIgnoreDebuggerPresence = FALSE;
-SYSTEM_SECUREBOOT_INFORMATION KphSecureBootInfo = { 0 };
 RTL_OSVERSIONINFOEXW KphOsVersionInfo = { 0 };
-USHORT KphOsRevision = 0;
-KPH_OSVERSION KphOsVersion = KphWinUnknown;
+KPH_FILE_VERSION KphKernelVersion = { 0 };
+BOOLEAN KphIgnoreProtectionSuppression = FALSE;
+SYSTEM_SECUREBOOT_INFORMATION KphSecureBootInfo = { 0 };
+SYSTEM_CODEINTEGRITY_INFORMATION KphCodeIntegrityInfo = { 0 };
 KPH_PROTECTED_DATA_SECTION_POP();
+KPH_PROTECTED_DATA_SECTION_RO_PUSH();
+static const BYTE KphpProtectedSectionReadOnly = 0;
+KPH_PROTECTED_DATA_SECTION_RO_POP();
 
 PAGED_FILE();
 
@@ -51,6 +54,15 @@ VOID KphpProtectSections(
     }
 
     status = KphDynMmProtectDriverSection(&KphpProtectedSection,
+                                          0,
+                                          MM_PROTECT_DRIVER_SECTION_ALLOW_UNLOAD);
+
+    KphTracePrint(TRACE_LEVEL_VERBOSE,
+                  GENERAL,
+                  "MmProtectDriverSection %!STATUS!",
+                  status);
+
+    status = KphDynMmProtectDriverSection((PVOID)&KphpProtectedSectionReadOnly,
                                           0,
                                           MM_PROTECT_DRIVER_SECTION_ALLOW_UNLOAD);
 
@@ -134,8 +146,6 @@ NTSTATUS DriverEntry(
     KphDriverObject = DriverObject;
     KphDriverObject->DriverUnload = DriverUnload;
 
-    RtlZeroMemory(&KphInformerSettings, sizeof(KphInformerSettings));
-
     ExInitializeDriverRuntime(DrvRtPoolNxOptIn);
 
     KphOsVersionInfo.dwOSVersionInfoSize = sizeof(RTL_OSVERSIONINFOEXW);
@@ -150,42 +160,6 @@ NTSTATUS DriverEntry(
         goto Exit;
     }
 
-    KphOsVersion = KphWinUnknown;
-
-    if (KphOsVersionInfo.dwMajorVersion == 6)
-    {
-        if (KphOsVersionInfo.dwMinorVersion == 1)
-        {
-            KphOsVersion = KphWin7;
-        }
-        else if (KphOsVersionInfo.dwMinorVersion == 2)
-        {
-            KphOsVersion = KphWin8;
-
-        }
-        else if (KphOsVersionInfo.dwMinorVersion == 3)
-        {
-            KphOsVersion = KphWin81;
-        }
-    }
-    else if (KphOsVersionInfo.dwMajorVersion >= 10)
-    {
-        KphOsVersion = KphWin10;
-    }
-
-    if (KphOsVersion == KphWinUnknown)
-    {
-        KphTracePrint(TRACE_LEVEL_ERROR,
-                      GENERAL,
-                      "Unknown OS Version %lu.%lu.%lu",
-                      KphOsVersionInfo.dwMajorVersion,
-                      KphOsVersionInfo.dwMinorVersion,
-                      KphOsVersionInfo.dwBuildNumber);
-
-        status = STATUS_NOT_SUPPORTED;
-        goto Exit;
-    }
-
     if (!NT_SUCCESS(ZwQuerySystemInformation(SystemSecureBootInformation,
                                              &KphSecureBootInfo,
                                              sizeof(KphSecureBootInfo),
@@ -194,7 +168,25 @@ NTSTATUS DriverEntry(
         RtlZeroMemory(&KphSecureBootInfo, sizeof(KphSecureBootInfo));
     }
 
-    KphInitializeAlloc();
+    KphCodeIntegrityInfo.Length = sizeof(KphCodeIntegrityInfo);
+    if (!NT_SUCCESS(ZwQuerySystemInformation(SystemCodeIntegrityInformation,
+                                             &KphCodeIntegrityInfo,
+                                             sizeof(KphCodeIntegrityInfo),
+                                             NULL)))
+    {
+        RtlZeroMemory(&KphCodeIntegrityInfo, sizeof(KphCodeIntegrityInfo));
+    }
+
+    status = KphInitializeAlloc(RegistryPath);
+    if (!NT_SUCCESS(status))
+    {
+        KphTracePrint(TRACE_LEVEL_ERROR,
+                      GENERAL,
+                      "KphInitializeAlloc failed: %!STATUS!",
+                      status);
+
+        goto Exit;
+    }
 
     KphDynamicImport();
 
@@ -209,7 +201,7 @@ NTSTATUS DriverEntry(
         goto Exit;
     }
 
-    status = KphLocateKernelRevision(&KphOsRevision);
+    status = KphGetKernelVersion(&KphKernelVersion);
     if (!NT_SUCCESS(status))
     {
         KphTracePrint(TRACE_LEVEL_ERROR,
@@ -219,6 +211,17 @@ NTSTATUS DriverEntry(
 
         goto Exit;
     }
+
+    KphTracePrint(TRACE_LEVEL_INFORMATION,
+                  GENERAL,
+                  "Windows %lu.%lu.%lu Kernel %lu.%lu.%lu.%lu",
+                  KphOsVersionInfo.dwMajorVersion,
+                  KphOsVersionInfo.dwMinorVersion,
+                  KphOsVersionInfo.dwBuildNumber,
+                  KphKernelVersion.MajorVersion,
+                  KphKernelVersion.MinorVersion,
+                  KphKernelVersion.BuildNumber,
+                  KphKernelVersion.Revision);
 
     status = KphInitializeVerify();
     if (!NT_SUCCESS(status))
@@ -370,7 +373,7 @@ Exit:
     {
         KphpDriverCleanup();
 
-        KphTracePrint(TRACE_LEVEL_INFORMATION,
+        KphTracePrint(TRACE_LEVEL_ERROR,
                       GENERAL,
                       "Driver Load Failed: %!STATUS!",
                       status);

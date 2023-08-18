@@ -132,7 +132,7 @@ VOID PhpShowKsiMessage(
     _In_ BOOLEAN Force,
     _In_ PWSTR Title,
     _In_ PWSTR Format,
-    _In_ va_list ArgPtr 
+    _In_ va_list ArgPtr
     )
 {
     PPH_STRING kernelVersion;
@@ -242,36 +242,29 @@ VOID PhShowKsiMessage(
     va_end(argptr);
 }
 
-static VOID NTAPI KsiCommsCallback(
-    _In_ ULONG_PTR ReplyToken,
-    _In_ PCKPH_MESSAGE Message
-    )
-{
-    PPH_FREE_LIST freelist;
-    PKPH_MESSAGE msg;
-
-    if (Message->Header.MessageId != KphMsgProcessCreate)
-    {
-        return;
-    }
-
-    freelist = KphGetMessageFreeList();
-
-    msg = PhAllocateFromFreeList(freelist);
-    KphMsgInit(msg, KphMsgProcessCreate);
-    msg->Reply.ProcessCreate.CreationStatus = STATUS_SUCCESS;
-    KphCommsReplyMessage(ReplyToken, msg);
-
-    PhFreeToFreeList(freelist, msg);
-}
-
 NTSTATUS PhRestartSelf(
     _In_ PPH_STRINGREF AdditionalCommandLine
     )
 {
+#ifndef DEBUG
+#define DEFAULT_MITIGATION_POLICY_FLAGS \
+    (PROCESS_CREATION_MITIGATION_POLICY_HEAP_TERMINATE_ALWAYS_ON | \
+     PROCESS_CREATION_MITIGATION_POLICY_BOTTOM_UP_ASLR_ALWAYS_ON | \
+     PROCESS_CREATION_MITIGATION_POLICY_HIGH_ENTROPY_ASLR_ALWAYS_ON | \
+     PROCESS_CREATION_MITIGATION_POLICY_EXTENSION_POINT_DISABLE_ALWAYS_ON | \
+     PROCESS_CREATION_MITIGATION_POLICY_CONTROL_FLOW_GUARD_ALWAYS_ON | \
+     PROCESS_CREATION_MITIGATION_POLICY_IMAGE_LOAD_PREFER_SYSTEM32_ALWAYS_ON)
+#define DEFAULT_MITIGATION_POLICY_FLAGS2 \
+    (PROCESS_CREATION_MITIGATION_POLICY2_LOADER_INTEGRITY_CONTINUITY_ALWAYS_ON | \
+     PROCESS_CREATION_MITIGATION_POLICY2_STRICT_CONTROL_FLOW_GUARD_ALWAYS_ON | \
+     PROCESS_CREATION_MITIGATION_POLICY2_MODULE_TAMPERING_PROTECTION_ALWAYS_ON)
+     // PROCESS_CREATION_MITIGATION_POLICY2_BLOCK_NON_CET_BINARIES_ALWAYS_ON
+     // PROCESS_CREATION_MITIGATION_POLICY2_XTENDED_CONTROL_FLOW_GUARD_ALWAYS_ON
+#endif
     NTSTATUS status;
     PH_STRINGREF commandlineSr;
     PPH_STRING commandline;
+    STARTUPINFOEX startupInfo;
 
     status = PhGetProcessCommandLineStringRef(&commandlineSr);
 
@@ -283,23 +276,60 @@ NTSTATUS PhRestartSelf(
         AdditionalCommandLine
         );
 
-    status = PhCreateProcessWin32(
+    memset(&startupInfo, 0, sizeof(STARTUPINFOEX));
+    startupInfo.StartupInfo.cb = sizeof(STARTUPINFOEX);
+
+#ifndef DEBUG
+    status = PhInitializeProcThreadAttributeList(&startupInfo.lpAttributeList, 1);
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    if (WindowsVersion >= WINDOWS_10_22H2)
+    {
+        status = PhUpdateProcThreadAttribute(
+            startupInfo.lpAttributeList,
+            PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY,
+            &(ULONG64[2]){ DEFAULT_MITIGATION_POLICY_FLAGS, DEFAULT_MITIGATION_POLICY_FLAGS2 },
+            sizeof(ULONG64[2])
+            );
+    }
+    else
+    {
+        status = PhUpdateProcThreadAttribute(
+            startupInfo.lpAttributeList,
+            PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY,
+            &(ULONG64[1]) { DEFAULT_MITIGATION_POLICY_FLAGS },
+            sizeof(ULONG64[1])
+            );
+    }
+#endif
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    status = PhCreateProcessWin32Ex(
         NULL,
         PhGetString(commandline),
         NULL,
         NULL,
-        0,
+        &startupInfo.StartupInfo,
+        PH_CREATE_PROCESS_DEFAULT_ERROR_MODE | PH_CREATE_PROCESS_EXTENDED_STARTUPINFO,
+        NULL,
         NULL,
         NULL,
         NULL
         );
 
-    PhDereferenceObject(commandline);
-
     if (NT_SUCCESS(status))
     {
         PhExitApplication(STATUS_SUCCESS);
     }
+
+    if (startupInfo.lpAttributeList)
+        PhDeleteProcThreadAttributeList(startupInfo.lpAttributeList);
+
+    PhDereferenceObject(commandline);
 
     return status;
 }
@@ -343,6 +373,25 @@ PPH_STRING PhGetKsiServiceName(
     return string;
 }
 
+BOOLEAN KsiCommsCallback(
+    _In_ ULONG_PTR ReplyToken,
+    _In_ PCKPH_MESSAGE Message
+    )
+{
+    if (Message->Header.MessageId != KphMsgRequiredStateFailure)
+    {
+        return FALSE;
+    }
+
+    if (Message->Kernel.RequiredStateFailure.ClientId.UniqueProcess == NtCurrentProcessId())
+    {
+        // force the cached value to be updated
+        KphLevelEx(FALSE);
+    }
+
+    return TRUE;
+}
+
 NTSTATUS KsiInitializeCallbackThread(
     _In_opt_ PVOID CallbackContext
     )
@@ -371,6 +420,7 @@ NTSTATUS KsiInitializeCallbackThread(
         PPH_STRING portName = NULL;
         PPH_STRING altitudeName = NULL;
         BOOLEAN disableImageLoadProtection = FALSE;
+        BOOLEAN randomizedPoolTag = FALSE;
 
         if (PhIsNullOrEmptyString(objectName = PhGetStringSetting(L"KphObjectName")))
             PhMoveReference(&objectName, PhCreateString(KPH_OBJECT_NAME));
@@ -379,6 +429,7 @@ NTSTATUS KsiInitializeCallbackThread(
         if (PhIsNullOrEmptyString(altitudeName = PhGetStringSetting(L"KphAltitude")))
             PhMoveReference(&altitudeName, PhCreateString(KPH_ALTITUDE_NAME));
         disableImageLoadProtection = !!PhGetIntegerSetting(L"KphDisableImageLoadProtection");
+        randomizedPoolTag = !!PhGetIntegerSetting(L"KphRandomizedPoolTag");
 
         config.FileName = &ksiFileName->sr;
         config.ServiceName = &ksiServiceName->sr;
@@ -388,12 +439,13 @@ NTSTATUS KsiInitializeCallbackThread(
         config.EnableNativeLoad = KsiEnableLoadNative;
         config.EnableFilterLoad = KsiEnableLoadFilter;
         config.DisableImageLoadProtection = disableImageLoadProtection;
+        config.RandomizedPoolTag = randomizedPoolTag;
         config.Callback = KsiCommsCallback;
         status = KphConnect(&config);
 
         if (NT_SUCCESS(status))
         {
-            KPH_LEVEL level = KphLevel();
+            KPH_LEVEL level = KphLevelEx(FALSE);
 
             if (!NtCurrentPeb()->BeingDebugged && (level != KphLevelMax))
             {
@@ -401,7 +453,7 @@ NTSTATUS KsiInitializeCallbackThread(
                     !PhStartupParameters.KphStartupMax)
                 {
                     PH_STRINGREF commandline = PH_STRINGREF_INIT(L" -kx");
-                    PhRestartSelf(&commandline);
+                    status = PhRestartSelf(&commandline);
                 }
 
                 if ((level < KphLevelHigh) &&
@@ -409,18 +461,30 @@ NTSTATUS KsiInitializeCallbackThread(
                     !PhStartupParameters.KphStartupHigh)
                 {
                     PH_STRINGREF commandline = PH_STRINGREF_INIT(L" -kh");
-                    PhRestartSelf(&commandline);
+                    status = PhRestartSelf(&commandline);
+                }
+
+                if (!NT_SUCCESS(status))
+                {
+                    PhShowKsiMessageEx(
+                        CallbackContext,
+                        TD_ERROR_ICON,
+                        status,
+                        FALSE,
+                        L"Unable to load kernel driver",
+                        L"Unable to restart."
+                        );
                 }
             }
         }
         else
         {
             PhShowKsiMessageEx(
-                CallbackContext, 
+                CallbackContext,
                 TD_ERROR_ICON,
                 status,
                 FALSE,
-                L"Unable to load kernel driver", 
+                L"Unable to load kernel driver",
                 L"Unable to load the kernel driver service."
                 );
         }
@@ -430,11 +494,11 @@ NTSTATUS KsiInitializeCallbackThread(
     else
     {
         PhShowKsiMessageEx(
-            CallbackContext, 
+            CallbackContext,
             TD_ERROR_ICON,
             STATUS_NO_SUCH_FILE,
             FALSE,
-            L"Unable to load kernel driver", 
+            L"Unable to load kernel driver",
             L"The kernel driver was not found."
             );
     }
@@ -548,18 +612,6 @@ VOID PhInitializeKsi(
             L"Unable to load kernel driver",
             L"The kernel driver is not supported on this Windows version, the "
             L"minimum supported version is Windows 10."
-            );
-        return;
-    }
-    if (WindowsVersion < WINDOWS_10_20H1) // Temporary workaround for +3 month Microsoft delay (dmex)
-    {
-        PhShowKsiMessageEx(
-            NULL,
-            TD_ERROR_ICON,
-            0,
-            FALSE,
-            L"Unable to load kernel driver",
-            L"The kernel driver is temporarily disabled on this Windows version."
             );
         return;
     }

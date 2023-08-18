@@ -539,18 +539,18 @@ VOID PhShowMemoryStringDialog(
     _In_ PPH_PROCESS_ITEM ProcessItem
     );
 
+// memmod
+
+VOID PhShowImagePageModifiedDialog(
+    _In_ HWND ParentWindowHandle,
+    _In_ PPH_PROCESS_ITEM ProcessItem
+    );
+
 // mtgndlg
 
 VOID PhShowProcessMitigationPolicyDialog(
     _In_ HWND ParentWindowHandle,
     _In_ HANDLE ProcessId
-    );
-
-// netstk
-
-VOID PhShowNetworkStackDialog(
-    _In_ HWND ParentWindowHandle,
-    _In_ PPH_NETWORK_ITEM NetworkItem
     );
 
 // ntobjprp
@@ -573,6 +573,11 @@ HPROPSHEETPAGE PhCreateSemaphorePage(
 HPROPSHEETPAGE PhCreateTimerPage(
     _In_ PPH_OPEN_OBJECT OpenObject,
     _In_opt_ PVOID Context
+    );
+
+HPROPSHEETPAGE PhCreateMappingsPage(
+    _In_ HANDLE ProcessId,
+    _In_ HANDLE SectionHandle
     );
 
 // options
@@ -625,6 +630,7 @@ typedef struct _PH_RUNAS_SERVICE_PARAMETERS
     PWSTR ServiceName;
     BOOLEAN CreateSuspendedProcess;
     HWND WindowHandle;
+    BOOLEAN CreateUIAccessProcess;
 } PH_RUNAS_SERVICE_PARAMETERS, *PPH_RUNAS_SERVICE_PARAMETERS;
 
 VOID PhShowRunAsDialog(
@@ -679,7 +685,8 @@ PhExecuteRunAsCommand3(
     _In_ ULONG SessionId,
     _In_ PWSTR DesktopName,
     _In_ BOOLEAN UseLinkedToken,
-    _In_ BOOLEAN CreateSuspendedProcess
+    _In_ BOOLEAN CreateSuspendedProcess,
+    _In_ BOOLEAN CreateUIAccessProcess
     );
 
 NTSTATUS PhRunAsServiceStart(
