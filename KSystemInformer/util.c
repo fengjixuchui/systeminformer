@@ -15,8 +15,6 @@
 
 #include <trace.h>
 
-#define KPH_MODULES_MAX_COUNT 1024
-
 /**
  * \brief Captures the current stack, both kernel and user if possible.
  *
@@ -33,7 +31,7 @@ ULONG KphCaptureStack(
 {
     ULONG frames;
 
-    NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
+    NPAGED_CODE_DISPATCH_MAX();
 
     frames = RtlWalkFrameChain(Frames, Count, 0);
 
@@ -66,7 +64,7 @@ BOOLEAN KphAcquireRundown(
     _Inout_ PKPH_RUNDOWN Rundown
     )
 {
-    NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
+    NPAGED_CODE_DISPATCH_MAX();
 
     return ExAcquireRundownProtection(Rundown);
 }
@@ -81,7 +79,7 @@ VOID KphReleaseRundown(
     _Inout_ PKPH_RUNDOWN Rundown
     )
 {
-    NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
+    NPAGED_CODE_DISPATCH_MAX();
 
     ExReleaseRundownProtection(Rundown);
 }
@@ -295,7 +293,7 @@ NTSTATUS KphQueryRegistryString(
     PUNICODE_STRING string;
     ULONG length;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     *String = NULL;
     info = NULL;
@@ -435,7 +433,7 @@ NTSTATUS KphQueryRegistryBinary(
     ULONG resultLength;
     PKEY_VALUE_PARTIAL_INFORMATION info;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     *Buffer = NULL;
     *Length = 0;
@@ -537,7 +535,7 @@ NTSTATUS KphQueryRegistryULong(
     ULONG resultLength;
     PKEY_VALUE_PARTIAL_INFORMATION info;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     *Value = 0;
 
@@ -598,7 +596,7 @@ NTSTATUS KphMapViewInSystem(
     SIZE_T fileSize;
     LARGE_INTEGER sectionOffset;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     sectionHandle = NULL;
     sectionObject = NULL;
@@ -720,7 +718,7 @@ VOID KphUnmapViewInSystem(
     _In_ PVOID MappedBase
     )
 {
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     MmUnmapViewInSystemSpace(MappedBase);
 }
@@ -745,7 +743,7 @@ NTSTATUS KphGetNameFileObject(
     ULONG returnLength;
     POBJECT_NAME_INFORMATION nameInfo;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     *FileName = NULL;
 
@@ -843,7 +841,7 @@ BOOLEAN KphSinglePrivilegeCheckEx(
 {
     PRIVILEGE_SET requiredPrivileges;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     requiredPrivileges.PrivilegeCount = 1;
     requiredPrivileges.Control = PRIVILEGE_SET_ALL_NECESSARY;
@@ -872,7 +870,7 @@ BOOLEAN KphSinglePrivilegeCheck(
     BOOLEAN accessGranted;
     SECURITY_SUBJECT_CONTEXT subjectContext;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     SeCaptureSubjectContext(&subjectContext);
 
@@ -902,7 +900,7 @@ NTSTATUS KphpGetLsassProcessId(
     KAPC_STATE apcState;
     KPH_ALPC_COMMUNICATION_INFORMATION info;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     *ProcessId = NULL;
 
@@ -985,7 +983,7 @@ BOOLEAN KphProcessIsLsass(
     SECURITY_SUBJECT_CONTEXT subjectContext;
     BOOLEAN result;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     status = KphpGetLsassProcessId(&processId);
     if (!NT_SUCCESS(status))
@@ -1000,7 +998,7 @@ BOOLEAN KphProcessIsLsass(
 
     SeCaptureSubjectContextEx(NULL, Process, &subjectContext);
 
-    result = KphSinglePrivilegeCheckEx(SeExports->SeCreateTokenPrivilege,
+    result = KphSinglePrivilegeCheckEx(SeCreateTokenPrivilege,
                                        &subjectContext,
                                        UserMode);
 
@@ -1020,7 +1018,7 @@ BOOLEAN KphProcessIsLsass(
 _IRQL_requires_max_(PASSIVE_LEVEL)
 _Must_inspect_result_
 NTSTATUS KphpGetKernelFileName(
-    _Out_ _At_(FileName->Buffer, __drv_allocatesMem(Mem)) 
+    _Out_ _At_(FileName->Buffer, __drv_allocatesMem(Mem))
     PUNICODE_STRING FileName
     )
 {
@@ -1028,7 +1026,7 @@ NTSTATUS KphpGetKernelFileName(
     SYSTEM_SINGLE_MODULE_INFORMATION info;
     ANSI_STRING fullPathName;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     RtlZeroMemory(FileName, sizeof(UNICODE_STRING));
 
@@ -1078,13 +1076,13 @@ NTSTATUS KphpGetKernelFileName(
 _IRQL_requires_max_(PASSIVE_LEVEL)
 _Must_inspect_result_
 NTSTATUS KphGetKernelVersion(
-    _Out_ PKPH_FILE_VERSION Version 
+    _Out_ PKPH_FILE_VERSION Version
     )
 {
     NTSTATUS status;
     UNICODE_STRING kernelFileName;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     status = KphpGetKernelFileName(&kernelFileName);
     if (!NT_SUCCESS(status))
@@ -1142,7 +1140,7 @@ NTSTATUS KphGetFileVersion(
     UNICODE_STRING keyName;
     PVS_FIXEDFILEINFO fileInfo;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     RtlZeroMemory(Version, sizeof(KPH_FILE_VERSION));
 
@@ -1346,21 +1344,17 @@ Exit:
 }
 
 /**
- * \brief Grants a call target in a process permission to be called by setting
- * CFG flags for that page.
+ * \brief Sets CFG call target information for a process.
  *
- * \details The process must already have the relevant mitigations enabled for
- * the CFG flags, else this call will fail. See RtlpGuardGrantSuppressedCallAccess.
- * 
- * \param ProcessHandle Handle to the process to configure CFG for.
- * \param VirtualAddress Virtual address of the call target.
- * \param Flags CFG flags to configure.
+ * \param[in] ProcessHandle Handle to the process to configure CFG for.
+ * \param[in] VirtualAddress Virtual address to configure CFG for.
+ * \param[in] Flags CFG call target flags (CFG_CALL_TARGET_).
  *
  * \return Successful or errant status.
  */
 _IRQL_requires_max_(PASSIVE_LEVEL)
 _Must_inspect_result_
-NTSTATUS KphGuardGrantSuppressedCallAccess(
+NTSTATUS KphpSetCfgCallTargetInformation(
     _In_ HANDLE ProcessHandle,
     _In_ PVOID VirtualAddress,
     _In_ ULONG Flags
@@ -1371,12 +1365,12 @@ NTSTATUS KphGuardGrantSuppressedCallAccess(
     CFG_CALL_TARGET_LIST_INFORMATION targetListInfo;
     ULONG numberOfEntriesProcessed;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
-    memoryRange.VirtualAddress = (PVOID)((ULONG_PTR)VirtualAddress & ~(PAGE_SIZE - 1));
+    memoryRange.VirtualAddress = PAGE_ALIGN(VirtualAddress);
     memoryRange.NumberOfBytes = PAGE_SIZE;
 
-    targetInfo.Offset = ((ULONG_PTR)VirtualAddress & (PAGE_SIZE - 1));
+    targetInfo.Offset = BYTE_OFFSET(VirtualAddress);
     targetInfo.Flags = Flags;
 
     numberOfEntriesProcessed = 0;
@@ -1392,4 +1386,158 @@ NTSTATUS KphGuardGrantSuppressedCallAccess(
                                          &memoryRange,
                                          &targetListInfo,
                                          sizeof(targetListInfo));
+}
+
+/**
+ * \brief Grants a suppressed call access to a target.
+ *
+ * \param[in] ProcessHandle Handle to the process to configure CFG for.
+ * \param[in] VirtualAddress Virtual address of the target.
+ *
+ * \return Successful or errant status.
+ */
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphGuardGrantSuppressedCallAccess(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID VirtualAddress
+    )
+{
+    ULONG flags;
+
+    PAGED_CODE_PASSIVE();
+
+    flags = CFG_CALL_TARGET_CONVERT_EXPORT_SUPPRESSED_TO_VALID;
+
+    return KphpSetCfgCallTargetInformation(ProcessHandle,
+                                           VirtualAddress,
+                                           flags);
+}
+
+/**
+ * \brief Disables XFG on a target.
+ *
+ * \param[in] ProcessHandle Handle to the process to configure CFG for.
+ * \param[in] VirtualAddress Virtual address of the target.
+ *
+ * \return Successful or errant status.
+ */
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphDisableXfgOnTarget(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID VirtualAddress
+    )
+{
+    ULONG flags;
+
+    PAGED_CODE_PASSIVE();
+
+    flags = CFG_CALL_TARGET_CONVERT_XFG_TO_CFG;
+
+    return KphpSetCfgCallTargetInformation(ProcessHandle,
+                                           VirtualAddress,
+                                           flags);
+}
+
+/**
+ * \brief Gets the final component of a file name.
+ *
+ * \details The final component is the last part of the file name, e.g. for
+ * "\SystemRoot\System32\ntoskrnl.exe" it would be "ntoskrnl.exe". Returns an
+ * error if the final component is not found.
+ *
+ * \param[in] FileName File name to get the final component of.
+ * \param[out] FinalComponent Final component of the file name, references
+ * input string, this string should not be freed and the input string must
+ * remain valid as long as this is in use.
+ *
+ * \return Successful or errant status.
+ */
+_IRQL_requires_max_(APC_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphGetFileNameFinalComponent(
+    _In_ PUNICODE_STRING FileName,
+    _Out_ PUNICODE_STRING FinalComponent
+    )
+{
+    PAGED_CODE();
+
+    for (USHORT i = (FileName->Length / sizeof(WCHAR)); i > 0; i--)
+    {
+        if (FileName->Buffer[i - 1] != L'\\')
+        {
+            continue;
+        }
+
+        FinalComponent->Buffer = &FileName->Buffer[i];
+        FinalComponent->Length = FileName->Length - (i * sizeof(WCHAR));
+        FinalComponent->MaximumLength = FinalComponent->Length;
+
+        return STATUS_SUCCESS;
+    }
+
+    RtlZeroMemory(FinalComponent, sizeof(*FinalComponent));
+
+    return STATUS_NOT_FOUND;
+}
+
+/**
+ * \brief Gets the image name from a process.
+ *
+ * \param[in] Process The process to get the image name from.
+ * \param[out] ImageName Populated with the image name of the process, this
+ * string should be freed using KphFreeProcessImageName.
+ *
+ * \return Successful or errant status.
+ */
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphGetProcessImageName(
+    _In_ PEPROCESS Process,
+    _Out_allocatesMem_ PUNICODE_STRING ImageName
+    )
+{
+    NTSTATUS status;
+    PUCHAR fileName;
+    SIZE_T len;
+
+    PAGED_CODE_PASSIVE();
+
+    fileName = PsGetProcessImageFileName(Process);
+
+    status = RtlStringCbLengthA((STRSAFE_PCNZCH)fileName, 15, &len);
+    if (NT_SUCCESS(status))
+    {
+        ANSI_STRING string;
+
+        string.Buffer = (PCHAR)fileName;
+        string.Length = (USHORT)len;
+        string.MaximumLength = string.Length;
+
+        status = RtlAnsiStringToUnicodeString(ImageName, &string, TRUE);
+        if (NT_SUCCESS(status))
+        {
+            return status;
+        }
+    }
+
+    RtlZeroMemory(ImageName, sizeof(*ImageName));
+
+    return status;
+}
+
+/**
+ * \brief Frees a process image file name from KphGetProcessImageName.
+ *
+ * \param[in] ImageName The image name to free.
+ */
+_IRQL_requires_max_(APC_LEVEL)
+VOID KphFreeProcessImageName(
+    _In_freesMem_ PUNICODE_STRING ImageName
+    )
+{
+    PAGED_CODE();
+
+    RtlFreeUnicodeString(ImageName);
 }

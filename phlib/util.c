@@ -1190,6 +1190,49 @@ VOID PhGenerateGuidFromName(
     guid->s2.Variant |= GUID_VARIANT_STANDARD;
 }
 
+// rev from ntoskrnl.exe!RtlGenerateClass5Guid (dmex)
+VOID PhGenerateClass5Guid(
+    _In_ REFGUID NamespaceGuid,
+    _In_reads_bytes_(BufferSize) PVOID Buffer,
+    _In_ ULONG BufferSize,
+    _Out_ PGUID Guid
+    )
+{
+    A_SHA_CTX context;
+    GUID data;
+    PGUID_EX guid;
+    UCHAR hash[20];
+
+    data = *NamespaceGuid;
+    data.Data1 = _byteswap_ulong(NamespaceGuid->Data1);
+    data.Data2 = _rotr16(NamespaceGuid->Data2, 8);
+    data.Data3 = _rotr16(NamespaceGuid->Data3, 8);
+
+    A_SHAInit(&context);
+    A_SHAUpdate(&context, (PUCHAR)&data, sizeof(GUID));
+    A_SHAUpdate(&context, Buffer, BufferSize);
+    A_SHAFinal(&context, hash);
+
+    guid = (PGUID_EX)Guid;
+    memcpy(guid->Data, hash, sizeof(GUID));
+    guid->Guid.Data1 = _byteswap_ulong(guid->Guid.Data1);
+    guid->Guid.Data2 = _rotr16(guid->Guid.Data2, 8);
+    guid->Guid.Data3 = _rotr16(guid->Guid.Data3, 8);
+    guid->s2.Version = GUID_VERSION_SHA1;
+    guid->s2.Variant &= ~GUID_VARIANT_STANDARD_MASK;
+    guid->s2.Variant |= GUID_VARIANT_STANDARD;
+}
+
+// rev from Windows SDK\\ComputerHardwareIds.exe (dmex)
+VOID PhGenerateHardwareIDGuid(
+    _In_reads_bytes_(BufferSize) PVOID Buffer,
+    _In_ ULONG BufferSize,
+    _Out_ PGUID Guid
+    )
+{
+    PhGenerateClass5Guid(&GUID_NAMESPACE_MICROSOFT, Buffer, BufferSize, Guid);
+}
+
 /**
  * Fills a buffer with random uppercase alphabetical characters.
  *
@@ -1223,10 +1266,14 @@ ULONG64 PhGenerateRandomNumber64(
     )
 {
     LARGE_INTEGER seed;
+    ULARGE_INTEGER value;
 
     PhQueryPerformanceCounter(&seed);
 
-    return (ULONG64)RtlRandomEx(&seed.LowPart) | ((ULONG64)RtlRandomEx(&seed.LowPart) << 31);
+    value.LowPart = RtlRandomEx(&seed.LowPart);
+    value.HighPart = RtlRandomEx(&seed.LowPart);
+
+    return value.QuadPart;
 }
 
 BOOLEAN PhGenerateRandomNumber(
@@ -7033,6 +7080,29 @@ PPH_LIST PhCommandLineToList(
     }
 
     return commandLineList;
+}
+
+PPH_STRING PhCommandLineQuoteSpaces(
+    _In_ PPH_STRINGREF CommandLine
+    )
+{
+    static PH_STRINGREF seperator = PH_STRINGREF_INIT(L"\"");
+    static PH_STRINGREF space = PH_STRINGREF_INIT(L" ");
+    PH_STRINGREF commandLineFileName;
+    PH_STRINGREF commandLineArguments;
+    PPH_STRING escaped;
+
+    if (!PhParseCommandLineFuzzy(CommandLine, &commandLineFileName, &commandLineArguments, NULL))
+        return NULL;
+
+    escaped = PhConcatStringRef3(&seperator, &commandLineFileName, &seperator);
+
+    if (commandLineArguments.Length)
+    {
+        PhMoveReference(&escaped, PhConcatStringRef3(&escaped->sr, &space, &commandLineArguments));
+    }
+
+    return escaped;
 }
 
 PPH_STRING PhSearchFilePath(

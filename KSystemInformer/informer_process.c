@@ -40,7 +40,7 @@ PKPH_PROCESS_CREATE_APC KphpAllocateProcessCreateApc(
 {
     PKPH_PROCESS_CREATE_APC apc;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     NT_ASSERT(KphpProcesCreateApcLookaside);
 
@@ -94,7 +94,7 @@ PKPH_PROCESS_CONTEXT KphpPerformProcessTracking(
     PKPH_PROCESS_CONTEXT creatorProcess;
     KPH_PROCESS_STATE processState;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     if (!CreateInfo)
     {
@@ -106,7 +106,8 @@ PKPH_PROCESS_CONTEXT KphpPerformProcessTracking(
 
         KphTracePrint(TRACE_LEVEL_VERBOSE,
                       TRACKING,
-                      "Stopped tracking process %lu",
+                      "Stopped tracking process %wZ (%lu)",
+                      &process->ImageName,
                       HandleToULong(process->ProcessId));
 
         process->ExitNotification = TRUE;
@@ -136,7 +137,8 @@ PKPH_PROCESS_CONTEXT KphpPerformProcessTracking(
 
     KphTracePrint(TRACE_LEVEL_VERBOSE,
                   TRACKING,
-                  "Tracking process %lu",
+                  "Tracking process %wZ (%lu)",
+                  &process->ImageName,
                   HandleToULong(process->ProcessId));
 
     KphVerifyProcessAndProtectIfAppropriate(process);
@@ -177,7 +179,7 @@ VOID KphpCreateProcessNotifyInformer(
     PKPH_MESSAGE msg;
     PKPH_MESSAGE reply;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     msg = NULL;
     reply = NULL;
@@ -403,7 +405,7 @@ VOID KphpPerformProcessCreationTracking(
     PKPH_PROCESS_CREATE_APC apc;
     BOOLEAN stopProtecting;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     if (!CreateInfo)
     {
@@ -434,8 +436,8 @@ VOID KphpPerformProcessCreationTracking(
 
     if (actor->ProcessContext->IsSubsystemProcess)
     {
-        KphTracePrint(TRACE_LEVEL_WARNING, 
-                      TRACKING, 
+        KphTracePrint(TRACE_LEVEL_WARNING,
+                      TRACKING,
                       "Skipping for subsystem process.");
         goto Exit;
     }
@@ -532,7 +534,7 @@ VOID KphpCreateProcessNotifyRoutine(
 {
     PKPH_PROCESS_CONTEXT process;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     process = KphpPerformProcessTracking(Process, ProcessId, CreateInfo);
     if (process)
@@ -556,7 +558,7 @@ NTSTATUS KphProcessInformerStart(
 {
     NTSTATUS status;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     status = KphCreateNPagedLookasideObject(&KphpProcesCreateApcLookaside,
                                             sizeof(KPH_PROCESS_CREATE_APC),
@@ -626,7 +628,7 @@ VOID KphProcessInformerStop(
     VOID
     )
 {
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     if (!KphpProcesCreateApcLookaside)
     {

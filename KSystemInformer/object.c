@@ -49,7 +49,7 @@ NTSTATUS KphReferenceProcessHandleTable(
     PHANDLE_TABLE handleTable;
     NTSTATUS status;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     *HandleTable = NULL;
 
@@ -104,7 +104,7 @@ VOID KphDereferenceProcessHandleTable(
     _In_ PEPROCESS Process
     )
 {
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     PsReleaseProcessExitSynchronization(Process);
 }
@@ -123,7 +123,7 @@ VOID KphpUnlockHandleTableEntry(
 {
     PEX_PUSH_LOCK handleContentionEvent;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     NT_ASSERT(KphDynHtHandleContentionEvent != ULONG_MAX);
 
@@ -170,7 +170,7 @@ BOOLEAN NTAPI KphEnumerateProcessHandlesExCallback(
     PKPH_ENUM_PROC_HANDLE_EX_CONTEXT context;
     BOOLEAN result;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     NT_ASSERT(Context);
 
@@ -203,7 +203,7 @@ NTSTATUS KphEnumerateProcessHandlesEx(
     KPH_ENUM_PROC_HANDLE_EX_CONTEXT context;
     PHANDLE_TABLE handleTable;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     if ((KphDynHtHandleContentionEvent == ULONG_MAX) ||
         (KphDynEpObjectTable == ULONG_MAX))
@@ -263,7 +263,7 @@ BOOLEAN KphpEnumerateProcessHandlesCallbck(
     POBJECT_TYPE objectType;
     PKPH_PROCESS_HANDLE entryInBuffer;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     context = Context;
 
@@ -358,7 +358,7 @@ NTSTATUS KphEnumerateProcessHandles(
     PEPROCESS process;
     KPHP_ENUMERATE_PROCESS_HANDLES_CONTEXT context;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     if (!Buffer)
     {
@@ -494,7 +494,7 @@ NTSTATUS KphQueryNameObject(
     NTSTATUS status;
     POBJECT_TYPE objectType;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     objectType = ObGetObjectType(Object);
 
@@ -572,8 +572,8 @@ NTSTATUS KphpExtractNameFileObject(
     ULONG subNameLength;
     PFILE_OBJECT relatedFileObject;
 
-    PAGED_PASSIVE();
-    
+    PAGED_CODE_PASSIVE();
+
     if (FlagOn(FileObject->Flags, FO_CLEANUP_COMPLETE))
     {
         return STATUS_FILE_CLOSED;
@@ -738,7 +738,7 @@ NTSTATUS KphQueryNameFileObject(
     PFLT_FILE_NAME_INFORMATION fileNameInfo;
     FLT_FILE_NAME_OPTIONS nameOptions;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     nameOptions = FLT_FILE_NAME_NORMALIZED;
 
@@ -829,7 +829,7 @@ NTSTATUS KphQueryInformationObject(
     KPROCESSOR_MODE accessMode;
     PKPH_PROCESS_CONTEXT processContext;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     process = NULL;
     returnLength = 0;
@@ -2035,7 +2035,7 @@ NTSTATUS KphSetInformationObject(
     PEPROCESS process;
     KAPC_STATE apcState;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     process = NULL;
 
@@ -2159,7 +2159,7 @@ NTSTATUS KphOpenNamedObject(
     NTSTATUS status;
     HANDLE objectHandle;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     if (AccessMode != KernelMode)
     {
@@ -2239,7 +2239,7 @@ NTSTATUS KphDuplicateObject(
     PEPROCESS targetProcess;
     HANDLE targetHandle;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     targetProcess = NULL;
     sourceProcess = NULL;
@@ -2362,8 +2362,8 @@ Exit:
 /**
  * \brief Checks if two object handles refer to the same object.
  *
- * \param[in] FirstObjectHandle First handle to compare with the second. 
- * \param[in] SecondObjectHandle Second handle to compare with the first. 
+ * \param[in] FirstObjectHandle First handle to compare with the second.
+ * \param[in] SecondObjectHandle Second handle to compare with the first.
  * \param[in] AccessMode The mode in which to perform access checks.
  *
  * \return STATUS_SUCCESS if the object handles refer to the same object,
@@ -2382,7 +2382,7 @@ NTSTATUS KphpCompareObjects(
     PVOID firstObject;
     PVOID secondObject;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     status = ObReferenceObjectByHandle(FirstObjectHandle,
                                        0,
@@ -2438,11 +2438,11 @@ Exit:
 }
 
 /**
- * \brief Checks if two object handles refer to the same object, for a process. 
+ * \brief Checks if two object handles refer to the same object, for a process.
  *
  * \param[in] ProcessHandle A handle to a process.
- * \param[in] FirstObjectHandle First handle to compare with the second. 
- * \param[in] SecondObjectHandle Second handle to compare with the first. 
+ * \param[in] FirstObjectHandle First handle to compare with the second.
+ * \param[in] SecondObjectHandle Second handle to compare with the first.
  * \param[in] AccessMode The mode in which to perform access checks.
  *
  * \return STATUS_SUCCESS if the object handles refer to the same object,
@@ -2461,8 +2461,8 @@ NTSTATUS KphCompareObjects(
     NTSTATUS status;
     PEPROCESS process;
     KAPC_STATE apcState;
-    
-    PAGED_PASSIVE();
+
+    PAGED_CODE_PASSIVE();
 
     status = ObReferenceObjectByHandle(ProcessHandle,
                                        0,

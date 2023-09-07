@@ -147,6 +147,10 @@ NTSTATUS PhSetDesktopWinStaAccess(
     _In_ HWND WindowHandle
     );
 
+BOOLEAN PhRunAsExecuteCommandPrompt(
+    _In_ HWND WindowHandle
+    );
+
 VOID PhpSplitUserName(
     _In_ PWSTR UserName,
     _Out_opt_ PPH_STRING* DomainPart,
@@ -189,6 +193,15 @@ BOOLEAN PhShowRunFileDialog(
     _In_ HWND ParentWindowHandle
     )
 {
+    // Note: Task Manager launches the command prompt instead of RunFileDlg
+    // when holding CTRL and selecting the 'Run New Task' menu. (dmex)
+
+    if (PhGetKeyState(VK_CONTROL))
+    {
+        if (PhRunAsExecuteCommandPrompt(ParentWindowHandle))
+            return TRUE;
+    }
+
     if (PhDialogBox(
         PhInstanceHandle,
         MAKEINTRESOURCE(IDD_RUNFILEDLG),
@@ -1644,8 +1657,8 @@ NTSTATUS PhExecuteRunAsCommand2(
     _In_opt_ PWSTR Password,
     _In_opt_ ULONG LogonType,
     _In_opt_ HANDLE ProcessIdWithToken,
-    _In_ ULONG SessionId,
-    _In_ PWSTR DesktopName,
+    _In_opt_ ULONG SessionId,
+    _In_opt_ PWSTR DesktopName,
     _In_ BOOLEAN UseLinkedToken
     )
 {
@@ -1659,8 +1672,8 @@ NTSTATUS PhExecuteRunAsCommand3(
     _In_opt_ PWSTR Password,
     _In_opt_ ULONG LogonType,
     _In_opt_ HANDLE ProcessIdWithToken,
-    _In_ ULONG SessionId,
-    _In_ PWSTR DesktopName,
+    _In_opt_ ULONG SessionId,
+    _In_opt_ PWSTR DesktopName,
     _In_ BOOLEAN UseLinkedToken,
     _In_ BOOLEAN CreateSuspendedProcess,
     _In_ BOOLEAN CreateUIAccessProcess
@@ -1966,8 +1979,45 @@ PPH_STRING PhpQueryRunFileParentDirectory(
     }
 }
 
-NTSTATUS PhpRunAsShellExecute(
-    _In_ HWND hWnd,
+BOOLEAN PhRunAsExecuteCommandPrompt(
+    _In_ HWND WindowHandle
+    )
+{
+    NTSTATUS status;
+    BOOLEAN elevated;
+    PPH_STRING commandFileName;
+    PPH_STRING commandDirectory;
+
+    elevated = !!PhGetOwnTokenAttributes().Elevated;
+    commandFileName = PhGetSystemDirectoryWin32Z(L"\\cmd.exe");
+    commandDirectory = PhpQueryRunFileParentDirectory(elevated);
+
+    if (PhShellExecuteEx(
+        WindowHandle,
+        PhGetString(commandFileName),
+        NULL,
+        PhGetString(commandDirectory),
+        SW_SHOW,
+        PH_SHELL_EXECUTE_DEFAULT,
+        0,
+        NULL
+        ))
+    {
+        status = STATUS_SUCCESS;
+    }
+    else
+    {
+        status = PhGetLastWin32ErrorAsNtStatus();
+    }
+
+    PhClearReference(&commandDirectory);
+    PhClearReference(&commandFileName);
+
+    return NT_SUCCESS(status);
+}
+
+NTSTATUS PhRunAsShellExecute(
+    _In_ HWND WindowHandle,
     _In_ PWSTR FileName,
     _In_opt_ PWSTR Parameters,
     _In_ BOOLEAN Elevated
@@ -1979,7 +2029,7 @@ NTSTATUS PhpRunAsShellExecute(
     parentDirectory = PhpQueryRunFileParentDirectory(Elevated);
 
     if (PhShellExecuteEx(
-        hWnd,
+        WindowHandle,
         FileName,
         Parameters,
         PhGetString(parentDirectory),
@@ -2127,7 +2177,7 @@ NTSTATUS PhpRunFileProgram(
 
     if (isDirectory || !PhDoesFileExistWin32(PhGetString(fullFileName)))
     {
-        status = PhpRunAsShellExecute(
+        status = PhRunAsShellExecute(
             Context->WindowHandle,
             PhGetString(commandString),
             NULL,
@@ -2139,7 +2189,7 @@ NTSTATUS PhpRunFileProgram(
         // holding the ctrl + shift keys and selecting the OK button. (dmex)
         (!!(GetKeyState(VK_CONTROL) < 0 && !!(GetKeyState(VK_SHIFT) < 0))))
     {
-        status = PhpRunAsShellExecute(
+        status = PhRunAsShellExecute(
             Context->WindowHandle,
             PhGetString(fullFileName),
             PhGetString(argumentsString),
@@ -2148,7 +2198,7 @@ NTSTATUS PhpRunFileProgram(
     }
     else
     {
-        status = PhpRunAsShellExecute(
+        status = PhRunAsShellExecute(
             Context->WindowHandle,
             PhGetString(fullFileName),
             PhGetString(argumentsString),
@@ -2157,7 +2207,7 @@ NTSTATUS PhpRunFileProgram(
 
         if (WIN32_FROM_NTSTATUS(status) == ERROR_ELEVATION_REQUIRED)
         {
-            status = PhpRunAsShellExecute(
+            status = PhRunAsShellExecute(
                 Context->WindowHandle,
                 PhGetString(fullFileName),
                 PhGetString(argumentsString),
@@ -2178,13 +2228,12 @@ NTSTATUS RunAsCreateProcessThread(
     )
 {
     PPH_STRING command = Parameter;
-    NTSTATUS status = STATUS_UNSUCCESSFUL;
+    NTSTATUS status;
     SERVICE_STATUS_PROCESS serviceStatus = { 0 };
     SC_HANDLE serviceHandle = NULL;
     HANDLE processHandle = NULL;
     STARTUPINFOEX startupInfo;
     PPH_STRING commandLine = NULL;
-    ULONG bytesNeeded = 0;
     PPH_STRING filePathString;
 
     if (filePathString = PhSearchFilePath(command->Buffer, L".exe"))
@@ -2197,23 +2246,11 @@ NTSTATUS RunAsCreateProcessThread(
     startupInfo.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
     startupInfo.StartupInfo.wShowWindow = SW_SHOWNORMAL;
 
-    if (!(serviceHandle = PhOpenService(L"TrustedInstaller", SERVICE_QUERY_STATUS | SERVICE_START)))
-    {
-        status = PhGetLastWin32ErrorAsNtStatus();
+    if (!NT_SUCCESS(status = PhOpenService(&serviceHandle, SERVICE_QUERY_STATUS | SERVICE_START, L"TrustedInstaller")))
         goto CleanupExit;
-    }
 
-    if (!QueryServiceStatusEx(
-        serviceHandle,
-        SC_STATUS_PROCESS_INFO,
-        (PBYTE)&serviceStatus,
-        sizeof(SERVICE_STATUS_PROCESS),
-        &bytesNeeded
-        ))
-    {
-        status = PhGetLastWin32ErrorAsNtStatus();
+    if (!NT_SUCCESS(status = PhQueryServiceStatus(serviceHandle, &serviceStatus)))
         goto CleanupExit;
-    }
 
     if (serviceStatus.dwCurrentState == SERVICE_RUNNING)
     {
@@ -2227,13 +2264,9 @@ NTSTATUS RunAsCreateProcessThread(
 
         do
         {
-            if (QueryServiceStatusEx(
-                serviceHandle,
-                SC_STATUS_PROCESS_INFO,
-                (PBYTE)&serviceStatus,
-                sizeof(SERVICE_STATUS_PROCESS),
-                &bytesNeeded
-                ))
+            status = PhQueryServiceStatus(serviceHandle, &serviceStatus);
+
+            if (NT_SUCCESS(status))
             {
                 if (serviceStatus.dwCurrentState == SERVICE_RUNNING)
                 {
@@ -2419,7 +2452,7 @@ INT_PTR CALLBACK PhpRunFileWndProc(
 
             PhImageListDestroy(context->ImageListHandle);
 
-            PhDeleteApplicationWindowIcon(hwndDlg);
+            PhDestroyWindowIcon(hwndDlg);
             PhDeleteStaticWindowIcon(GetDlgItem(hwndDlg, IDC_FILEICON));
 
             PhFree(context);
@@ -3326,7 +3359,7 @@ INT_PTR CALLBACK PhRunAsPackageWndProc(
 
             PhImageListDestroy(context->ImageListHandle);
 
-            PhDeleteApplicationWindowIcon(WindowHandle);
+            PhDestroyWindowIcon(WindowHandle);
 
             PhDereferenceObject(context);
         }

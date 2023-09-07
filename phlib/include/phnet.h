@@ -17,6 +17,10 @@ EXTERN_C_START
 
 #define __WINDOT11_H__ // temporary preprocessor workaround (dmex)
 
+#ifndef PIO_APC_ROUTINE_DEFINED
+#define PIO_APC_ROUTINE_DEFINED 1
+#endif
+
 #ifndef UM_NDIS60
 #define UM_NDIS60 1
 #endif
@@ -30,6 +34,7 @@ EXTERN_C_START
 #include <mstcpip.h>
 #include <icmpapi.h>
 
+EXTERN_C CONST DECLSPEC_SELECTANY IN_ADDR  inaddr_any             = { 0x00 };
 EXTERN_C CONST DECLSPEC_SELECTANY IN6_ADDR in6addr_any            = { 0x00 };
 EXTERN_C CONST DECLSPEC_SELECTANY IN6_ADDR in6addr_v4mappedprefix = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00 };
 

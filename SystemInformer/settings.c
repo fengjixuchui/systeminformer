@@ -59,6 +59,7 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"EnableGraphMaxScale", L"0");
     PhpAddIntegerSetting(L"EnableGraphMaxText", L"1");
     PhpAddIntegerSetting(L"EnableServiceNonPoll", L"0");
+    PhpAddIntegerSetting(L"EnableServiceNonPollNotify", L"1");
     PhpAddIntegerSetting(L"EnableShellExecuteSkipIfeoDebugger", L"1");
     PhpAddIntegerSetting(L"EnableStage2", L"1");
     PhpAddIntegerSetting(L"EnableStreamerMode", L"0");
@@ -174,6 +175,7 @@ VOID PhAddDefaultSettings(
     PhpAddStringSetting(L"ModuleTreeListSort", L"0,0"); // 0, NoSortOrder
     PhpAddStringSetting(L"NetworkTreeListColumns", L"");
     PhpAddStringSetting(L"NetworkTreeListSort", L"0,1"); // 0, AscendingSortOrder
+    PhpAddIntegerSetting(L"NonPollFlushInterval", L"A"); // % 10
     PhpAddIntegerSetting(L"NoPurgeProcessRecords", L"0");
     PhpAddStringSetting(L"OptionsCustomColorList", L"");
     PhpAddStringSetting(L"OptionsWindowAdvancedColumns", L"");
@@ -347,7 +349,6 @@ VOID PhUpdateCachedSettings(
 {
     PH_UPDATE_SETTING(ForceNoParent);
     PH_UPDATE_SETTING(HighlightingDuration);
-    PH_UPDATE_SETTING(HideOtherUserProcesses);
     PH_UPDATE_SETTING(PropagateCpuUsage);
     PH_UPDATE_SETTING(ScrollToNewProcesses);
     PH_UPDATE_SETTING(ScrollToRemovedProcesses);

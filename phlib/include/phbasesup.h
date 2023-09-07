@@ -86,6 +86,12 @@ PhCreateThread2(
     );
 
 // Misc. system
+PHLIBAPI
+VOID
+NTAPI
+PhQueryInterruptTime(
+    _Out_ PULARGE_INTEGER InterruptTime
+    );
 
 PHLIBAPI
 VOID
@@ -4031,7 +4037,7 @@ typedef struct _PH_FORMAT
     } u;
 } PH_FORMAT, *PPH_FORMAT;
 
-// Convenience functions 
+// Convenience functions
 
 FORCEINLINE
 VOID
@@ -4322,6 +4328,13 @@ PhNtStatusToDosError(
     );
 
 PHLIBAPI
+ULONG
+NTAPI
+PhNtStatusToServiceStatus(
+    _In_ NTSTATUS Status
+    );
+
+PHLIBAPI
 NTSTATUS
 NTAPI
 PhDosErrorToNtStatus(
@@ -4334,6 +4347,16 @@ NTAPI
 PhNtStatusFileNotFound(
     _In_ NTSTATUS Status
     );
+
+FORCEINLINE
+NTSTATUS
+NTAPI
+PhGetLastWin32ErrorAsNtStatus(
+    VOID
+    )
+{
+    return PhDosErrorToNtStatus(GetLastError());
+}
 
 // Generic tree definitions
 

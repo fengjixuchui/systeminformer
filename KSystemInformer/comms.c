@@ -61,7 +61,7 @@ _IRQL_requires_max_(DISPATCH_LEVEL)
 _Return_allocatesMem_
 PKPHM_QUEUE_ITEM KphpAllocateMessageQueueItem()
 {
-    NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
+    NPAGED_CODE_DISPATCH_MAX();
 
     return KphAllocateFromNPagedLookaside(&KphpMessageQueueItemLookaside);
 }
@@ -75,7 +75,7 @@ _IRQL_requires_max_(DISPATCH_LEVEL)
 VOID KphpFreeMessageQueueItem(_In_freesMem_ PKPHM_QUEUE_ITEM Item)
 {
     NT_ASSERT(Item);
-    NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
+    NPAGED_CODE_DISPATCH_MAX();
 
     if (Item->NonPaged)
     {
@@ -100,7 +100,7 @@ PKPH_MESSAGE KphAllocateNPagedMessage(
     VOID
     )
 {
-    NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
+    NPAGED_CODE_DISPATCH_MAX();
 
     return KphAllocateFromNPagedLookaside(&KphpNPagedMessageLookaside);
 }
@@ -116,7 +116,7 @@ VOID KphFreeNPagedMessage(
     )
 {
     NT_ASSERT(Message);
-    NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
+    NPAGED_CODE_DISPATCH_MAX();
 
     KphFreeToNPagedLookaside(&KphpNPagedMessageLookaside, Message);
 }
@@ -135,7 +135,7 @@ VOID KphCommsSendNPagedMessageAsync(
 {
     PKPHM_QUEUE_ITEM item;
 
-    NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
+    NPAGED_CODE_DISPATCH_MAX();
 
     if (!KphAcquireRundown(&KphpCommsRundown))
     {
@@ -189,7 +189,7 @@ PVOID KSIAPI KphpAllocateClientObject(
     _In_ SIZE_T Size
     )
 {
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     return KphAllocatePaged(Size, KPH_TAG_CLIENT);
 }
@@ -289,7 +289,7 @@ NTSTATUS FLTAPI KphpCommsConnectNotifyCallback(
     KPH_PROCESS_STATE processState;
     PKPH_CLIENT client;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     UNREFERENCED_PARAMETER(ServerPortCookie);
     UNREFERENCED_PARAMETER(ConnectionContext);
@@ -300,7 +300,7 @@ NTSTATUS FLTAPI KphpCommsConnectNotifyCallback(
     process = NULL;
     client = NULL;
 
-    if (!KphSinglePrivilegeCheck(SeExports->SeDebugPrivilege, UserMode))
+    if (!KphSinglePrivilegeCheck(SeDebugPrivilege, UserMode))
     {
         KphTracePrint(TRACE_LEVEL_ERROR,
                       COMMS,
@@ -328,7 +328,8 @@ NTSTATUS FLTAPI KphpCommsConnectNotifyCallback(
     {
         KphTracePrint(TRACE_LEVEL_CRITICAL,
                       COMMS,
-                      "Untrusted client %lu (0x%08x)",
+                      "Untrusted client %wZ (%lu) (0x%08x)",
+                      &process->ImageName,
                       HandleToULong(process->ProcessId),
                       processState);
 
@@ -359,7 +360,8 @@ NTSTATUS FLTAPI KphpCommsConnectNotifyCallback(
 
     KphTracePrint(TRACE_LEVEL_INFORMATION,
                   COMMS,
-                  "Client connected: %lu (0x%08x)",
+                  "Client connected: %wZ (%lu) (0x%08x)",
+                  &client->Process->ImageName,
                   HandleToULong(client->Process->ProcessId),
                   processState);
 
@@ -394,7 +396,7 @@ VOID FLTAPI KphpCommsDisconnectNotifyCallback(
 {
     PKPH_CLIENT client;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     NT_ASSERT(ConnectionCookie);
 
@@ -406,14 +408,15 @@ VOID FLTAPI KphpCommsDisconnectNotifyCallback(
 
     KphTracePrint(TRACE_LEVEL_INFORMATION,
                   COMMS,
-                  "Client disconnected: %lu",
+                  "Client disconnected: %wZ (%lu)",
+                  &client->Process->ImageName,
                   HandleToULong(client->Process->ProcessId));
 
     KphDereferenceObject(client);
 }
 
 /**
- * \brief Signals clients when a required state failure occurs on inbound requests. 
+ * \brief Signals clients when a required state failure occurs on inbound requests.
  *
  * \param[in] MessageId The message ID that failed.
  * \param[in] ClientState The client state that was checked.
@@ -428,7 +431,7 @@ VOID KphpSendRequiredStateFailure(
 {
     PKPH_MESSAGE msg;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     msg = KphAllocateMessage();
     if (!msg)
@@ -485,7 +488,7 @@ NTSTATUS FLTAPI KphpCommsMessageNotifyCallback(
     KPH_PROCESS_STATE processState;
     KPH_PROCESS_STATE requiredState;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     client = (PKPH_CLIENT)PortCookie;
 
@@ -582,9 +585,10 @@ NTSTATUS FLTAPI KphpCommsMessageNotifyCallback(
 
     KphTracePrint(TRACE_LEVEL_VERBOSE,
                   COMMS,
-                  "Received input (%lu - %!TIME!) from client: %lu",
+                  "Received input (%lu - %!TIME!) from client: %wZ (%lu)",
                   (ULONG)msg->Header.MessageId,
                   msg->Header.TimeStamp.QuadPart,
+                  &client->Process->ImageName,
                   HandleToULong(client->Process->ProcessId));
 
     handler = &KphCommsMessageHandlers[msg->Header.MessageId];
@@ -600,7 +604,8 @@ NTSTATUS FLTAPI KphpCommsMessageNotifyCallback(
     {
         KphTracePrint(TRACE_LEVEL_CRITICAL,
                       COMMS,
-                      "Untrusted client %lu (0x%08x, 0x%08x)",
+                      "Untrusted client %wZ (%lu) (0x%08x, 0x%08x)",
+                      &client->Process->ImageName,
                       HandleToULong(client->Process->ProcessId),
                       processState,
                       requiredState);
@@ -644,9 +649,10 @@ NTSTATUS FLTAPI KphpCommsMessageNotifyCallback(
 
     KphTracePrint(TRACE_LEVEL_VERBOSE,
                   COMMS,
-                  "Sending output (%lu - %!TIME!) to client: %lu",
+                  "Sending output (%lu - %!TIME!) to client: %wZ (%lu)",
                   (ULONG)msg->Header.MessageId,
                   msg->Header.TimeStamp.QuadPart,
+                  &client->Process->ImageName,
                   HandleToULong(client->Process->ProcessId));
 
     status = STATUS_SUCCESS;
@@ -671,7 +677,7 @@ VOID KphpFreeCommsSecurityDescriptor(
     _In_freesMem_ PSECURITY_DESCRIPTOR SecurityDescriptor
     )
 {
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     FltFreeSecurityDescriptor(SecurityDescriptor);
 }
@@ -693,7 +699,7 @@ NTSTATUS KphpBuildCommsSecurityDescriptor(
 {
     NTSTATUS status;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     status = FltBuildDefaultSecurityDescriptor(SecurityDescriptor,
                                                FLT_PORT_ALL_ACCESS);
@@ -940,9 +946,10 @@ NTSTATUS KphpCommsSendMessage(
             KphTracePrint(TRACE_LEVEL_INFORMATION,
                           COMMS,
                           "Bottleneck protection, forcing asynchronous send "
-                          "(%lu - %!TIME!) to client: %lu",
+                          "(%lu - %!TIME!) to client: %wZ (%lu)",
                           (ULONG)Message->Header.MessageId,
                           Message->Header.TimeStamp.QuadPart,
+                          &client->Process->ImageName,
                           HandleToULong(client->Process->ProcessId));
 
             //
@@ -967,9 +974,10 @@ NTSTATUS KphpCommsSendMessage(
 
         KphTracePrint(TRACE_LEVEL_VERBOSE,
                       COMMS,
-                      "Sending message (%lu - %!TIME!) to client: %lu",
+                      "Sending message (%lu - %!TIME!) to client: %wZ (%lu)",
                       (ULONG)Message->Header.MessageId,
                       Message->Header.TimeStamp.QuadPart,
+                      &client->Process->ImageName,
                       HandleToULong(client->Process->ProcessId));
 
         status2 = KphpFltSendMessage(&client->Port,
@@ -989,7 +997,8 @@ NTSTATUS KphpCommsSendMessage(
         {
             KphTracePrint(TRACE_LEVEL_CRITICAL,
                           COMMS,
-                          "Untrusted client %lu (0x%08x)",
+                          "Untrusted client %wZ (%lu) (0x%08x)",
+                          &client->Process->ImageName,
                           HandleToULong(client->Process->ProcessId),
                           processState);
 
@@ -1002,16 +1011,18 @@ NTSTATUS KphpCommsSendMessage(
             {
                 KphTracePrint(TRACE_LEVEL_ERROR,
                               COMMS,
-                              "Received invalid reply from client: %lu",
+                              "Received invalid reply from client: %wZ (%lu)",
+                              &client->Process->ImageName,
                               HandleToULong(client->Process->ProcessId));
             }
             else
             {
                 KphTracePrint(TRACE_LEVEL_VERBOSE,
                               COMMS,
-                              "Received reply (%lu - %!TIME!) from client: %lu",
+                              "Received reply (%lu - %!TIME!) from client: %wZ (%lu)",
                               (ULONG)reply->Header.MessageId,
                               reply->Header.TimeStamp.QuadPart,
+                              &client->Process->ImageName,
                               HandleToULong(client->Process->ProcessId));
             }
         }
@@ -1034,7 +1045,7 @@ VOID KphpMessageQueueThread (
     _In_ PVOID StartContext
     )
 {
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     UNREFERENCED_PARAMETER(StartContext);
 
@@ -1111,7 +1122,7 @@ NTSTATUS KphCommsStart(
     PSECURITY_DESCRIPTOR securityDescriptor;
     ULONG threadCount;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
     NT_ASSERT(KphFltFilter);
     NT_ASSERT(!KphpFltServerPort);
     NT_ASSERT(KphDynPortName);
@@ -1296,7 +1307,7 @@ VOID KphCommsStop(
 {
     PLIST_ENTRY entry;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     if (!KphpFltServerPort)
     {
@@ -1487,4 +1498,3 @@ VOID KphCaptureStackInMessage(
                       status);
     }
 }
-

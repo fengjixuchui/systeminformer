@@ -4986,16 +4986,6 @@ typedef struct _HEAP_INFORMATION_ITEM
     };
 } HEAP_INFORMATION_ITEM, *PHEAP_INFORMATION_ITEM;
 
-typedef
-_Function_class_(RTL_HEAP_COMMIT_ROUTINE)
-NTSTATUS
-NTAPI
-RTL_HEAP_COMMIT_ROUTINE(
-    _In_ PVOID Base,
-    _Inout_ PVOID* CommitAddress,
-    _Inout_ PSIZE_T CommitSize
-    );
-
 _Function_class_(RTL_HEAP_EXTENDED_ENUMERATION_ROUTINE)
 typedef NTSTATUS (NTAPI RTL_HEAP_EXTENDED_ENUMERATION_ROUTINE)(
     _In_ PHEAP_INFORMATION_ITEM Information,
@@ -5361,7 +5351,10 @@ FORCEINLINE BOOLEAN RtlIsZeroLuid(
     return (L1->LowPart | L1->HighPart) == 0;
 }
 
-FORCEINLINE LUID RtlConvertLongToLuid(
+FORCEINLINE
+LUID
+NTAPI_INLINE
+RtlConvertLongToLuid(
     _In_ LONG Long
     )
 {
@@ -5375,7 +5368,10 @@ FORCEINLINE LUID RtlConvertLongToLuid(
     return tempLuid;
 }
 
-FORCEINLINE LUID RtlConvertUlongToLuid(
+FORCEINLINE
+LUID
+NTAPI_INLINE
+RtlConvertUlongToLuid(
     _In_ ULONG Ulong
     )
 {
@@ -8956,7 +8952,7 @@ NTSYSAPI
 NTSTATUS
 NTAPI
 RtlIsApiSetImplemented(
-    _In_ PCSTR Namespace
+    _In_ PCSTR ApiSetName
     );
 #endif
 

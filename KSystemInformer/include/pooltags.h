@@ -91,3 +91,9 @@
 
 #define KPH_TAG_FILE_QUERY                      '0FpK'
 #define KPH_TAG_VOL_FILE_QUERY                  '1FpK'
+
+// socket
+
+#define KPH_TAG_SOCKET                           '0spK'
+#define KPH_TAG_TLS                              '1spK'
+#define KPH_TAG_TLS_BUFFER                       '2spK'

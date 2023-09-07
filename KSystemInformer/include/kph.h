@@ -17,6 +17,7 @@
 #include <fltKernel.h>
 #include <ntimage.h>
 #include <bcrypt.h>
+#include <wsk.h>
 #include <pooltags.h>
 #define PHNT_MODE PHNT_MODE_KERNEL
 #include <phnt.h>
@@ -28,9 +29,15 @@
 
 #define KSIAPI NTAPI
 
-#define PAGED_PASSIVE()\
+#define PAGED_CODE_PASSIVE()\
     PAGED_CODE()\
     NT_ASSERT(KeGetCurrentIrql() == PASSIVE_LEVEL)
+#define NPAGED_CODE_PASSIVE()\
+    NT_ASSERT(KeGetCurrentIrql() == PASSIVE_LEVEL)
+#define NPAGED_CODE_DISPATCH_MAX()\
+    NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL)
+#define NPAGED_CODE_DISPATCH_MIN()\
+    NT_ASSERT(KeGetCurrentIrql() >= DISPATCH_LEVEL)
 
 #define PAGED_FILE() \
     __pragma(bss_seg("PAGEBBS"))\
@@ -827,8 +834,33 @@ _IRQL_requires_max_(PASSIVE_LEVEL)
 _Must_inspect_result_
 NTSTATUS KphGuardGrantSuppressedCallAccess(
     _In_ HANDLE ProcessHandle,
-    _In_ PVOID VirtualAddress,
-    _In_ ULONG Flags
+    _In_ PVOID VirtualAddress
+    );
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphDisableXfgOnTarget(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID VirtualAddress
+    );
+
+_IRQL_requires_max_(APC_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphGetFileNameFinalComponent(
+    _In_ PUNICODE_STRING FileName,
+    _Out_ PUNICODE_STRING FinalComponent
+    );
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphGetProcessImageName(
+    _In_ PEPROCESS Process,
+    _Out_allocatesMem_ PUNICODE_STRING ImageName
+    );
+
+_IRQL_requires_max_(APC_LEVEL)
+VOID KphFreeProcessImageName(
+    _In_freesMem_ PUNICODE_STRING ImageName
     );
 
 // vm
@@ -1120,6 +1152,7 @@ typedef struct _KPH_PROCESS_CONTEXT
     CLIENT_ID CreatorClientId;
 
     PUNICODE_STRING ImageFileName;
+    UNICODE_STRING ImageName;
     PFILE_OBJECT FileObject;
 
     volatile SIZE_T NumberOfImageLoads;
@@ -1137,7 +1170,8 @@ typedef struct _KPH_PROCESS_CONTEXT
             ULONG IsLsass : 1;
             ULONG IsWow64 : 1;
             ULONG IsSubsystemProcess : 1;
-            ULONG Reserved : 24;
+            ULONG AllocatedImageName : 1;
+            ULONG Reserved : 23;
         };
     };
 
@@ -1348,6 +1382,13 @@ NTSTATUS KphCheckProcessApcNoopRoutine(
 _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID KphVerifyProcessAndProtectIfAppropriate(
     _In_ PKPH_PROCESS_CONTEXT Process
+    );
+
+_IRQL_requires_max_(APC_LEVEL)
+_Must_inspect_result_
+_Maybenull_
+PUNICODE_STRING KphGetThreadImageName(
+    _In_ PKPH_THREAD_CONTEXT Thread
     );
 
 // protection
@@ -1583,4 +1624,118 @@ extern PVOID KphNtDllRtlSetBits;
 _IRQL_requires_max_(PASSIVE_LEVEL)
 NTSTATUS KphInitializeKnownDll(
     VOID
+    );
+
+// socket
+
+typedef PVOID KPH_SOCKET_HANDLE;
+typedef PVOID* PKPH_SOCKET_HANDLE;
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphInitializeSocket(
+    VOID
+    );
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+VOID KphCleanupSocket(
+    VOID
+    );
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphGetAddressInfo(
+    _In_ PUNICODE_STRING NodeName,
+    _In_opt_ PUNICODE_STRING ServiceName,
+    _In_opt_ PADDRINFOEXW Hints,
+    _In_opt_ PLARGE_INTEGER Timeout,
+    _Outptr_allocatesMem_ PADDRINFOEXW* AddressInfo
+    );
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+VOID KphFreeAddressInfo(
+    _In_freesMem_ PADDRINFOEXW AddressInfo
+    );
+
+_IRQL_requires_max_(DISPATCH_LEVEL)
+VOID KphSocketClose(
+    _In_freesMem_ KPH_SOCKET_HANDLE Socket
+    );
+
+_IRQL_requires_max_(DISPATCH_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphSocketConnect(
+    _In_ USHORT SocketType,
+    _In_ ULONG Protocol,
+    _In_ PSOCKADDR LocalAddress,
+    _In_ PSOCKADDR RemoteAddress,
+    _In_opt_ PLARGE_INTEGER Timeout,
+    _Outptr_allocatesMem_ PKPH_SOCKET_HANDLE Socket
+    );
+
+_IRQL_requires_max_(DISPATCH_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphSocketSend(
+    _In_ KPH_SOCKET_HANDLE Socket,
+    _In_opt_ PLARGE_INTEGER Timeout,
+    _In_reads_bytes_(Length) PVOID Buffer,
+    _In_ ULONG Length
+    );
+
+_IRQL_requires_max_(DISPATCH_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphSocketRecv(
+    _In_ KPH_SOCKET_HANDLE Socket,
+    _In_opt_ PLARGE_INTEGER Timeout,
+    _Out_writes_bytes_to_(*Length, *Length) PVOID Buffer,
+    _Inout_ PULONG Length
+    );
+
+typedef PVOID KPH_TLS_HANDLE;
+typedef PVOID* PKPH_TLS_HANDLE;
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+VOID KphSocketTlsClose(
+    _In_freesMem_ KPH_TLS_HANDLE Tls
+    );
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphSocketTlsCreate(
+    _Outptr_allocatesMem_ PKPH_TLS_HANDLE Tls
+    );
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphSocketTlsHandshake(
+    _In_ KPH_SOCKET_HANDLE Socket,
+    _In_opt_ PLARGE_INTEGER Timeout,
+    _In_ KPH_TLS_HANDLE Tls,
+    _In_ PUNICODE_STRING TargetName
+    );
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+VOID KphSocketTlsShutdown(
+    _In_ KPH_SOCKET_HANDLE Socket,
+    _In_ KPH_TLS_HANDLE Tls
+    );
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphSocketTlsSend(
+    _In_ KPH_SOCKET_HANDLE Socket,
+    _In_opt_ PLARGE_INTEGER Timeout,
+    _In_ KPH_TLS_HANDLE Tls,
+    _In_reads_bytes_(Length) PVOID Buffer,
+    _In_ ULONG Length
+    );
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphSocketTlsRecv(
+    _In_ KPH_SOCKET_HANDLE Socket,
+    _In_opt_ PLARGE_INTEGER Timeout,
+    _In_ KPH_TLS_HANDLE Tls,
+    _Out_writes_bytes_to_(*Length, *Length) PVOID Buffer,
+    _Inout_ PULONG Length
     );
