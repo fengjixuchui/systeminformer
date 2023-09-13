@@ -84,32 +84,48 @@ VOID PhGetMemoryProtectionString(
     *string = UNICODE_NULL;
 }
 
-PWSTR PhGetMemoryStateString(
+PPH_STRINGREF PhGetMemoryStateString(
     _In_ ULONG State
     )
 {
-    if (State & MEM_COMMIT)
-        return L"Commit";
-    else if (State & MEM_RESERVE)
-        return L"Reserved";
-    else if (State & MEM_FREE)
-        return L"Free";
+    static PH_STRINGREF MemoryStateString[] =
+    {
+        PH_STRINGREF_INIT(L"Unknown"),
+        PH_STRINGREF_INIT(L"Commit"),
+        PH_STRINGREF_INIT(L"Reserved"),
+        PH_STRINGREF_INIT(L"Free"),
+    };
+
+    if (FlagOn(State, MEM_COMMIT))
+        return &MemoryStateString[1];
+    else if (FlagOn(State, MEM_RESERVE))
+        return &MemoryStateString[2];
+    else if (FlagOn(State, MEM_FREE))
+        return &MemoryStateString[3];
     else
-        return L"Unknown";
+        return &MemoryStateString[0];
 }
 
-PWSTR PhGetMemoryTypeString(
+PPH_STRINGREF PhGetMemoryTypeString(
     _In_ ULONG Type
     )
 {
-    if (Type & MEM_PRIVATE)
-        return L"Private";
-    else if (Type & MEM_MAPPED)
-        return L"Mapped";
-    else if (Type & MEM_IMAGE)
-        return L"Image";
+    static PH_STRINGREF MemoryTypeString[] =
+    {
+        PH_STRINGREF_INIT(L"Unknown"),
+        PH_STRINGREF_INIT(L"Private"),
+        PH_STRINGREF_INIT(L"Mapped"),
+        PH_STRINGREF_INIT(L"Image"),
+    };
+
+    if (FlagOn(Type, MEM_PRIVATE))
+        return &MemoryTypeString[1];
+    else if (FlagOn(Type, MEM_MAPPED))
+        return &MemoryTypeString[2];
+    else if (FlagOn(Type, MEM_IMAGE))
+        return &MemoryTypeString[3];
     else
-        return L"Unknown";
+        return &MemoryTypeString[0];
 }
 
 PPH_STRINGREF PhGetSigningLevelString(
@@ -245,7 +261,6 @@ PPH_STRING PhGetMemoryRegionTypeExString(
     return PhFinalStringBuilderString(&stringBuilder);
 }
 
-_Ret_notnull_
 PPH_MEMORY_ITEM PhCreateMemoryItem(
     VOID
     )
@@ -929,15 +944,18 @@ NTSTATUS PhpUpdateMemoryRegionTypes(
         if (memoryItem->RegionType != UnknownRegion)
             continue;
 
-        if ((memoryItem->Type & (MEM_MAPPED | MEM_IMAGE)) && memoryItem->AllocationBaseItem == memoryItem)
+        if (FlagOn(memoryItem->Type, MEM_MAPPED | MEM_IMAGE) && memoryItem->AllocationBaseItem == memoryItem)
         {
             MEMORY_IMAGE_INFORMATION imageInfo;
             PPH_STRING fileName;
 
-            if (NT_SUCCESS(PhGetProcessMappedImageInformation(ProcessHandle, memoryItem->BaseAddress, &imageInfo)))
+            if (FlagOn(memoryItem->Type, MEM_IMAGE))
             {
-                memoryItem->u.MappedFile.SigningLevelValid = TRUE;
-                memoryItem->u.MappedFile.SigningLevel = (SE_SIGNING_LEVEL)imageInfo.ImageSigningLevel;
+                if (NT_SUCCESS(PhGetProcessMappedImageInformation(ProcessHandle, memoryItem->BaseAddress, &imageInfo)))
+                {
+                    memoryItem->u.MappedFile.SigningLevelValid = TRUE;
+                    memoryItem->u.MappedFile.SigningLevel = (SE_SIGNING_LEVEL)imageInfo.ImageSigningLevel;
+                }
             }
 
             if (NT_SUCCESS(PhGetProcessMappedFileName(ProcessHandle, memoryItem->BaseAddress, &fileName)))
@@ -953,7 +971,7 @@ NTSTATUS PhpUpdateMemoryRegionTypes(
             }
         }
 
-        if (memoryItem->State & MEM_COMMIT && memoryItem->Valid && !memoryItem->Bad)
+        if (FlagOn(memoryItem->State, MEM_COMMIT) && memoryItem->Valid && !memoryItem->Bad)
         {
             UCHAR buffer[HEAP_SEGMENT_MAX_SIZE];
 

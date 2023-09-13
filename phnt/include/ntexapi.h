@@ -1710,7 +1710,7 @@ typedef struct _SYSTEM_THREAD_INFORMATION
     LARGE_INTEGER UserTime;
     LARGE_INTEGER CreateTime;
     ULONG WaitTime;
-    PVOID StartAddress;
+    ULONG_PTR StartAddress;
     CLIENT_ID ClientId;
     KPRIORITY Priority;
     KPRIORITY BasePriority;
@@ -1727,7 +1727,7 @@ typedef struct _SYSTEM_EXTENDED_THREAD_INFORMATION
     SYSTEM_THREAD_INFORMATION ThreadInfo;
     PVOID StackBase;
     PVOID StackLimit;
-    PVOID Win32StartAddress;
+    ULONG_PTR Win32StartAddress;
     PTEB TebBase; // since VISTA
     ULONG_PTR Reserved2;
     ULONG_PTR Reserved3;
@@ -6387,7 +6387,7 @@ typedef struct _KUSER_SHARED_DATA
     //
     // A bitmask of enclave features supported on this system.
     //
-    // N.B. This field must be accessed via the RtlIsEnclareFeaturePresent API for an
+    // N.B. This field must be accessed via the RtlIsEnclaveFeaturePresent API for an
     //      accurate result.
     //
 

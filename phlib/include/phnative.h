@@ -489,11 +489,11 @@ PHLIBAPI
 NTSTATUS
 NTAPI
 PhTraceControl(
-    _In_ TRACE_CONTROL_INFORMATION_CLASS TraceInformationClass,
+    _In_ ETWTRACECONTROLCODE TraceInformationClass,
     _In_reads_bytes_opt_(InputBufferLength) PVOID InputBuffer,
     _In_ ULONG InputBufferLength,
-    _Out_opt_ PVOID* TraceInformation,
-    _Out_opt_ PULONG TraceInformationLength
+    _Out_opt_ PVOID* OutputBuffer,
+    _Out_opt_ PULONG OutputBufferLength
     );
 
 PHLIBAPI
@@ -2017,6 +2017,7 @@ PhGetExistingPathPrefixWin32(
 #define PH_MODULE_TYPE_KERNEL_MODULE 4
 #define PH_MODULE_TYPE_MAPPED_IMAGE 5
 #define PH_MODULE_TYPE_ELF_MAPPED_IMAGE 6
+#define PH_MODULE_TYPE_ENCLAVE_MODULE 7
 
 typedef struct _PH_MODULE_INFO
 {
@@ -2035,6 +2036,10 @@ typedef struct _PH_MODULE_INFO
     USHORT LoadReason; // -1 if N/A
     USHORT Reserved;
     LARGE_INTEGER LoadTime; // 0 if N/A
+
+    ULONG EnclaveType;
+    PVOID EnclaveBaseAddress;
+    SIZE_T EnclaveSize;
 } PH_MODULE_INFO, *PPH_MODULE_INFO;
 
 /**
@@ -2503,6 +2508,13 @@ NTSTATUS
 NTAPI
 PhDeleteDirectoryWin32(
     _In_ PPH_STRINGREF DirectoryPath
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhDeleteDirectoryFullPath(
+    _In_ PPH_STRINGREF FileName
     );
 
 PHLIBAPI
@@ -3373,6 +3385,52 @@ BOOLEAN
 NTAPI
 PhIsAppExecutionAliasTarget(
     _In_ PPH_STRING FileName
+    );
+
+typedef BOOLEAN (NTAPI *PPH_ENUM_PROCESS_ENCLAVES_CALLBACK)(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID EnclaveAddress,
+    _In_ PLDR_SOFTWARE_ENCLAVE Enclave,
+    _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhEnumProcessEnclaves(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID LdrpEnclaveList,
+    _In_ PPH_ENUM_PROCESS_ENCLAVES_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    );
+
+typedef BOOLEAN (NTAPI *PPH_ENUM_PROCESS_ENCLAVE_MODULES_CALLBACK)(
+    _In_ HANDLE ProcessHandle,
+    _In_ PLDR_SOFTWARE_ENCLAVE Enclave,
+    _In_ PVOID EntryAddress,
+    _In_ PLDR_DATA_TABLE_ENTRY Entry,
+    _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhEnumProcessEnclaveModules(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID EnclaveAddress,
+    _In_ PLDR_SOFTWARE_ENCLAVE Enclave,
+    _In_ PPH_ENUM_PROCESS_ENCLAVE_MODULES_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhGetProcessLdrTableEntryNames(
+    _In_ HANDLE ProcessHandle,
+    _In_ PLDR_DATA_TABLE_ENTRY Entry,
+    _Out_ PPH_STRING* Name,
+    _Out_ PPH_STRING* FileName
     );
 
 EXTERN_C_END

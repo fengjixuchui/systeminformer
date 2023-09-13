@@ -590,7 +590,7 @@ PhGetWindowTextEx(
     );
 
 PHLIBAPI
-ULONG
+NTSTATUS
 NTAPI
 PhGetWindowTextToBuffer(
     _In_ HWND WindowHandle,
@@ -1425,6 +1425,14 @@ NTAPI
 PhGetPhysicallyInstalledSystemMemory(
     _Out_ PULONGLONG TotalMemory,
     _Out_ PULONGLONG ReservedMemory
+    );
+
+_Success_(return)
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhGetThreadWin32Thread(
+    _In_ HANDLE ThreadId
     );
 
 _Success_(return)

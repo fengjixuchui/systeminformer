@@ -478,7 +478,7 @@ VOID
 NTAPI
 PhGenerateRandomAlphaString(
     _Out_writes_z_(Count) PWSTR Buffer,
-    _In_ ULONG Count
+    _In_ SIZE_T Count
     );
 
 PHLIBAPI
@@ -1708,6 +1708,7 @@ PHLIBAPI
 PPH_STRING
 NTAPI
 PhCreateCacheFile(
+    _In_ BOOLEAN PortableDirectory,
     _In_ PPH_STRING FileName,
     _In_ BOOLEAN NativeFileName
     );
@@ -1724,7 +1725,7 @@ PHLIBAPI
 VOID
 NTAPI
 PhClearCacheDirectory(
-    VOID
+    _In_ BOOLEAN PortableDirectory
     );
 
 PHLIBAPI
@@ -1949,6 +1950,55 @@ NTAPI
 PhDevFreeObjects(
     _In_ ULONG ObjectCount,
     _In_reads_(ObjectCount) const DEV_OBJECT* Objects
+    );
+
+PHLIBAPI
+HRESULT
+NTAPI
+PhTaskbarListCreate(
+    _Out_ PHANDLE TaskbarHandle
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhTaskbarListDestroy(
+    _In_ HANDLE TaskbarHandle
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhTaskbarListSetProgressValue(
+    _In_ HANDLE TaskbarHandle,
+    _In_ HWND WindowHandle,
+    _In_ ULONGLONG Completed,
+    _In_ ULONGLONG Total
+    );
+
+#define PH_TBLF_NOPROGRESS 0x1
+#define PH_TBLF_INDETERMINATE 0x2
+#define PH_TBLF_NORMAL 0x4
+#define PH_TBLF_ERROR 0x8
+#define PH_TBLF_PAUSED 0x10
+
+PHLIBAPI
+VOID
+NTAPI
+PhTaskbarListSetProgressState(
+    _In_ HANDLE TaskbarHandle,
+    _In_ HWND WindowHandle,
+    _In_ ULONG Flags
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhTaskbarListSetOverlayIcon(
+    _In_ HANDLE TaskbarHandle,
+    _In_ HWND WindowHandle,
+    _In_opt_ HICON IconHandle,
+    _In_opt_ PCWSTR IconDescription
     );
 
 FORCEINLINE

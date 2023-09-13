@@ -959,7 +959,7 @@ ULONG PhGetWindowTextEx(
     }
 }
 
-ULONG PhGetWindowTextToBuffer(
+NTSTATUS PhGetWindowTextToBuffer(
     _In_ HWND WindowHandle,
     _In_ ULONG Flags,
     _Out_writes_bytes_(BufferLength) PWSTR Buffer,
@@ -967,7 +967,7 @@ ULONG PhGetWindowTextToBuffer(
     _Out_opt_ PULONG ReturnLength
     )
 {
-    ULONG status = ERROR_SUCCESS;
+    NTSTATUS status;
     ULONG length;
 
     if (Flags & PH_GET_WINDOW_TEXT_INTERNAL)
@@ -976,7 +976,9 @@ ULONG PhGetWindowTextToBuffer(
         length = GetWindowText(WindowHandle, Buffer, BufferLength);
 
     if (length == 0)
-        status = GetLastError();
+        status = PhGetLastWin32ErrorAsNtStatus();
+    else
+        status = STATUS_SUCCESS;
 
     if (ReturnLength)
         *ReturnLength = length;
@@ -2643,6 +2645,24 @@ BOOLEAN PhGetPhysicallyInstalledSystemMemory(
     {
         *TotalMemory = physicallyInstalledSystemMemory * 1024ULL;
         *ReservedMemory = physicallyInstalledSystemMemory * 1024ULL - UInt32x32To64(PhSystemBasicInformation.NumberOfPhysicalPages, PAGE_SIZE);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+_Success_(return)
+BOOLEAN PhGetThreadWin32Thread(
+    _In_ HANDLE ThreadId
+    )
+{
+    GUITHREADINFO info;
+
+    memset(&info, 0, sizeof(GUITHREADINFO));
+    info.cbSize = sizeof(GUITHREADINFO);
+
+    if (GetGUIThreadInfo(HandleToUlong(ThreadId), &info))
+    {
         return TRUE;
     }
 
