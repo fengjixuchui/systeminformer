@@ -623,6 +623,14 @@ PhGetTokenPrimaryGroup(
 PHLIBAPI
 NTSTATUS
 NTAPI
+PhGetTokenDefaultDacl(
+    _In_ HANDLE TokenHandle,
+    _Out_ PTOKEN_DEFAULT_DACL* DefaultDacl
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
 PhGetTokenGroups(
     _In_ HANDLE TokenHandle,
     _Out_ PTOKEN_GROUPS *Groups
@@ -959,6 +967,45 @@ PhFreeUnicodeString(
 #endif
 }
 
+FORCEINLINE
+NTSTATUS
+NTAPI
+PhGetDaclSecurityDescriptorNotNull(
+    _In_ PSECURITY_DESCRIPTOR SecurityDescriptor,
+    _Out_ PBOOLEAN DaclPresent,
+    _Out_ PBOOLEAN DaclDefaulted,
+    _Outptr_result_maybenull_ PACL* Dacl
+    )
+{
+    NTSTATUS status;
+    BOOLEAN present = FALSE;
+    BOOLEAN defaulted = FALSE;
+    PACL dacl = NULL;
+
+    status = RtlGetDaclSecurityDescriptor(
+        SecurityDescriptor,
+        &present,
+        &dacl,
+        &defaulted
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        if (dacl)
+        {
+            *DaclPresent = present;
+            *DaclDefaulted = defaulted;
+            *Dacl = dacl;
+        }
+        else
+        {
+            status = STATUS_INVALID_SECURITY_DESCR;
+        }
+    }
+
+    return status;
+}
+
 PHLIBAPI
 NTSTATUS
 NTAPI
@@ -1178,6 +1225,14 @@ NTAPI
 PhGetFileHandleName(
     _In_ HANDLE FileHandle,
     _Out_ PPH_STRING *FileName
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhGetFileNetworkPhysicalName(
+    _In_ HANDLE FileHandle,
+    _Out_ PPH_STRING* FileName
     );
 
 PHLIBAPI
@@ -2389,6 +2444,14 @@ NTSTATUS
 NTAPI
 PhQueryAttributesFileWin32(
     _In_ PWSTR FileName,
+    _Out_ PFILE_BASIC_INFORMATION FileInformation
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhQueryAttributesFile(
+    _In_ PPH_STRINGREF FileName,
     _Out_ PFILE_BASIC_INFORMATION FileInformation
     );
 

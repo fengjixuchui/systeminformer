@@ -104,37 +104,37 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <OutDir>$(ProjectDir)bin\$(Configuration)$(PlatformArchitecture)\</OutDir>
-    <IntDir>$(ProjectDir)obj\$(Configuration)$(PlatformArchitecture)\</IntDir>
+    <IntDir>$(ProjectDir)obj\km\$(Configuration)$(PlatformArchitecture)\</IntDir>
     <EnableInf2cat>false</EnableInf2cat>
     <TargetName>kphlib_km</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <OutDir>$(ProjectDir)bin\$(Configuration)$(PlatformArchitecture)\</OutDir>
-    <IntDir>$(ProjectDir)obj\$(Configuration)$(PlatformArchitecture)\</IntDir>
+    <IntDir>$(ProjectDir)obj\km\$(Configuration)$(PlatformArchitecture)\</IntDir>
     <EnableInf2cat>false</EnableInf2cat>
     <TargetName>kphlib_km</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(ProjectDir)bin\$(Configuration)$(PlatformArchitecture)\</OutDir>
-    <IntDir>$(ProjectDir)obj\$(Configuration)$(PlatformArchitecture)\</IntDir>
+    <IntDir>$(ProjectDir)obj\km\$(Configuration)$(PlatformArchitecture)\</IntDir>
     <EnableInf2cat>false</EnableInf2cat>
     <TargetName>kphlib_km</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(ProjectDir)bin\$(Configuration)$(PlatformArchitecture)\</OutDir>
-    <IntDir>$(ProjectDir)obj\$(Configuration)$(PlatformArchitecture)\</IntDir>
+    <IntDir>$(ProjectDir)obj\km\$(Configuration)$(PlatformArchitecture)\</IntDir>
     <EnableInf2cat>false</EnableInf2cat>
     <TargetName>kphlib_km</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <OutDir>$(ProjectDir)bin\$(Configuration)$(PlatformArchitecture)\</OutDir>
-    <IntDir>$(ProjectDir)obj\$(Configuration)$(PlatformArchitecture)\</IntDir>
+    <IntDir>$(ProjectDir)obj\km\$(Configuration)$(PlatformArchitecture)\</IntDir>
     <EnableInf2cat>false</EnableInf2cat>
     <TargetName>kphlib_km</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <OutDir>$(ProjectDir)bin\$(Configuration)$(PlatformArchitecture)\</OutDir>
-    <IntDir>$(ProjectDir)obj\$(Configuration)$(PlatformArchitecture)\</IntDir>
+    <IntDir>$(ProjectDir)obj\km\$(Configuration)$(PlatformArchitecture)\</IntDir>
     <EnableInf2cat>false</EnableInf2cat>
     <TargetName>kphlib_km</TargetName>
   </PropertyGroup>
@@ -274,19 +274,39 @@
   <ItemGroup>
     <FilesToPackage Include="$(TargetPath)" />
   </ItemGroup>
+  <!-- sistatus
+    Compiling of the message file is only done in the kernelmode side of KPHLIB
+    so that the WDK is not a requirement only building the usermode parts. If
+    changes are made to sistatus.mc, you must build the kernel parts for the
+    header and resources to be regenerated.
+  -->
+  <ItemGroup>
+    <MessageCompile Include="sistatus.mc">
+      <GeneratedHeaderPath>true</GeneratedHeaderPath>
+      <HeaderFilePath>$(ProjectDir)include</HeaderFilePath>
+      <GeneratedRcAndMessagesPath>true</GeneratedRcAndMessagesPath>
+      <RCFilePath>$(ProjectDir)include</RCFilePath>
+      <SetCustomerbit>true</SetCustomerbit>
+    </MessageCompile>
+    <None Include="include\sistatus_MSG00001.bin" />
+    <ResourceCompile Include="include\sistatus.rc" />
+    <ClInclude Include="include\sistatus.h" />
+  </ItemGroup>
+  <!-- sistatus -->
   <ItemGroup>
     <ClInclude Include="include\kphapi.h" />
+    <ClInclude Include="include\kphdyndata.h" />
     <ClInclude Include="include\kphlibbase.h" />
     <ClInclude Include="include\kphmsg.h" />
-    <ClInclude Include="include\kphmsgbase.h" />
     <ClInclude Include="include\kphmsgdyn.h" />
     <ClInclude Include="include\kphmsgdefs.h" />
     <ClInclude Include="include\kphdyn.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="kphdyndata.c" />
     <ClCompile Include="kphmsg.c" />
     <ClCompile Include="kphmsgdyn.c" />
-    <ClInclude Include="kphdyn.c" />
+    <ClCompile Include="kphdyn.c" />
   </ItemGroup>
   <ItemGroup>
     <Xml Include="kphdyn.xml" />

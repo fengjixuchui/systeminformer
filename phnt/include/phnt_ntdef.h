@@ -53,6 +53,8 @@ typedef CLONG *PCLONG;
 
 typedef PCSTR PCSZ;
 
+typedef PVOID* PPVOID;
+
 // Specific
 
 typedef UCHAR KIRQL, *PKIRQL;
@@ -72,6 +74,9 @@ typedef struct _LARGE_INTEGER_128
 #define NT_INFORMATION(Status) ((((ULONG)(Status)) >> 30) == 1)
 #define NT_WARNING(Status) ((((ULONG)(Status)) >> 30) == 2)
 #define NT_ERROR(Status) ((((ULONG)(Status)) >> 30) == 3)
+
+#define NT_CUSTOMER_SHIFT 29
+#define NT_CUSTOMER(Status) ((((ULONG)(Status)) >> NT_CUSTOMER_SHIFT) & 1)
 
 #define NT_FACILITY_MASK 0xfff
 #define NT_FACILITY_SHIFT 16

@@ -143,11 +143,7 @@ typedef struct _LDR_DATA_TABLE_ENTRY
 {
     LIST_ENTRY InLoadOrderLinks;
     LIST_ENTRY InMemoryOrderLinks;
-    union
-    {
-        LIST_ENTRY InInitializationOrderLinks;
-        LIST_ENTRY InProgressLinks;
-    };
+    LIST_ENTRY InInitializationOrderLinks;
     PVOID DllBase;
     PLDR_INIT_ROUTINE EntryPoint;
     ULONG SizeOfImage;
@@ -847,7 +843,7 @@ LdrUnloadAlternateResourceModuleEx(
 
 typedef struct _RTL_PROCESS_MODULE_INFORMATION
 {
-    HANDLE Section;
+    PVOID Section;
     PVOID MappedBase;
     PVOID ImageBase;
     ULONG ImageSize;
@@ -1105,8 +1101,9 @@ LdrUpdatePackageSearchPath(
 #if (PHNT_VERSION >= PHNT_THRESHOLD)
 
 // rev
-#define ENCLAVE_STATE_CREATED     0x00000001ul
-#define ENCLAVE_STATE_INITIALIZED 0x00000002ul
+#define ENCLAVE_STATE_CREATED         0x00000000ul // LdrpCreateSoftwareEnclave initial state
+#define ENCLAVE_STATE_INITIALIZED     0x00000001ul // ZwInitializeEnclave successful (LdrInitializeEnclave)
+#define ENCLAVE_STATE_INITIALIZED_VBS 0x00000002ul // only for ENCLAVE_TYPE_VBS (LdrInitializeEnclave)
 
 // rev
 typedef struct _LDR_SOFTWARE_ENCLAVE

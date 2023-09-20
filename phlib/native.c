@@ -85,7 +85,7 @@ PH_TOKEN_ATTRIBUTES PhGetOwnTokenAttributes(
         {
             PH_TOKEN_USER tokenUser;
 
-            PhGetTokenIsElevated(attributes.TokenHandle, &elevated);
+            PhGetTokenElevation(attributes.TokenHandle, &elevated);
             PhGetTokenElevationType(attributes.TokenHandle, &elevationType);
 
             if (NT_SUCCESS(PhGetTokenUser(attributes.TokenHandle, &tokenUser)))
@@ -3050,6 +3050,43 @@ NTSTATUS PhGetTokenPrimaryGroup(
 }
 
 /**
+ * Gets a token's discretionary access control list (DACL).
+ *
+ * \param TokenHandle A handle to a token. The handle must have TOKEN_QUERY access.
+ * \param DefaultDacl A pointer to an ACL structure assigned by default to any objects created
+ * by the user. You must free the structure using PhFree() when you no longer need it.
+ */
+NTSTATUS PhGetTokenDefaultDacl(
+    _In_ HANDLE TokenHandle,
+    _Out_ PTOKEN_DEFAULT_DACL* DefaultDacl
+    )
+{
+    NTSTATUS status;
+    PTOKEN_DEFAULT_DACL defaultDacl;
+
+    status = PhQueryTokenVariableSize(
+        TokenHandle,
+        TokenDefaultDacl,
+        &defaultDacl
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        if (defaultDacl->DefaultDacl)
+        {
+            *DefaultDacl = defaultDacl;
+        }
+        else
+        {
+            status = STATUS_INVALID_SECURITY_DESCR;
+            PhFree(defaultDacl);
+        }
+    }
+
+    return status;
+}
+
+/**
  * Gets a token's groups.
  *
  * \param TokenHandle A handle to a token. The handle must have TOKEN_QUERY access.
@@ -4580,6 +4617,54 @@ NTSTATUS PhGetFileHandleName(
             buffer,
             bufferSize,
             FileNameInformation
+            );
+    }
+
+    if (!NT_SUCCESS(status))
+    {
+        PhFree(buffer);
+        return status;
+    }
+
+    *FileName = PhCreateStringEx(buffer->FileName, buffer->FileNameLength);
+    PhFree(buffer);
+
+    return status;
+}
+
+NTSTATUS PhGetFileNetworkPhysicalName(
+    _In_ HANDLE FileHandle,
+    _Out_ PPH_STRING* FileName
+    )
+{
+    NTSTATUS status;
+    IO_STATUS_BLOCK ioStatusBlock;
+    ULONG bufferLength;
+    PFILE_NETWORK_PHYSICAL_NAME_INFORMATION buffer;
+
+    bufferLength = UFIELD_OFFSET(FILE_NETWORK_PHYSICAL_NAME_INFORMATION, FileName[DOS_MAX_PATH_LENGTH]) + sizeof(UNICODE_NULL);
+    buffer = PhAllocate(bufferLength);
+
+    status = NtQueryInformationFile(
+        FileHandle,
+        &ioStatusBlock,
+        buffer,
+        bufferLength,
+        FileNetworkPhysicalNameInformation
+        );
+
+    if (status == STATUS_BUFFER_OVERFLOW)
+    {
+        bufferLength = sizeof(FILE_NETWORK_PHYSICAL_NAME_INFORMATION) + buffer->FileNameLength;
+        PhFree(buffer);
+        buffer = PhAllocate(bufferLength);
+
+        status = NtQueryInformationFile(
+            FileHandle,
+            &ioStatusBlock,
+            buffer,
+            bufferLength,
+            FileNetworkPhysicalNameInformation
             );
     }
 

@@ -1211,7 +1211,7 @@ VOID PhpFillProcessItem(
                 ProcessItem->ElevationType = elevationType;
             }
 
-            if (NT_SUCCESS(PhGetTokenIsElevated(tokenHandle, &isElevated)))
+            if (NT_SUCCESS(PhGetTokenElevation(tokenHandle, &isElevated)))
             {
                 ProcessItem->IsElevated = isElevated;
             }
@@ -2578,7 +2578,7 @@ VOID PhProcessProviderUpdate(
 
                     // Elevation
 
-                    //if (NT_SUCCESS(PhGetTokenIsElevated(tokenHandle, &isElevated)))
+                    //if (NT_SUCCESS(PhGetTokenElevation(tokenHandle, &isElevated)))
                     //{
                     //    if (processItem->IsElevated != isElevated)
                     //    {
@@ -3788,4 +3788,22 @@ HIMAGELIST PhGetProcessSmallImageList(
     VOID)
 {
     return PhProcessSmallImageList;
+}
+
+BOOLEAN PhDuplicateProcessInformation(
+    _Out_ PPVOID ProcessInformation
+    )
+{
+    SIZE_T infoLength;
+
+    if (!PhProcessInformation)
+        return FALSE;
+
+    infoLength = RtlSizeHeap(PhHeapHandle, 0, PhProcessInformation);
+
+    if (!infoLength)
+        return FALSE;
+
+    *ProcessInformation = PhAllocateCopy(PhProcessInformation, infoLength);
+    return TRUE;
 }

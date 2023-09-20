@@ -808,6 +808,52 @@ PhGetThreadBasePriority(
 
 FORCEINLINE
 NTSTATUS
+PhGetThreadTeb(
+    _In_ HANDLE ThreadHandle,
+    _Out_ PULONG_PTR TebBaseAddress
+    )
+{
+    NTSTATUS status;
+    THREAD_BASIC_INFORMATION basicInfo;
+
+    status = PhGetThreadBasicInformation(ThreadHandle, &basicInfo);
+
+    if (NT_SUCCESS(status))
+    {
+        if (!basicInfo.TebBaseAddress)
+            return STATUS_UNSUCCESSFUL;
+
+        *TebBaseAddress = (ULONG_PTR)basicInfo.TebBaseAddress;
+    }
+
+    return status;
+}
+
+FORCEINLINE
+NTSTATUS
+PhGetThreadTeb32(
+    _In_ HANDLE ThreadHandle,
+    _Out_ PULONG_PTR TebBaseAddress
+    )
+{
+    NTSTATUS status;
+    THREAD_BASIC_INFORMATION basicInfo;
+
+    status = PhGetThreadBasicInformation(ThreadHandle, &basicInfo);
+
+    if (NT_SUCCESS(status))
+    {
+        if (!basicInfo.TebBaseAddress)
+            return STATUS_UNSUCCESSFUL;
+
+        *TebBaseAddress = (ULONG_PTR)WOW64_GET_TEB32(basicInfo.TebBaseAddress);
+    }
+
+    return status;
+}
+
+FORCEINLINE
+NTSTATUS
 PhGetThreadStartAddress(
     _In_ HANDLE ThreadHandle,
     _Out_ PULONG_PTR StartAddress
@@ -1237,13 +1283,13 @@ PhGetTokenElevationType(
  * Gets whether a token is elevated.
  *
  * \param TokenHandle A handle to a token. The handle must have TOKEN_QUERY access.
- * \param Elevated A variable which receives a boolean indicating whether the token is elevated.
+ * \param TokenIsElevated A variable which receives a boolean indicating whether the token is elevated.
  */
 FORCEINLINE
 NTSTATUS
-PhGetTokenIsElevated(
+PhGetTokenElevation(
     _In_ HANDLE TokenHandle,
-    _Out_ PBOOLEAN Elevated
+    _Out_ PBOOLEAN TokenIsElevated
     )
 {
     NTSTATUS status;
@@ -1260,7 +1306,7 @@ PhGetTokenIsElevated(
 
     if (NT_SUCCESS(status))
     {
-        *Elevated = !!elevation.TokenIsElevated;
+        *TokenIsElevated = !!elevation.TokenIsElevated;
     }
 
     return status;

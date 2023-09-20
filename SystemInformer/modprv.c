@@ -62,6 +62,54 @@ ULONG NTAPI PhpModuleHashtableHashFunction(
 
 PPH_OBJECT_TYPE PhModuleProviderType = NULL;
 PPH_OBJECT_TYPE PhModuleItemType = NULL;
+static PVOID PhpLdrpEnclaveList = NULL;
+
+PLIST_ENTRY PhpGetLdrEnclaveList(
+    VOID
+    )
+{
+    static PH_STRINGREF ntdllFileName = PH_STRINGREF_INIT(L"ntdll.dll");
+    PLIST_ENTRY ldrpEnclaveList;
+    PPH_SYMBOL_PROVIDER symbolProvider;
+    PLDR_DATA_TABLE_ENTRY entry;
+    PH_SYMBOL_INFORMATION symbolInfo;
+
+    ldrpEnclaveList = NULL;
+
+    symbolProvider = PhCreateSymbolProvider(NULL);
+    PhLoadSymbolProviderOptions(symbolProvider);
+
+    if (entry = PhFindLoaderEntry(NULL, NULL, &ntdllFileName))
+    {
+        PH_STRINGREF fullName;
+        PPH_STRING fileName;
+
+        PhUnicodeStringToStringRef(&entry->FullDllName, &fullName);
+
+        if (fileName = PhDosPathNameToNtPathName(&fullName))
+        {
+            PhLoadModuleSymbolProvider(symbolProvider, fileName, (ULONG64)entry->DllBase, entry->SizeOfImage);
+            PhDereferenceObject(fileName);
+        }
+    }
+
+    if (PhGetSymbolFromName(symbolProvider, L"LdrpEnclaveList", &symbolInfo))
+    {
+        ldrpEnclaveList = (PLIST_ENTRY)symbolInfo.Address;
+    }
+
+    PhDereferenceObject(symbolProvider);
+
+    return ldrpEnclaveList;
+}
+
+NTSTATUS NTAPI PhpInitLdrEnclaveListAddress(
+    _In_ PVOID ThreadParameter
+    )
+{
+    PhpLdrpEnclaveList = PhpGetLdrEnclaveList();
+    return STATUS_SUCCESS;
+}
 
 PPH_MODULE_PROVIDER PhCreateModuleProvider(
     _In_ HANDLE ProcessId
@@ -76,6 +124,12 @@ PPH_MODULE_PROVIDER PhCreateModuleProvider(
     {
         PhModuleProviderType = PhCreateObjectType(L"ModuleProvider", 0, PhpModuleProviderDeleteProcedure);
         PhModuleItemType = PhCreateObjectType(L"ModuleItem", 0, PhpModuleItemDeleteProcedure);
+
+        if (WindowsVersion >= WINDOWS_10)
+        {
+            PhCreateThread2(PhpInitLdrEnclaveListAddress, NULL);
+        }
+
         PhEndInitOnce(&initOnce);
     }
 
@@ -192,38 +246,6 @@ PPH_MODULE_PROVIDER PhCreateModuleProvider(
     case 4:
         moduleProvider->ImageCoherencyScanLevel = PhImageCoherencySharedOriginal;
         break;
-    }
-
-    if (WindowsVersion >= WINDOWS_10)
-    {
-        static PH_STRINGREF ntdllFileName = PH_STRINGREF_INIT(L"ntdll.dll");
-        PPH_SYMBOL_PROVIDER symbolProvider;
-        PLDR_DATA_TABLE_ENTRY entry;
-        PH_SYMBOL_INFORMATION symbolInfo;
-
-        symbolProvider = PhCreateSymbolProvider(ProcessId);
-        PhLoadSymbolProviderOptions(symbolProvider);
-
-        if (entry = PhFindLoaderEntry(NULL, NULL, &ntdllFileName))
-        {
-            PH_STRINGREF fullName;
-            PPH_STRING fileName;
-
-            PhUnicodeStringToStringRef(&entry->FullDllName, &fullName);
-
-            if (fileName = PhDosPathNameToNtPathName(&fullName))
-            {
-                PhLoadModuleSymbolProvider(symbolProvider, fileName, (ULONG64)entry->DllBase, entry->SizeOfImage);
-                PhDereferenceObject(fileName);
-            }
-        }
-
-        if (PhGetSymbolFromName(symbolProvider, L"LdrpEnclaveList", &symbolInfo))
-        {
-            moduleProvider->LdrpEnclaveList = (PVOID)symbolInfo.Address;
-        }
-
-        PhDereferenceObject(symbolProvider);
     }
 
     RtlInitializeSListHead(&moduleProvider->QueryListHead);
@@ -350,7 +372,7 @@ ULONG NTAPI PhpModuleHashtableHashFunction(
 PPH_MODULE_ITEM PhReferenceModuleItemEx(
     _In_ PPH_MODULE_PROVIDER ModuleProvider,
     _In_ PVOID BaseAddress,
-    _In_ PVOID EnclaveBaseAddress,
+    _In_opt_ PVOID EnclaveBaseAddress,
     _In_opt_ PPH_STRING FileName
     )
 {
@@ -667,11 +689,11 @@ VOID PhModuleProviderUpdate(
         modules
         );
 
-    if (moduleProvider->LdrpEnclaveList)
+    if (PhpLdrpEnclaveList)
     {
         PhEnumProcessEnclaves(
             moduleProvider->ProcessHandle,
-            moduleProvider->LdrpEnclaveList,
+            PhpLdrpEnclaveList,
             EnumEnclavesCallback,
             modules
             );
@@ -1054,4 +1076,95 @@ VOID PhModuleProviderUpdate(
 
 UpdateExit:
     PhInvokeCallback(&moduleProvider->UpdatedEvent, NULL);
+}
+
+static PH_KEY_VALUE_PAIR PhModuleTypePairs[] =
+{
+    SIP(SREF(L"DLL"), PH_MODULE_TYPE_MODULE),
+    SIP(SREF(L"Mapped file"), PH_MODULE_TYPE_MAPPED_FILE),
+    SIP(SREF(L"WOW64 DLL"), PH_MODULE_TYPE_WOW64_MODULE),
+    SIP(SREF(L"Kernel module"), PH_MODULE_TYPE_KERNEL_MODULE),
+    SIP(SREF(L"Mapped image"), PH_MODULE_TYPE_MAPPED_IMAGE),
+    SIP(SREF(L"Mapped image"), PH_MODULE_TYPE_ELF_MAPPED_IMAGE),
+    SIP(SREF(L"Enclave module"), PH_MODULE_TYPE_ENCLAVE_MODULE),
+};
+
+PPH_STRINGREF PhGetModuleTypeName(
+    _In_ ULONG ModuleType
+    )
+{
+    PPH_STRINGREF string;
+
+    if (PhFindStringSiKeyValuePairs(
+        PhModuleTypePairs,
+        sizeof(PhModuleTypePairs),
+        ModuleType,
+        (PWSTR*)&string
+        ))
+    {
+        return string;
+    }
+
+    return NULL;
+}
+
+static PH_KEY_VALUE_PAIR PhModuleLoadReasonTypePairs[] =
+{
+    SIP(SREF(L"Static dependency"), LoadReasonStaticDependency),
+    SIP(SREF(L"Static forwarder dependency"), LoadReasonStaticForwarderDependency),
+    SIP(SREF(L"Dynamic forwarder dependency"), LoadReasonDynamicForwarderDependency),
+    SIP(SREF(L"Delay load dependency"), LoadReasonDelayloadDependency),
+    SIP(SREF(L"Dynamic"), LoadReasonDynamicLoad),
+    SIP(SREF(L"As image"), LoadReasonAsImageLoad),
+    SIP(SREF(L"As data"), LoadReasonAsDataLoad),
+    SIP(SREF(L"Enclave primary"), LoadReasonEnclavePrimary),
+    SIP(SREF(L"Enclave dependency"), LoadReasonEnclaveDependency),
+    SIP(SREF(L"Patch image"), LoadReasonPatchImage),
+    SIP(SREF(L"Unknown"), LoadReasonUnknown),
+};
+
+PPH_STRINGREF PhGetModuleLoadReasonTypeName(
+    _In_ USHORT LoadReason
+    )
+{
+    PPH_STRINGREF string;
+
+    if (PhFindStringSiKeyValuePairs(
+        PhModuleLoadReasonTypePairs,
+        sizeof(PhModuleLoadReasonTypePairs),
+        LoadReason,
+        (PWSTR*)&string
+        ))
+    {
+        return string;
+    }
+
+    return NULL;
+}
+
+static PH_KEY_VALUE_PAIR PhModuleEnclaveTypePairs[] =
+{
+    SIP(SREF(L"Unknown"), 0),
+    SIP(SREF(L"SGX"), ENCLAVE_TYPE_SGX),
+    SIP(SREF(L"SGX2"), ENCLAVE_TYPE_SGX2),
+    SIP(SREF(L"VBS"), ENCLAVE_TYPE_VBS)
+};
+
+PPH_STRINGREF PhGetModuleEnclaveTypeName(
+    _In_ ULONG EnclaveType
+    )
+{
+    PPH_STRINGREF string;
+
+    if (PhFindStringSiKeyValuePairs(
+        PhModuleEnclaveTypePairs,
+        sizeof(PhModuleEnclaveTypePairs),
+        EnclaveType,
+        (PWSTR*)&string
+        ))
+    {
+        return string;
+    }
+
+    return NULL;
 }

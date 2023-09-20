@@ -78,6 +78,10 @@ static _GetDpiForSystem GetDpiForSystem_I = NULL; // win10rs1+
 //static _GetDpiForSession GetDpiForSession_I = NULL; // ordinal 2713
 static _GetSystemMetricsForDpi GetSystemMetricsForDpi_I = NULL;
 static _SystemParametersInfoForDpi SystemParametersInfoForDpi_I = NULL;
+static _CreateMRUList CreateMRUList_I = NULL;
+static _AddMRUString AddMRUString_I = NULL;
+static _EnumMRUList EnumMRUList_I = NULL;
+static _FreeMRUList FreeMRUList_I = NULL;
 
 VOID PhGuiSupportInitialization(
     VOID
@@ -2906,8 +2910,6 @@ HICON PhCreateIconFromResourceDirectory(
         ((PBITMAPCOREHEADER)iconResourceBuffer)->bcSize != MAKEFOURCC('J', 'P', 'E', 'G')
         )
     {
-        // CreateIconFromResourceEx seems to know what formats are supported so these
-        // size/format checks are probably redundant and not required? (dmex)
         return NULL;
     }
 
@@ -2922,6 +2924,19 @@ HICON PhCreateIconFromResourceDirectory(
         );
 }
 
+// rev from LdrLoadAlternateResourceModuleEx and GetMunResourceModuleForEnumIfExist (dmex)
+/**
+ * Retrieves the filename of the \SystemResources\.mun alternate resource (mandatory on 19H1 and later).
+ *
+ * \param FileName A string containing a file name.
+ * \param NativeFileName The type of name format.
+ * \param ResourceFileName A pointer to the MUN filename.
+ *
+ * \return Successful or errant status.
+ *
+ * \remarks LdrLoadAlternateResourceModuleEx and GetMunResourceModuleForEnumIfExist always search the parent directory
+ * and this function has the same logic and semantics. For example: C:\Windows\explorer.exe -> C:\SystemResources\explorer.exe.mun
+ */
 _Success_(return)
 BOOLEAN PhGetSystemResourcesFileName(
     _In_ PPH_STRINGREF FileName,
@@ -2929,46 +2944,30 @@ BOOLEAN PhGetSystemResourcesFileName(
     _Out_ PPH_STRING* ResourceFileName
     )
 {
-    static PH_STRINGREF systemResourcesPath = PH_STRINGREF_INIT(L"\\SystemResources\\");
-    static PH_STRINGREF systemResourcesExtension = PH_STRINGREF_INIT(L".mun");
-    PPH_STRING fileName = NULL;
+    static PH_STRINGREF directoryName = PH_STRINGREF_INIT(L"\\SystemResources\\");
+    static PH_STRINGREF extensionName = PH_STRINGREF_INIT(L".mun");
+    PPH_STRING fileName;
     PH_STRINGREF directoryPart;
     PH_STRINGREF fileNamePart;
-    PH_STRINGREF directoryBasePart;
+    PH_STRINGREF baseNamePart;
 
     if (WindowsVersion < WINDOWS_10_19H1)
         return FALSE;
     if (PhDetermineDosPathNameType(FileName) == RtlPathTypeUncAbsolute)
         return FALSE;
-
-    // 19H1 and above relocated binary resources into the \SystemResources\ directory.
-    // This is implemented as a hook inside EnumResourceNamesExW:
-    // PrivateExtractIconExW -> EnumResourceNamesExW -> GetMunResourceModuleForEnumIfExist.
-    //
-    // GetMunResourceModuleForEnumIfExist trims the path and inserts '\SystemResources\' and '.mun'
-    // to locate the binary with the icon resources. For example:
-    // From: C:\Windows\system32\notepad.exe
-    // To: C:\Windows\SystemResources\notepad.exe.mun
-    //
-    // It doesn't currently hard-code the \SystemResources\ path and ends up accessing other directories:
-    // From: C:\Windows\explorer.exe
-    // To: C:\SystemResources\explorer.exe.mun
-    //
-    // The below code has the same logic and semantics. (dmex)
-
     if (!PhGetBasePath(FileName, &directoryPart, &fileNamePart))
         return FALSE;
 
     if (directoryPart.Length && fileNamePart.Length)
     {
-        if (!PhGetBasePath(&directoryPart, &directoryBasePart, NULL))
+        if (!PhGetBasePath(&directoryPart, &baseNamePart, NULL))
             return FALSE;
 
         fileName = PhConcatStringRef4(
-            &directoryBasePart,
-            &systemResourcesPath,
+            &baseNamePart,
+            &directoryName,
             &fileNamePart,
-            &systemResourcesExtension
+            &extensionName
             );
 
         if (NativeFileName)
@@ -4216,4 +4215,165 @@ PPH_STRING PhGetCurrentThreadDesktopName(
         PhDereferenceObject(string);
         return PhCreateString(L"Default");
     }
+}
+
+BOOLEAN PhpInitializeMRUList(VOID)
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static PVOID comctl32ModuleHandle = NULL;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        if (comctl32ModuleHandle = PhLoadLibrary(L"comctl32.dll"))
+        {
+            CreateMRUList_I = PhGetDllBaseProcedureAddress(comctl32ModuleHandle, "CreateMRUListW", 0);
+            AddMRUString_I = PhGetDllBaseProcedureAddress(comctl32ModuleHandle, "AddMRUStringW", 0);
+            EnumMRUList_I = PhGetDllBaseProcedureAddress(comctl32ModuleHandle, "EnumMRUListW", 0);
+            FreeMRUList_I = PhGetDllBaseProcedureAddress(comctl32ModuleHandle, "FreeMRUList", 0);
+
+            if (!(CreateMRUList_I && AddMRUString_I && EnumMRUList_I && FreeMRUList_I))
+            {
+                PhFreeLibrary(comctl32ModuleHandle);
+                comctl32ModuleHandle = NULL;
+            }
+        }
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (comctl32ModuleHandle)
+        return TRUE;
+
+    return FALSE;
+}
+
+BOOLEAN PhRecentListCreate(
+    _Out_ PHANDLE RecentHandle
+    )
+{
+    HANDLE handle;
+    MRUINFO info;
+
+    if (!PhpInitializeMRUList())
+        return FALSE;
+
+    memset(&info, 0, sizeof(MRUINFO));
+    info.cbSize = sizeof(MRUINFO);
+    info.uMaxItems = UINT_MAX;
+    info.hKey = HKEY_CURRENT_USER;
+    info.lpszSubKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\RunMRU";
+
+    if (handle = CreateMRUList_I(&info))
+    {
+        *RecentHandle = handle;
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+VOID PhRecentListDestroy(
+    _In_ HANDLE RecentHandle
+    )
+{
+    if (!PhpInitializeMRUList())
+        return;
+
+    if (RecentHandle)
+    {
+        FreeMRUList_I(RecentHandle);
+    }
+}
+
+BOOLEAN PhRecentListAddString(
+    _In_ HANDLE RecentHandle,
+    _In_ PCWSTR String
+    )
+{
+    if (!PhpInitializeMRUList())
+        return FALSE;
+
+    return AddMRUString_I(RecentHandle, String) != INT_ERROR;
+}
+
+BOOLEAN PhRecentListAddCommand(
+    _In_ PPH_STRINGREF Command
+    )
+{
+    static PH_STRINGREF prefixSr = PH_STRINGREF_INIT(L"\\1");
+    BOOLEAN status;
+    HANDLE listHandle;
+    PPH_STRING command;
+
+    if (!PhpInitializeMRUList())
+        return FALSE;
+    if (!PhRecentListCreate(&listHandle))
+        return FALSE;
+
+    command = PhConcatStringRef2(Command, &prefixSr);
+
+    status = PhRecentListAddString(listHandle, PhGetString(command));
+
+    PhDereferenceObject(command);
+
+    PhRecentListDestroy(listHandle);
+
+    return status;
+}
+
+VOID PhEnumerateRecentList(
+    _In_ PPH_ENUM_MRULIST_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    )
+{
+    HANDLE listHandle;
+    INT listCount;
+
+    if (!PhpInitializeMRUList())
+        return;
+    if (!PhRecentListCreate(&listHandle))
+        return;
+
+    listCount = EnumMRUList_I(
+        listHandle,
+        MAXINT,
+        NULL,
+        0
+        );
+
+    for (INT i = 0; i < listCount; i++)
+    {
+        PH_STRINGREF string;
+        SIZE_T returnLength;
+        WCHAR buffer[DOS_MAX_PATH_LENGTH] = L"";
+
+        returnLength = EnumMRUList_I(
+            listHandle,
+            i,
+            buffer,
+            RTL_NUMBER_OF(buffer)
+            );
+
+        if (returnLength >= RTL_NUMBER_OF(buffer))
+            continue;
+        if (returnLength < sizeof(UNICODE_NULL))
+            continue;
+
+        buffer[returnLength] = UNICODE_NULL;
+
+        string.Buffer = buffer;
+        string.Length = returnLength * sizeof(WCHAR);
+
+        // trim \\1 (dmex)
+        if (string.Buffer[returnLength - 1] == L'1' && string.Buffer[returnLength - 2] == L'\\')
+        {
+            string.Buffer[returnLength - 2] = UNICODE_NULL;
+            string.Length -= 4;
+        }
+
+        if (!Callback(&string, Context))
+            break;
+    }
+
+    FreeMRUList_I(listHandle);
 }

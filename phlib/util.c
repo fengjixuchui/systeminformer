@@ -176,13 +176,10 @@ LCID PhGetSystemDefaultLCID(
 #if (PHNT_NATIVE_LOCALE)
     return GetSystemDefaultLCID();
 #else
-    if (NtQueryDefaultLocale_Import())
-    {
-        LCID localeId = LOCALE_SYSTEM_DEFAULT;
+    LCID localeId = LOCALE_SYSTEM_DEFAULT;
 
-        if (NT_SUCCESS(NtQueryDefaultLocale_Import()(FALSE, &localeId)))
-            return localeId;
-    }
+    if (NT_SUCCESS(NtQueryDefaultLocale(FALSE, &localeId)))
+        return localeId;
 
     return LOCALE_SYSTEM_DEFAULT; // MAKELCID(MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT), SORT_DEFAULT);
 #endif
@@ -196,13 +193,10 @@ LCID PhGetUserDefaultLCID(
 #if (PHNT_NATIVE_LOCALE)
     return GetUserDefaultLCID();
 #else
-    if (NtQueryDefaultLocale_Import())
-    {
-        LCID localeId = LOCALE_USER_DEFAULT;
+    LCID localeId = LOCALE_USER_DEFAULT;
 
-        if (NT_SUCCESS(NtQueryDefaultLocale_Import()(TRUE, &localeId)))
-            return localeId;
-    }
+    if (NT_SUCCESS(NtQueryDefaultLocale(TRUE, &localeId)))
+        return localeId;
 
     return LOCALE_USER_DEFAULT; // MAKELCID(MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT), SORT_DEFAULT);
 #endif
@@ -259,13 +253,12 @@ LANGID PhGetUserDefaultUILanguage(
 #if (PHNT_NATIVE_LOCALE)
     return GetUserDefaultUILanguage();
 #else
-    if (NtQueryDefaultUILanguage_Import())
-    {
-        LANGID languageId = MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT);
+    LANGID languageId;
 
-        if (NT_SUCCESS(NtQueryDefaultUILanguage_Import()(&languageId)))
-            return languageId;
-    }
+    if (NT_SUCCESS(NtQueryDefaultUILanguage(&languageId)))
+        return languageId;
+    if (NT_SUCCESS(NtQueryInstallUILanguage(&languageId)))
+        return languageId;
 
     return MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT);
 #endif
@@ -519,7 +512,9 @@ PPH_STRING PhGetNtMessage(
 {
     PPH_STRING message;
 
-    if (!NT_NTWIN32(Status))
+    if (NT_CUSTOMER(Status))
+        message = PhGetMessage(PhGetLoaderEntryDllBase(NULL, NULL), 0xb, PhGetUserDefaultLangID(), (ULONG)Status);
+    else if (!NT_NTWIN32(Status))
         message = PhGetMessage(PhGetLoaderEntryDllBaseZ(L"ntdll.dll"), 0xb, PhGetUserDefaultLangID(), (ULONG)Status);
     else
         message = PhGetWin32Message(PhNtStatusToDosError(Status));
@@ -7343,13 +7338,13 @@ HANDLE PhGetNamespaceHandle(
     )
 {
     static PH_INITONCE initOnce = PH_INITONCE_INIT;
-    static UNICODE_STRING namespacePathUs = RTL_CONSTANT_STRING(L"\\BaseNamedObjects\\SystemInformer");
-    static HANDLE directory = NULL;
+    static HANDLE directoryHandle = NULL;
 
     if (PhBeginInitOnce(&initOnce))
     {
         UCHAR securityDescriptorBuffer[SECURITY_DESCRIPTOR_MIN_LENGTH + 0x80];
         PSID administratorsSid = PhSeAdministratorsSid();
+        UNICODE_STRING objectName;
         OBJECT_ATTRIBUTES objectAttributes;
         PSECURITY_DESCRIPTOR securityDescriptor;
         ULONG sdAllocationLength;
@@ -7376,19 +7371,16 @@ HANDLE PhGetNamespaceHandle(
         RtlAddAccessAllowedAce(dacl, ACL_REVISION, DIRECTORY_QUERY | DIRECTORY_TRAVERSE | DIRECTORY_CREATE_OBJECT, (PSID)&PhSeInteractiveSid);
         RtlSetDaclSecurityDescriptor(securityDescriptor, TRUE, dacl, FALSE);
 
+        RtlInitUnicodeString(&objectName, L"\\BaseNamedObjects\\SystemInformer");
         InitializeObjectAttributes(
             &objectAttributes,
-            &namespacePathUs,
+            &objectName,
             OBJ_OPENIF | (WindowsVersion < WINDOWS_10 ? 0 : OBJ_DONT_REPARSE),
             NULL,
             securityDescriptor
             );
 
-        NtCreateDirectoryObject(
-            &directory,
-            MAXIMUM_ALLOWED,
-            &objectAttributes
-            );
+        NtCreateDirectoryObject(&directoryHandle, MAXIMUM_ALLOWED, &objectAttributes);
 
 #ifdef DEBUG
         assert(sdAllocationLength < sizeof(securityDescriptorBuffer));
@@ -7397,7 +7389,7 @@ HANDLE PhGetNamespaceHandle(
         PhEndInitOnce(&initOnce);
     }
 
-    return directory;
+    return directoryHandle;
 }
 
 HWND PhHungWindowFromGhostWindow(

@@ -1196,18 +1196,15 @@ HRESULT STDMETHODCALLTYPE PhEffectivePermission_GetEffectivePermission(
     PACCESS_MASK accessRights;
     TRUSTEE trustee;
 
-    status = RtlGetDaclSecurityDescriptor(
+    status = PhGetDaclSecurityDescriptorNotNull(
         SecurityDescriptor,
         &present,
-        &dacl,
-        &defaulted
+        &defaulted,
+        &dacl
         );
 
     if (!NT_SUCCESS(status))
         return HRESULT_FROM_WIN32(PhNtStatusToDosError(status));
-    // Note: RtlGetDaclSecurityDescriptor returns success for security descriptors with a NULL dacl. (dmex)
-    if (NT_SUCCESS(status) && !dacl)
-        return HRESULT_FROM_WIN32(PhNtStatusToDosError(STATUS_INVALID_SECURITY_DESCR));
 
     accessRights = (PACCESS_MASK)LocalAlloc(LPTR, sizeof(PACCESS_MASK) + sizeof(ACCESS_MASK));
 
@@ -1378,17 +1375,12 @@ _Callback_ NTSTATUS PhStdGetObjectSecurity(
     }
     else if (PhEqualString2(this->ObjectType, L"TokenDefault", TRUE))
     {
-        PTOKEN_DEFAULT_DACL defaultDacl = NULL;
+        PTOKEN_DEFAULT_DACL defaultDacl;
 
-        status = PhQueryTokenVariableSize(
+        status = PhGetTokenDefaultDacl(
             handle,
-            TokenDefaultDacl,
             &defaultDacl
             );
-
-        // Note: NtQueryInformationToken returns success for processes with a NULL DefaultDacl. (dmex)
-        if (NT_SUCCESS(status) && !defaultDacl->DefaultDacl)
-            status = STATUS_INVALID_SECURITY_DESCR;
 
         if (NT_SUCCESS(status))
         {
@@ -1408,10 +1400,9 @@ _Callback_ NTSTATUS PhStdGetObjectSecurity(
                 RtlLengthSecurityDescriptor(securityDescriptor)
                 );
             PhFree(securityDescriptor);
-        }
 
-        if (defaultDacl)
             PhFree(defaultDacl);
+        }
 
         NtClose(handle);
     }
@@ -1552,16 +1543,12 @@ _Callback_ NTSTATUS PhStdSetObjectSecurity(
         BOOLEAN defaulted = FALSE;
         PACL dacl = NULL;
 
-        status = RtlGetDaclSecurityDescriptor(
+        status = PhGetDaclSecurityDescriptorNotNull(
             SecurityDescriptor,
             &present,
-            &dacl,
-            &defaulted
+            &defaulted,
+            &dacl
             );
-
-        // Note: RtlGetDaclSecurityDescriptor returns success for security descriptors with a NULL dacl. (dmex)
-        if (NT_SUCCESS(status) && !dacl)
-            status = STATUS_INVALID_SECURITY_DESCR;
 
         if (NT_SUCCESS(status))
         {
