@@ -17,6 +17,7 @@
 typedef struct _DEVICE_NODE
 {
     PH_TREENEW_NODE Node;
+    PH_SH_STATE ShState;
     PPH_DEVICE_ITEM DeviceItem;
     PPH_LIST Children;
     ULONG_PTR IconIndex;
@@ -43,10 +44,14 @@ static ULONG DeviceDisconnectedColor = 0;
 static ULONG DeviceHighlightColor = 0;
 static ULONG DeviceInterfaceColor = 0;
 static ULONG DeviceDisabledInterfaceColor = 0;
+static ULONG DeviceArrivedColor = 0;
+static ULONG DeviceHighlightingDuration = 0;
 
 static BOOLEAN DeviceTabCreated = FALSE;
 static HWND DeviceTreeHandle = NULL;
 static PH_CALLBACK_REGISTRATION DeviceNotifyRegistration = { 0 };
+static PH_CALLBACK_REGISTRATION ProcessesUpdatedCallbackRegistration = { 0 };
+static PH_CALLBACK_REGISTRATION SettingsUpdatedCallbackRegistration = { 0 };
 static PDEVICE_TREE DeviceTree = NULL;
 static HIMAGELIST DeviceImageList = NULL;
 static PH_INTEGER_PAIR DeviceIconSize = { 16, 16 };
@@ -59,6 +64,7 @@ static PH_SORT_ORDER DeviceTreeSortOrder = NoSortOrder;
 static PH_TN_FILTER_SUPPORT DeviceTreeFilterSupport = { 0 };
 static PPH_TN_FILTER_ENTRY DeviceTreeFilterEntry = NULL;
 static PH_CALLBACK_REGISTRATION SearchChangedRegistration = { 0 };
+static PPH_POINTER_LIST DeviceNodeStateList = NULL;
 
 static int __cdecl DeviceListSortByNameFunction(
     const void* Left,
@@ -76,6 +82,52 @@ static int __cdecl DeviceListSortByNameFunction(
     rhs = PhGetDeviceProperty(rhsNode->DeviceItem, PhDevicePropertyName);
 
     return PhCompareStringWithNull(lhs->AsString, rhs->AsString, TRUE);
+}
+
+static int __cdecl DeviceNodeSortFunction(
+    const void* Left,
+    const void* Right
+    )
+{
+    PDEVICE_NODE lhsItem;
+    PDEVICE_NODE rhsItem;
+
+    lhsItem = *(PDEVICE_NODE*)Left;
+    rhsItem = *(PDEVICE_NODE*)Right;
+
+    return uintcmp(lhsItem->DeviceItem->InstanceIdHash, rhsItem->DeviceItem->InstanceIdHash);
+}
+
+static int __cdecl DeviceNodeSearchFunction(
+    const void* Hash,
+    const void* Item
+    )
+{
+    PDEVICE_NODE item;
+
+    item = *(PDEVICE_NODE*)Item;
+
+    return uintcmp(PtrToUlong(Hash), item->DeviceItem->InstanceIdHash);
+}
+
+_Success_(return != NULL)
+_Must_inspect_result_
+PDEVICE_NODE DeviceTreeLookupNode(
+    _In_ PDEVICE_TREE Tree,
+    _In_ ULONG InstanceIdHash
+    )
+{
+    PDEVICE_NODE* deviceItem;
+
+    deviceItem = bsearch(
+        UlongToPtr(InstanceIdHash),
+        Tree->Nodes->Items,
+        Tree->Nodes->Count,
+        sizeof(PVOID),
+        DeviceNodeSearchFunction
+        );
+
+    return deviceItem ? *deviceItem : NULL;
 }
 
 BOOLEAN DeviceTreeShouldIncludeDeviceItem(
@@ -102,6 +154,35 @@ BOOLEAN DeviceTreeShouldIncludeDeviceItem(
 
         return PhGetDeviceProperty(DeviceItem, PhDevicePropertyIsPresent)->Boolean;
     }
+}
+
+BOOLEAN DeviceTreeIsJustArrivedDeviceItem(
+    _In_ PPH_DEVICE_ITEM DeviceItem
+    )
+{
+    LARGE_INTEGER lastArrival;
+    LARGE_INTEGER systemTime;
+    LARGE_INTEGER elapsed;
+
+    lastArrival = PhGetDeviceProperty(DeviceItem, PhDevicePropertyLastArrivalDate)->TimeStamp;
+
+    if (lastArrival.QuadPart <= 0)
+        return FALSE;
+
+    PhQuerySystemTime(&systemTime);
+
+    elapsed.QuadPart = systemTime.QuadPart - lastArrival.QuadPart;
+
+    // convert to milliseconds
+    elapsed.QuadPart /= 10000;
+
+    // consider devices that arrived in that last 10 seconds as "just arrived"
+    if (elapsed.QuadPart < (10 * 1000))
+    {
+        return TRUE;
+    }
+
+    return FALSE;
 }
 
 PDEVICE_NODE DeviceTreeCreateNode(
@@ -174,6 +255,8 @@ PDEVICE_TREE DeviceTreeCreate(
             qsort(tree->Roots->Items, tree->Roots->Count, sizeof(PVOID), DeviceListSortByNameFunction);
     }
 
+    qsort(tree->Nodes->Items, tree->Nodes->Count, sizeof(PVOID), DeviceNodeSortFunction);
+
     tree->Tree = PhReferenceObject(Tree);
     return tree;
 }
@@ -225,7 +308,7 @@ PDEVICE_TREE DeviceTreeCreateIfNecessary(
 
 VOID NTAPI DeviceTreePublish(
     _In_opt_ PDEVICE_TREE Tree
-    )
+)
 {
     PDEVICE_TREE oldTree;
 
@@ -239,6 +322,35 @@ VOID NTAPI DeviceTreePublish(
     DeviceFilterList.AllocatedCount = DeviceTree->Nodes->AllocatedCount;
     DeviceFilterList.Count = DeviceTree->Nodes->Count;
     DeviceFilterList.Items = DeviceTree->Nodes->Items;
+
+    if (oldTree)
+    {
+        // TODO PhClearPointerList
+        PhMoveReference(&DeviceNodeStateList, NULL);
+
+        for (ULONG i = 0; i < DeviceTree->Nodes->Count; i++)
+        {
+            PDEVICE_NODE node = DeviceTree->Nodes->Items[i];
+            PDEVICE_NODE old = DeviceTreeLookupNode(oldTree, node->DeviceItem->InstanceIdHash);
+
+            if (old)
+            {
+                node->Node.Selected = old->Node.Selected;
+            }
+
+            if (DeviceTreeIsJustArrivedDeviceItem(node->DeviceItem))
+            {
+                PhChangeShStateTn(
+                    &node->Node,
+                    &node->ShState,
+                    &DeviceNodeStateList,
+                    NewItemState,
+                    DeviceArrivedColor,
+                    NULL
+                    );
+            }
+        }
+    }
 
     TreeNew_SetRedraw(DeviceTreeHandle, TRUE);
 
@@ -1334,6 +1446,69 @@ VOID NTAPI DeviceProviderCallbackHandler(
         ProcessHacker_Invoke(DeviceTreePublish, DeviceTreeCreateIfNecessary(FALSE));
 }
 
+VOID DeviceTreeRemoveDeviceNode(
+    _In_ PDEVICE_NODE Node,
+    _In_opt_ PVOID Context
+    )
+{
+    NOTHING;
+}
+
+VOID NTAPI DeviceTreeProcessesUpdatedCallback(
+    _In_opt_ PVOID Parameter,
+    _In_opt_ PVOID Context
+    )
+{
+    if (!DeviceTreeHandle)
+        return;
+
+    // piggy back off the processes update callback to handle state changes
+    PH_TICK_SH_STATE_TN(
+        DEVICE_NODE,
+        ShState,
+        DeviceNodeStateList,
+        DeviceTreeRemoveDeviceNode,
+        DeviceHighlightingDuration,
+        DeviceTreeHandle,
+        TRUE,
+        NULL,
+        NULL
+        );
+}
+
+VOID DeviceTreeUpdateCachedSettings(
+    _In_ BOOLEAN UpdateColors
+    )
+{
+    AutoRefreshDeviceTree = !!PhGetIntegerSetting(SETTING_NAME_DEVICE_TREE_AUTO_REFRESH);
+    ShowDisconnected = !!PhGetIntegerSetting(SETTING_NAME_DEVICE_TREE_SHOW_DISCONNECTED);
+    ShowSoftwareComponents = !!PhGetIntegerSetting(SETTING_NAME_DEVICE_SHOW_SOFTWARE_COMPONENTS);
+    ShowDeviceInterfaces = !!PhGetIntegerSetting(SETTING_NAME_DEVICE_SHOW_DEVICE_INTERFACES);
+    ShowDisabledDeviceInterfaces = !!PhGetIntegerSetting(SETTING_NAME_DEVICE_SHOW_DISABLED_DEVICE_INTERFACES);
+    HighlightUpperFiltered = !!PhGetIntegerSetting(SETTING_NAME_DEVICE_TREE_HIGHLIGHT_UPPER_FILTERED);
+    HighlightLowerFiltered = !!PhGetIntegerSetting(SETTING_NAME_DEVICE_TREE_HIGHLIGHT_LOWER_FILTERED);
+    DeviceHighlightingDuration = PhGetIntegerSetting(SETTING_NAME_DEVICE_HIGHLIGHTING_DURATION);
+
+    if (UpdateColors)
+    {
+        DeviceProblemColor = PhGetIntegerSetting(SETTING_NAME_DEVICE_PROBLEM_COLOR);
+        DeviceDisabledColor = PhGetIntegerSetting(SETTING_NAME_DEVICE_DISABLED_COLOR);
+        DeviceDisconnectedColor = PhGetIntegerSetting(SETTING_NAME_DEVICE_DISCONNECTED_COLOR);
+        DeviceHighlightColor = PhGetIntegerSetting(SETTING_NAME_DEVICE_HIGHLIGHT_COLOR);
+        DeviceInterfaceColor = PhGetIntegerSetting(SETTING_NAME_DEVICE_INTERFACE_COLOR);
+        DeviceDisabledInterfaceColor = PhGetIntegerSetting(SETTING_NAME_DEVICE_DISABLED_INTERFACE_COLOR);
+        DeviceArrivedColor = PhGetIntegerSetting(SETTING_NAME_DEVICE_ARRIVED_COLOR);
+    }
+}
+
+VOID NTAPI DeviceTreeSettingsUpdatedCallback(
+    _In_opt_ PVOID Parameter,
+    _In_opt_ PVOID Context
+    )
+{
+    DeviceTreeUpdateCachedSettings(FALSE);
+}
+
 VOID InitializeDevicesTab(
     VOID
     )
@@ -1347,20 +1522,20 @@ VOID InitializeDevicesTab(
         NULL,
         &DeviceNotifyRegistration
         );
+    PhRegisterCallback(
+        PhGetGeneralCallback(GeneralCallbackProcessesUpdated),
+        DeviceTreeProcessesUpdatedCallback,
+        NULL,
+        &ProcessesUpdatedCallbackRegistration
+        );
+    PhRegisterCallback(
+        PhGetGeneralCallback(GeneralCallbackSettingsUpdated),
+        DeviceTreeSettingsUpdatedCallback,
+        NULL,
+        &SettingsUpdatedCallbackRegistration
+        );
 
-    AutoRefreshDeviceTree = !!PhGetIntegerSetting(SETTING_NAME_DEVICE_TREE_AUTO_REFRESH);
-    ShowDisconnected = !!PhGetIntegerSetting(SETTING_NAME_DEVICE_TREE_SHOW_DISCONNECTED);
-    ShowSoftwareComponents = !!PhGetIntegerSetting(SETTING_NAME_DEVICE_SHOW_SOFTWARE_COMPONENTS);
-    ShowDeviceInterfaces = !!PhGetIntegerSetting(SETTING_NAME_DEVICE_SHOW_DEVICE_INTERFACES);
-    ShowDisabledDeviceInterfaces = !!PhGetIntegerSetting(SETTING_NAME_DEVICE_SHOW_DISABLED_DEVICE_INTERFACES);
-    HighlightUpperFiltered = !!PhGetIntegerSetting(SETTING_NAME_DEVICE_TREE_HIGHLIGHT_UPPER_FILTERED);
-    HighlightLowerFiltered = !!PhGetIntegerSetting(SETTING_NAME_DEVICE_TREE_HIGHLIGHT_LOWER_FILTERED);
-    DeviceProblemColor = PhGetIntegerSetting(SETTING_NAME_DEVICE_PROBLEM_COLOR);
-    DeviceDisabledColor = PhGetIntegerSetting(SETTING_NAME_DEVICE_DISABLED_COLOR);
-    DeviceDisconnectedColor = PhGetIntegerSetting(SETTING_NAME_DEVICE_DISCONNECTED_COLOR);
-    DeviceHighlightColor = PhGetIntegerSetting(SETTING_NAME_DEVICE_HIGHLIGHT_COLOR);
-    DeviceInterfaceColor = PhGetIntegerSetting(SETTING_NAME_DEVICE_INTERFACE_COLOR);
-    DeviceDisabledInterfaceColor = PhGetIntegerSetting(SETTING_NAME_DEVICE_DISABLED_INTERFACE_COLOR);
+    DeviceTreeUpdateCachedSettings(TRUE);
 
     RtlZeroMemory(&page, sizeof(PH_MAIN_TAB_PAGE));
     PhInitializeStringRef(&page.Name, L"Devices");
