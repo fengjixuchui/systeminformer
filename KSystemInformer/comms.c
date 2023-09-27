@@ -17,8 +17,6 @@
 
 #include <trace.h>
 
-#define KPH_COMMS_MIN_TIMEOUT_MS 300
-#define KPH_COMMS_MAX_TIMEOUT_MS (60 * 1000)
 #define KPH_COMMS_MIN_QUEUE_THREADS 2
 #define KPH_COMMS_MAX_QUEUE_THREADS 64
 
@@ -34,6 +32,13 @@ static PKTHREAD* KphpMessageQueueThreads = NULL;
 static ULONG KphpMessageQueueThreadsCount = 0;
 static UNICODE_STRING KphpClientObjectName = RTL_CONSTANT_STRING(L"KphClient");
 static PKPH_OBJECT_TYPE KphpClientObjectType = NULL;
+static LARGE_INTEGER KphpMessageMinTimeout = KPH_TIMEOUT(300);
+static KPH_MESSAGE_TIMEOUTS KphpMessageTimeouts =
+{
+    .AsyncTimeout = KPH_TIMEOUT(3000),
+    .DefaultTimeout = KPH_TIMEOUT(3000),
+    .ProcessCreateTimeout = KPH_TIMEOUT(3000),
+};
 
 typedef struct _KPHM_QUEUE_ITEM
 {
@@ -108,7 +113,7 @@ PKPH_MESSAGE KphAllocateNPagedMessage(
 /**
  * \brief Frees a non-paged message.
  *
- * \param[in] Message Message to free.
+ * \param[in] Message The message to free.
  */
 _IRQL_requires_max_(DISPATCH_LEVEL)
 VOID KphFreeNPagedMessage(
@@ -124,9 +129,9 @@ VOID KphFreeNPagedMessage(
 /**
  * \brief Sends a non-paged message asynchronously.
  *
- * \param[in] Message Message to send asynchronously. The call assumes ownership
- * over the message. The caller should *not* free the message after it is
- * passed to this function.
+ * \param[in] Message The message to send asynchronously. The call assumes
+ * ownership over the message. The caller should *not* free the message after
+ * it is passed to this function.
  */
 _IRQL_requires_max_(DISPATCH_LEVEL)
 VOID KphCommsSendNPagedMessageAsync(
@@ -170,6 +175,47 @@ VOID KphCommsSendNPagedMessageAsync(
     KeInsertHeadQueue(&KphpMessageQueue, &item->Entry);
 
     KphReleaseRundown(&KphpCommsRundown);
+}
+
+/**
+ * \brief Captures the current stack and adds it to the message.
+ *
+ * \param[in,out] Message The message to populate with the current stack.
+ */
+_IRQL_requires_max_(DISPATCH_LEVEL)
+VOID KphCaptureStackInMessage(
+    _Inout_ PKPH_MESSAGE Message
+    )
+{
+    NTSTATUS status;
+    PVOID frames[150];
+    KPH_STACK_TRACE stack;
+    ULONG flags;
+
+    NPAGED_CODE_DISPATCH_MAX();
+
+    flags = (KPH_STACK_BACK_TRACE_USER_MODE | KPH_STACK_BACK_TRACE_SKIP_KPH);
+
+    stack.Count = (USHORT)KphCaptureStackBackTrace(0,
+                                                   ARRAYSIZE(frames),
+                                                   frames,
+                                                   NULL,
+                                                   flags);
+    if (stack.Count == 0)
+    {
+        return;
+    }
+
+    stack.Frames = frames;
+
+    status = KphMsgDynAddStackTrace(Message, KphMsgFieldStackTrace, &stack);
+    if (!NT_SUCCESS(status))
+    {
+        KphTracePrint(TRACE_LEVEL_WARNING,
+                      COMMS,
+                      "KphMsgDynAddStackTrace failed: %!STATUS!",
+                      status);
+    }
 }
 
 
@@ -720,6 +766,91 @@ Exit:
 }
 
 /**
+ * \brief Gets the timeouts for messages.
+ *
+ * \param[out] Timeouts Receives the timeouts for messages.
+ */
+_IRQL_requires_max_(APC_LEVEL)
+VOID KphGetMessageTimeouts(
+    _Out_ PKPH_MESSAGE_TIMEOUTS Timeouts
+    )
+{
+    PAGED_CODE();
+
+#define KPH_GET_MESSAGE_TIMEOUT(t) \
+    Timeouts->##t.QuadPart = KphpMessageTimeouts.##t.QuadPart
+
+    KPH_GET_MESSAGE_TIMEOUT(AsyncTimeout);
+    KPH_GET_MESSAGE_TIMEOUT(DefaultTimeout);
+    KPH_GET_MESSAGE_TIMEOUT(ProcessCreateTimeout);
+}
+
+/**
+ * \brief Sets the timeouts for messages.
+ *
+ * \param[in] Timeouts The timeouts to apply.
+ *
+ * \return Successful or errant status.
+ */
+_IRQL_requires_max_(APC_LEVEL)
+NTSTATUS KphSetMessageTimeouts(
+    _In_ PKPH_MESSAGE_TIMEOUTS Timeouts
+    )
+{
+    PAGED_CODE();
+
+    //
+    // Timeouts must be relative. Thus the timeout must be _less_ than or equal
+    // to the minimum timeout.
+    //
+#define KPH_VALIDATE_MESSAGE_TIMEOUT(t) \
+    (Timeouts->##t.QuadPart <= KphpMessageMinTimeout.QuadPart)
+
+    if (!KPH_VALIDATE_MESSAGE_TIMEOUT(AsyncTimeout) ||
+        !KPH_VALIDATE_MESSAGE_TIMEOUT(DefaultTimeout) ||
+        !KPH_VALIDATE_MESSAGE_TIMEOUT(ProcessCreateTimeout))
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+#define KPH_SET_MESSAGE_TIMEOUT(t) \
+    KphpMessageTimeouts.##t.QuadPart = Timeouts->##t.QuadPart
+
+    KPH_SET_MESSAGE_TIMEOUT(AsyncTimeout);
+    KPH_SET_MESSAGE_TIMEOUT(DefaultTimeout);
+    KPH_SET_MESSAGE_TIMEOUT(ProcessCreateTimeout);
+
+    return STATUS_SUCCESS;
+}
+
+/**
+ * \brief Retrieves the timeout for a message.
+ *
+ * \param[in] Message The message to retrieve the timeout for.
+ *
+ * \return Timeout for the message.
+ */
+_IRQL_requires_max_(APC_LEVEL)
+PLARGE_INTEGER KphpGetTimeoutForMessage(
+    _In_ PKPH_MESSAGE Message
+    )
+{
+    PAGED_CODE();
+
+    switch (Message->Header.MessageId)
+    {
+        case KphMsgProcessCreate:
+        {
+            return &KphpMessageTimeouts.ProcessCreateTimeout;
+        }
+        default:
+        {
+            return &KphpMessageTimeouts.DefaultTimeout;
+        }
+    }
+}
+
+/**
  * \brief Wrapper for the communication port message send API.
  *
  * \param[in] ClientPort Client port to send message to.
@@ -842,10 +973,10 @@ VOID KphpCommsSendMessageAsync(
  * \brief Sends a message to all connected clients. The last client to connect
  * is given authority for any reply.
  *
- * \param[in] Message Message to send.
- * \param[out] Reply Reply from last client.
- * \param[in] Timeout Time in milliseconds for each client to receive the
- * message, and if appropriate, for the last client to reply.
+ * \param[in] Message The message to send.
+ * \param[out] Reply The reply from last client.
+ * \param[in] Timeout The timeout for each client to receive the message, and if
+ * appropriate, for the last client to reply.
  * \param[in] TargetClientProcess Optional target client process to send the
  * message to. If provided the message will only be sent to the target client
  * from the queue processing. Otherwise, the message will be sent to all
@@ -857,31 +988,17 @@ _IRQL_requires_max_(APC_LEVEL)
 NTSTATUS KphpCommsSendMessage(
     _In_ PKPH_MESSAGE Message,
     _Out_opt_ PKPH_MESSAGE Reply,
-    _In_ ULONG TimeoutMs,
+    _In_ PLARGE_INTEGER Timeout,
     _In_opt_ PEPROCESS TargetClientProcess
     )
 {
     NTSTATUS status;
-    LARGE_INTEGER timeout;
 
     PAGED_CODE();
 
     NT_ASSERT(!TargetClientProcess || !Reply);
 
     NT_ASSERT(NT_SUCCESS(KphMsgValidate(Message)));
-
-    if (TimeoutMs < KPH_COMMS_MIN_TIMEOUT_MS)
-    {
-        timeout.QuadPart = (-10000ll * KPH_COMMS_MIN_TIMEOUT_MS);
-    }
-    else if (TimeoutMs > KPH_COMMS_MAX_TIMEOUT_MS)
-    {
-        timeout.QuadPart = (-10000ll * KPH_COMMS_MAX_TIMEOUT_MS);
-    }
-    else
-    {
-        timeout.QuadPart = (-10000ll * TimeoutMs);
-    }
 
     KphAcquireRWLockShared(&KphpConnectedClientLock);
 
@@ -985,7 +1102,7 @@ NTSTATUS KphpCommsSendMessage(
                                      Message->Header.Size,
                                      reply,
                                      (reply ? &replyLength : NULL),
-                                     &timeout);
+                                     Timeout);
 
         if (!reply || !NT_SUCCESS(status2))
         {
@@ -1087,7 +1204,7 @@ VOID KphpMessageQueueThread (
 
         status = KphpCommsSendMessage(item->Message,
                                       NULL,
-                                      KPH_COMMS_DEFAULT_TIMEOUT,
+                                      &KphpMessageTimeouts.AsyncTimeout,
                                       item->TargetClientProcess);
         if (!NT_SUCCESS(status))
         {
@@ -1352,7 +1469,7 @@ VOID KphCommsStop(
 
             status = KphpCommsSendMessage(item->Message,
                                           NULL,
-                                          KPH_COMMS_DEFAULT_TIMEOUT,
+                                          &KphpMessageTimeouts.AsyncTimeout,
                                           item->TargetClientProcess);
             if (!NT_SUCCESS(status))
             {
@@ -1437,16 +1554,13 @@ VOID KphCommsSendMessageAsync(
  *
  * \param[in] Message The message to send.
  * \param[out] Reply Optional reply from last client.
- * \param[in] Timeout Time in milliseconds for each client to receive the
- * message, and if appropriate, for the last client to reply.
  *
  * \return Successful or errant status.
  */
 _IRQL_requires_max_(APC_LEVEL)
 NTSTATUS KphCommsSendMessage(
     _In_ PKPH_MESSAGE Message,
-    _Out_opt_ PKPH_MESSAGE Reply,
-    _In_ ULONG TimeoutMs
+    _Out_opt_ PKPH_MESSAGE Reply
     )
 {
     NTSTATUS status;
@@ -1458,43 +1572,12 @@ NTSTATUS KphCommsSendMessage(
         return STATUS_TOO_LATE;
     }
 
-    status = KphpCommsSendMessage(Message, Reply, TimeoutMs, NULL);
+    status = KphpCommsSendMessage(Message,
+                                  Reply,
+                                  KphpGetTimeoutForMessage(Message),
+                                  NULL);
 
     KphReleaseRundown(&KphpCommsRundown);
 
     return status;
-}
-
-/**
- * \brief Captures the current stack and adds it to the message.
- *
- * \param[in,out] Message The message to populate with the current stack.
- */
-_IRQL_requires_max_(APC_LEVEL)
-VOID KphCaptureStackInMessage(
-    _Inout_ PKPH_MESSAGE Message
-    )
-{
-    NTSTATUS status;
-    PVOID frames[150];
-    KPH_STACK_TRACE stack;
-
-    PAGED_CODE();
-
-    stack.Count = (USHORT)KphCaptureStack(frames, ARRAYSIZE(frames));
-    if (stack.Count == 0)
-    {
-        return;
-    }
-
-    stack.Frames = frames;
-
-    status = KphMsgDynAddStackTrace(Message, KphMsgFieldStackTrace, &stack);
-    if (!NT_SUCCESS(status))
-    {
-        KphTracePrint(TRACE_LEVEL_WARNING,
-                      COMMS,
-                      "KphMsgDynAddStackTrace failed: %!STATUS!",
-                      status);
-    }
 }

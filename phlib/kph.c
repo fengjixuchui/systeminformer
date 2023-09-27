@@ -145,7 +145,7 @@ NTSTATUS KphConnect(
         SERVICE_ERROR_IGNORE,
         PhGetStringRefZ(Config->FileName),
         PhGetStringRefZ(Config->ObjectName),
-        L""
+        NULL
         );
 
     if (!NT_SUCCESS(status))
@@ -466,7 +466,7 @@ VOID KphSetServiceSecurity(
         );
     RtlSetDaclSecurityDescriptor(securityDescriptor, TRUE, dacl, FALSE);
 
-    SetServiceObjectSecurity(ServiceHandle, DACL_SECURITY_INFORMATION, securityDescriptor);
+    PhSetServiceObjectSecurity(ServiceHandle, DACL_SECURITY_INFORMATION, securityDescriptor);
 
 #ifdef DEBUG
     assert(sdAllocationLength < sizeof(securityDescriptorBuffer));
@@ -992,8 +992,8 @@ NTSTATUS KphCaptureStackBackTraceThread(
     _In_ ULONG FramesToSkip,
     _In_ ULONG FramesToCapture,
     _Out_writes_(FramesToCapture) PVOID *BackTrace,
-    _Inout_opt_ PULONG CapturedFrames,
-    _Inout_opt_ PULONG BackTraceHash,
+    _Out_ PULONG CapturedFrames,
+    _Out_opt_ PULONG BackTraceHash,
     _In_ ULONG Flags
     )
 {
@@ -1355,7 +1355,7 @@ KPH_LEVEL KphProcessLevel(
 }
 
 KPH_LEVEL KphLevelEx(
-    BOOLEAN Cached
+    _In_ BOOLEAN Cached
     )
 {
     static KPH_LEVEL level = KphLevelNone;
@@ -1858,6 +1858,51 @@ NTSTATUS KphCompareObjects(
     if (NT_SUCCESS(status))
     {
         status = msg->User.CompareObjects.Status;
+    }
+
+    PhFreeToFreeList(&KphMessageFreeList, msg);
+    return status;
+}
+
+NTSTATUS KphGetMessageTimeouts(
+    _Out_ PKPH_MESSAGE_TIMEOUTS Timeouts
+    )
+{
+    NTSTATUS status;
+    PKPH_MESSAGE msg;
+
+    KSI_COMMS_INIT_ASSERT();
+
+    msg = PhAllocateFromFreeList(&KphMessageFreeList);
+    KphMsgInit(msg, KphMsgGetMessageTimeouts);
+    status = KphCommsSendMessage(msg);
+
+    if (NT_SUCCESS(status))
+    {
+        RtlCopyMemory(Timeouts, &msg->User.GetMessageTimeouts.Timeouts, sizeof(*Timeouts));
+    }
+
+    PhFreeToFreeList(&KphMessageFreeList, msg);
+    return status;
+}
+
+NTSTATUS KphSetMessageTimeouts(
+    _In_ PKPH_MESSAGE_TIMEOUTS Timeouts
+    )
+{
+    NTSTATUS status;
+    PKPH_MESSAGE msg;
+
+    KSI_COMMS_INIT_ASSERT();
+
+    msg = PhAllocateFromFreeList(&KphMessageFreeList);
+    KphMsgInit(msg, KphMsgSetMessageTimeouts);
+    RtlCopyMemory(&msg->User.SetMessageTimeouts.Timeouts, Timeouts, sizeof(*Timeouts));
+    status = KphCommsSendMessage(msg);
+
+    if (NT_SUCCESS(status))
+    {
+        status = msg->User.SetMessageTimeouts.Status;
     }
 
     PhFreeToFreeList(&KphMessageFreeList, msg);

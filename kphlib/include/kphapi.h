@@ -32,41 +32,41 @@ typedef KPH_PROCESS_STATE* PKPH_PROCESS_STATE;
 #define KPH_PROCESS_NO_FILE_TRANSACTION                  0x00000080ul
 #define KPH_PROCESS_NOT_BEING_DEBUGGED                   0x00000100ul
 
-#define KPH_PROCESS_STATE_MAXIMUM (KPH_PROCESS_SECURELY_CREATED             |\
-                                   KPH_PROCESS_VERIFIED_PROCESS             |\
-                                   KPH_PROCESS_PROTECTED_PROCESS            |\
-                                   KPH_PROCESS_NO_UNTRUSTED_IMAGES          |\
-                                   KPH_PROCESS_HAS_FILE_OBJECT              |\
-                                   KPH_PROCESS_HAS_SECTION_OBJECT_POINTERS  |\
-                                   KPH_PROCESS_NO_USER_WRITABLE_REFERENCES  |\
-                                   KPH_PROCESS_NO_FILE_TRANSACTION          |\
+#define KPH_PROCESS_STATE_MAXIMUM (KPH_PROCESS_SECURELY_CREATED              |\
+                                   KPH_PROCESS_VERIFIED_PROCESS              |\
+                                   KPH_PROCESS_PROTECTED_PROCESS             |\
+                                   KPH_PROCESS_NO_UNTRUSTED_IMAGES           |\
+                                   KPH_PROCESS_HAS_FILE_OBJECT               |\
+                                   KPH_PROCESS_HAS_SECTION_OBJECT_POINTERS   |\
+                                   KPH_PROCESS_NO_USER_WRITABLE_REFERENCES   |\
+                                   KPH_PROCESS_NO_FILE_TRANSACTION           |\
                                    KPH_PROCESS_NOT_BEING_DEBUGGED)
 
-#define KPH_PROCESS_STATE_HIGH    (KPH_PROCESS_VERIFIED_PROCESS             |\
-                                   KPH_PROCESS_PROTECTED_PROCESS            |\
-                                   KPH_PROCESS_NO_UNTRUSTED_IMAGES          |\
-                                   KPH_PROCESS_HAS_FILE_OBJECT              |\
-                                   KPH_PROCESS_HAS_SECTION_OBJECT_POINTERS  |\
-                                   KPH_PROCESS_NO_USER_WRITABLE_REFERENCES  |\
-                                   KPH_PROCESS_NO_FILE_TRANSACTION          |\
+#define KPH_PROCESS_STATE_HIGH    (KPH_PROCESS_VERIFIED_PROCESS              |\
+                                   KPH_PROCESS_PROTECTED_PROCESS             |\
+                                   KPH_PROCESS_NO_UNTRUSTED_IMAGES           |\
+                                   KPH_PROCESS_HAS_FILE_OBJECT               |\
+                                   KPH_PROCESS_HAS_SECTION_OBJECT_POINTERS   |\
+                                   KPH_PROCESS_NO_USER_WRITABLE_REFERENCES   |\
+                                   KPH_PROCESS_NO_FILE_TRANSACTION           |\
                                    KPH_PROCESS_NOT_BEING_DEBUGGED)
 
-#define KPH_PROCESS_STATE_MEDIUM  (KPH_PROCESS_VERIFIED_PROCESS             |\
-                                   KPH_PROCESS_PROTECTED_PROCESS            |\
-                                   KPH_PROCESS_HAS_FILE_OBJECT              |\
-                                   KPH_PROCESS_HAS_SECTION_OBJECT_POINTERS  |\
-                                   KPH_PROCESS_NO_USER_WRITABLE_REFERENCES  |\
+#define KPH_PROCESS_STATE_MEDIUM  (KPH_PROCESS_VERIFIED_PROCESS              |\
+                                   KPH_PROCESS_PROTECTED_PROCESS             |\
+                                   KPH_PROCESS_HAS_FILE_OBJECT               |\
+                                   KPH_PROCESS_HAS_SECTION_OBJECT_POINTERS   |\
+                                   KPH_PROCESS_NO_USER_WRITABLE_REFERENCES   |\
                                    KPH_PROCESS_NO_FILE_TRANSACTION)
 
-#define KPH_PROCESS_STATE_LOW     (KPH_PROCESS_VERIFIED_PROCESS             |\
-                                   KPH_PROCESS_HAS_FILE_OBJECT              |\
-                                   KPH_PROCESS_HAS_SECTION_OBJECT_POINTERS  |\
-                                   KPH_PROCESS_NO_USER_WRITABLE_REFERENCES  |\
+#define KPH_PROCESS_STATE_LOW     (KPH_PROCESS_VERIFIED_PROCESS              |\
+                                   KPH_PROCESS_HAS_FILE_OBJECT               |\
+                                   KPH_PROCESS_HAS_SECTION_OBJECT_POINTERS   |\
+                                   KPH_PROCESS_NO_USER_WRITABLE_REFERENCES   |\
                                    KPH_PROCESS_NO_FILE_TRANSACTION)
 
-#define KPH_PROCESS_STATE_MINIMUM (KPH_PROCESS_HAS_FILE_OBJECT              |\
-                                   KPH_PROCESS_HAS_SECTION_OBJECT_POINTERS  |\
-                                   KPH_PROCESS_NO_USER_WRITABLE_REFERENCES  |\
+#define KPH_PROCESS_STATE_MINIMUM (KPH_PROCESS_HAS_FILE_OBJECT               |\
+                                   KPH_PROCESS_HAS_SECTION_OBJECT_POINTERS   |\
+                                   KPH_PROCESS_NO_USER_WRITABLE_REFERENCES   |\
                                    KPH_PROCESS_NO_FILE_TRANSACTION)
 
 typedef enum _KPH_PROCESS_INFORMATION_CLASS
@@ -84,7 +84,7 @@ typedef enum _KPH_PROCESS_INFORMATION_CLASS
     KphProcessPowerThrottlingState,  // s: POWER_THROTTLING_PROCESS_STATE
     KphProcessPriorityClassEx,       // s: PROCESS_PRIORITY_CLASS_EX
     KphProcessEmptyWorkingSet,       // s
-    KphProcessWSLProcessId,          // q: ULONG 
+    KphProcessWSLProcessId,          // q: ULONG
 } KPH_PROCESS_INFORMATION_CLASS;
 
 typedef enum _KPH_THREAD_INFORMATION_CLASS
@@ -102,7 +102,7 @@ typedef enum _KPH_THREAD_INFORMATION_CLASS
     KphThreadActualGroupAffinity,    // s: GROUP_AFFINITY
     KphThreadPowerThrottlingState,   // s: POWER_THROTTLING_THREAD_STATE
     KphThreadIoCounters,             // q: IO_COUNTERS
-    KphThreadWSLThreadId,            // q: ULONG 
+    KphThreadWSLThreadId,            // q: ULONG
     KphThreadExplicitCaseSensitivity,// s: ULONG; s: 0 disables, otherwise enables
 } KPH_THREAD_INFORMATION_CLASS;
 
@@ -168,10 +168,6 @@ typedef struct _KPH_PROCESS_HANDLE_INFORMATION
     ULONG HandleCount;
     _Field_size_(HandleCount) KPH_PROCESS_HANDLE Handles[1];
 } KPH_PROCESS_HANDLE_INFORMATION, *PKPH_PROCESS_HANDLE_INFORMATION;
-
-// Thread information
-
-#define KPH_STACK_TRACE_CAPTURE_USER_STACK 0x00000001
 
 // Object information
 
@@ -436,5 +432,12 @@ typedef struct _KPH_INFORMER_SETTINGS
         };
     };
 } KPH_INFORMER_SETTINGS, *PKPH_INFORMER_SETTINGS;
+
+typedef struct _KPH_MESSAGE_TIMEOUTS
+{
+    LARGE_INTEGER AsyncTimeout;
+    LARGE_INTEGER DefaultTimeout;
+    LARGE_INTEGER ProcessCreateTimeout;
+} KPH_MESSAGE_TIMEOUTS, *PKPH_MESSAGE_TIMEOUTS;
 
 #pragma warning(pop)

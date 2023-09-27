@@ -16,41 +16,6 @@
 #include <trace.h>
 
 /**
- * \brief Captures the current stack, both kernel and user if possible.
- *
- * \param[out] Frames Populated with the stack frames.
- * \param[in] Count Number of pointers in the frames buffer.
- *
- * \return Number of captured frames.
- */
-_IRQL_requires_max_(DISPATCH_LEVEL)
-ULONG KphCaptureStack(
-    _Out_ PVOID* Frames,
-    _In_ ULONG Count
-    )
-{
-    ULONG frames;
-
-    NPAGED_CODE_DISPATCH_MAX();
-
-    frames = RtlWalkFrameChain(Frames, Count, 0);
-
-    if (KeGetCurrentIrql() < DISPATCH_LEVEL)
-    {
-        if (frames >= Count)
-        {
-            return frames;
-        }
-
-        frames += RtlWalkFrameChain(&Frames[frames],
-                                    (Count - frames),
-                                    RTL_WALK_USER_MODE_STACK);
-    }
-
-    return frames;
-}
-
-/**
  * \brief Acquires rundown. On successful return the caller should release
  * the rundown using KphReleaseRundown.
  *
@@ -70,7 +35,7 @@ BOOLEAN KphAcquireRundown(
 }
 
 /**
- * \brief Releases rundown previously accquired by KphAcquireRundown.
+ * \brief Releases rundown previously acquired by KphAcquireRundown.
  *
  * \param[in,out] Rundown The rundown object to release.
  */
@@ -1032,16 +997,7 @@ NTSTATUS KphpGetKernelFileName(
 
     RtlZeroMemory(&info, sizeof(info));
 
-    info.TargetModuleAddress = KphGetSystemRoutineAddress(L"ObCloseHandle");
-    if (!info.TargetModuleAddress)
-    {
-        KphTracePrint(TRACE_LEVEL_ERROR,
-                      UTIL,
-                      L"KphGetSystemRoutineAddress failed");
-
-        return STATUS_NOT_FOUND;
-    }
-
+    info.TargetModuleAddress = (PVOID)ObCloseHandle;
     status = ZwQuerySystemInformation(SystemSingleModuleInformation,
                                       &info,
                                       sizeof(info),

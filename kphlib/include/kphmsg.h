@@ -52,6 +52,8 @@ typedef enum _KPH_MESSAGE_ID
     KphMsgQueryInformationThread,
     KphMsgQuerySection,
     KphMsgCompareObjects,
+    KphMsgGetMessageTimeouts,
+    KphMsgSetMessageTimeouts,
 
     MaxKphMsgClient,
     MaxKphMsgClientAllowed = 0x40000000,
@@ -172,6 +174,8 @@ typedef struct _KPH_MESSAGE
             KPHM_QUERY_INFORMATION_THREAD QueryInformationThread;
             KPHM_QUERY_SECTION QuerySection;
             KPHM_COMPARE_OBJECTS CompareObjects;
+            KPHM_GET_MESSAGE_TIMEOUTS GetMessageTimeouts;
+            KPHM_SET_MESSAGE_TIMEOUTS SetMessageTimeouts;
         } User;
 
         //
@@ -224,7 +228,7 @@ typedef struct _KPH_MESSAGE
 typedef const KPH_MESSAGE* PCKPH_MESSAGE;
 
 //
-// ABI breaking asserts. KPH_MESSAGE_VESRSION must be updated.
+// ABI breaking asserts. KPH_MESSAGE_VERSION must be updated.
 // const int size = sizeof(KPH_MESSAGE);
 // const int offset = FIELD_OFFSET(KPH_MESSAGE, _Dyn);
 //

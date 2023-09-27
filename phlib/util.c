@@ -974,88 +974,6 @@ BOOLEAN PhShowConfirmMessage(
 }
 
 /**
- * Finds an integer in an array of string-integer pairs.
- *
- * \param KeyValuePairs The array.
- * \param SizeOfKeyValuePairs The size of the array, in bytes.
- * \param String The string to search for.
- * \param Integer A variable which receives the found integer.
- *
- * \return TRUE if the string was found, otherwise FALSE.
- *
- * \remarks The search is case-sensitive.
- */
-_Success_(return)
-BOOLEAN PhFindIntegerSiKeyValuePairs(
-    _In_ PPH_KEY_VALUE_PAIR KeyValuePairs,
-    _In_ ULONG SizeOfKeyValuePairs,
-    _In_ PWSTR String,
-    _Out_ PULONG Integer
-    )
-{
-    for (ULONG i = 0; i < SizeOfKeyValuePairs / sizeof(PH_KEY_VALUE_PAIR); i++)
-    {
-        if (PhEqualStringZ(KeyValuePairs[i].Key, String, TRUE))
-        {
-            *Integer = PtrToUlong(KeyValuePairs[i].Value);
-            return TRUE;
-        }
-    }
-
-    return FALSE;
-}
-
-/**
- * Finds a string in an array of string-integer pairs.
- *
- * \param KeyValuePairs The array.
- * \param SizeOfKeyValuePairs The size of the array, in bytes.
- * \param Integer The integer to search for.
- * \param String A variable which receives the found string.
- *
- * \return TRUE if the integer was found, otherwise FALSE.
- */
-_Success_(return)
-BOOLEAN PhFindStringSiKeyValuePairs(
-    _In_ PPH_KEY_VALUE_PAIR KeyValuePairs,
-    _In_ ULONG SizeOfKeyValuePairs,
-    _In_ ULONG Integer,
-    _Out_ PWSTR *String
-    )
-{
-    for (ULONG i = 0; i < SizeOfKeyValuePairs / sizeof(PH_KEY_VALUE_PAIR); i++)
-    {
-        if (PtrToUlong(KeyValuePairs[i].Value) == Integer)
-        {
-            *String = (PWSTR)KeyValuePairs[i].Key;
-            return TRUE;
-        }
-    }
-
-    return FALSE;
-}
-
-_Success_(return)
-BOOLEAN PhFindIntegerSiKeyValuePairsStringRef(
-    _In_ PPH_KEY_VALUE_PAIR KeyValuePairs,
-    _In_ ULONG SizeOfKeyValuePairs,
-    _In_ PPH_STRINGREF String,
-    _Out_ PULONG Integer
-    )
-{
-    for (ULONG i = 0; i < SizeOfKeyValuePairs / sizeof(PH_KEY_VALUE_PAIR); i++)
-    {
-        if (PhEqualStringRef(KeyValuePairs[i].Key, String, TRUE))
-        {
-            *Integer = PtrToUlong(KeyValuePairs[i].Value);
-            return TRUE;
-        }
-    }
-
-    return FALSE;
-}
-
-/**
  * Creates a random (type 4) UUID.
  *
  * \param Guid The destination UUID.
@@ -8084,29 +8002,55 @@ ULONGLONG PhReadTimeStampCounter(
 }
 
 // rev from QueryPerformanceCounter (dmex)
+/**
+ * Retrieves the current value of the performance counter, which is a high resolution (<1us) time stamp that can be used for time-interval measurements.
+ *
+ * \param PerformanceCounter A pointer to a variable that receives the current performance-counter value, in counts.
+ *
+ * \return Successful or errant status.
+ *
+ * \remarks On systems that run Windows XP or later, the function will always succeed and will thus never return zero.
+ */
 BOOLEAN PhQueryPerformanceCounter(
     _Out_ PLARGE_INTEGER PerformanceCounter
     )
 {
-    if (RtlQueryPerformanceCounter(PerformanceCounter))
-        return TRUE;
-
+#if (PH_WIN32_PERFCOUNTER)
+    return !!QueryPerformanceCounter(PerformanceCounter);
+#elif (PH_NATIVE_PERFCOUNTER)
     return NT_SUCCESS(NtQueryPerformanceCounter(PerformanceCounter, NULL));
+#else
+    return !!RtlQueryPerformanceCounter(PerformanceCounter);
+#endif
 }
 
 // rev from QueryPerformanceFrequency (dmex)
+/**
+ * Retrieves the frequency of the performance counter.
+ * The frequency of the performance counter is fixed at system boot and is consistent across all processors.
+ * Therefore, the frequency need only be queried upon application initialization, and the result can be cached.
+ *
+ * \param PerformanceFrequency A pointer to a variable that receives the current performance-counter frequency, in counts per second.
+ *
+ * \return Successful or errant status.
+ *
+ * \remarks On systems that run Windows XP or later, the function will always succeed and will thus never return zero.
+ */
 BOOLEAN PhQueryPerformanceFrequency(
     _Out_ PLARGE_INTEGER PerformanceFrequency
     )
 {
+#if (PH_WIN32_PERFCOUNTER)
+    return !!QueryPerformanceFrequency(PerformanceFrequency);
+#elif (PH_NATIVE_PERFCOUNTER)
     LARGE_INTEGER performanceCounter;
-
-    if (RtlQueryPerformanceFrequency(PerformanceFrequency))
-        return TRUE;
-
     return NT_SUCCESS(NtQueryPerformanceCounter(&performanceCounter, PerformanceFrequency));
+#else
+    return !!RtlQueryPerformanceFrequency(PerformanceFrequency);
+#endif
 }
 
+// rev from lucasg https://lucasg.github.io/2017/10/15/Api-set-resolution/ (dmex)
 PPH_STRING PhApiSetResolveToHost(
     _In_ PPH_STRINGREF ApiSetName
     )

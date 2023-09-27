@@ -86,6 +86,14 @@ PhCreateThread2(
     _In_opt_ PVOID Parameter
     );
 
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhQueueUserWorkItem(
+    _In_ PUSER_THREAD_START_ROUTINE StartRoutine,
+    _In_opt_ PVOID Argument
+    );
+
 // Misc. system
 
 PHLIBAPI
@@ -300,6 +308,47 @@ PhAllocateZeroSafe(
     }
 
     return NULL;
+}
+
+// Singly linked list
+
+// rev from RtlInitializeSListHead (dmex)
+FORCEINLINE
+VOID
+NTAPI
+PhInitializeSListHead(
+    _Out_ PSLIST_HEADER ListHead
+    )
+{
+#if (PHNT_NATIVE_SLIST)
+    RtlInitializeSListHead(ListHead);
+#else
+    if (IS_ALIGNED(ListHead, MEMORY_ALLOCATION_ALIGNMENT))
+        memset(ListHead, 0, sizeof(SLIST_HEADER));
+    else
+        PhRaiseStatus(STATUS_DATATYPE_MISALIGNMENT);
+#endif
+}
+
+// rev from RtlQueryDepthSList (dmex)
+FORCEINLINE
+USHORT
+NTAPI
+PhQueryDepthSList(
+    _In_ PSLIST_HEADER ListHead
+    )
+{
+#if (PHNT_NATIVE_SLIST)
+    return RtlQueryDepthSList(ListHead);
+#else
+#ifdef _M_X64
+    return (USHORT)ListHead->HeaderX64.Depth;
+#elif _M_ARM64
+    return (USHORT)ListHead->HeaderArm64.Depth;
+#else
+    return ListHead->Depth;
+#endif
+#endif
 }
 
 // Event
@@ -4325,6 +4374,9 @@ PhFormatDoubleToUtf8(
 
 // error
 
+#define HRESULT_CUSTOMER(hr) (((hr) >> 29) & 0x1)
+#define HRESULT_NTSTATUS(hr) (((hr) >> 28) & 0x1)
+
 PHLIBAPI
 ULONG
 NTAPI
@@ -4351,6 +4403,13 @@ BOOLEAN
 NTAPI
 PhNtStatusFileNotFound(
     _In_ NTSTATUS Status
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhNtStatusFromHResult(
+    _In_ HRESULT Result
     );
 
 FORCEINLINE

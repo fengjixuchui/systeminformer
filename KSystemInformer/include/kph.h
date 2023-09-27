@@ -29,31 +29,31 @@
 
 #define KSIAPI NTAPI
 
-#define PAGED_CODE_PASSIVE()\
-    PAGED_CODE()\
+#define PAGED_CODE_PASSIVE()                                                  \
+    PAGED_CODE()                                                              \
     NT_ASSERT(KeGetCurrentIrql() == PASSIVE_LEVEL)
-#define NPAGED_CODE_PASSIVE()\
+#define NPAGED_CODE_PASSIVE()                                                 \
     NT_ASSERT(KeGetCurrentIrql() == PASSIVE_LEVEL)
-#define NPAGED_CODE_DISPATCH_MAX()\
+#define NPAGED_CODE_DISPATCH_MAX()                                            \
     NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL)
-#define NPAGED_CODE_DISPATCH_MIN()\
+#define NPAGED_CODE_DISPATCH_MIN()                                            \
     NT_ASSERT(KeGetCurrentIrql() >= DISPATCH_LEVEL)
 
-#define PAGED_FILE() \
-    __pragma(bss_seg("PAGEBBS"))\
-    __pragma(code_seg("PAGE"))\
-    __pragma(data_seg("PAGEDATA"))\
+#define PAGED_FILE()                                                          \
+    __pragma(bss_seg("PAGEBBS"))                                              \
+    __pragma(code_seg("PAGE"))                                                \
+    __pragma(data_seg("PAGEDATA"))                                            \
     __pragma(const_seg("PAGERO"))
 
-#define KPH_PROTECTED_DATA_SECTION_PUSH() \
-    __pragma(data_seg(push))\
+#define KPH_PROTECTED_DATA_SECTION_PUSH()                                     \
+    __pragma(data_seg(push))                                                  \
     __pragma(data_seg("KSIDATA"))
-#define KPH_PROTECTED_DATA_SECTION_POP() \
+#define KPH_PROTECTED_DATA_SECTION_POP()                                      \
     __pragma(data_seg(pop))
-#define KPH_PROTECTED_DATA_SECTION_RO_PUSH() \
-    __pragma(const_seg(push))\
+#define KPH_PROTECTED_DATA_SECTION_RO_PUSH()                                  \
+    __pragma(const_seg(push))                                                 \
     __pragma(const_seg("KSIRO"))
-#define KPH_PROTECTED_DATA_SECTION_RO_POP() \
+#define KPH_PROTECTED_DATA_SECTION_RO_POP()                                   \
     __pragma(const_seg(pop))
 
 #define _Outptr_allocatesMem_ _Outptr_result_nullonfailure_ __drv_allocatesMem(Mem)
@@ -72,7 +72,7 @@
 #define InterlockedExchangeAddULongPtr(target, value) (ULONG_PTR)InterlockedExchangeAddSizeT((SIZE_T*)target, (SIZE_T)value)
 #define InterlockedIncrementSSizeT(target) (SSIZE_T)InterlockedIncrementSizeT((SIZE_T*)target)
 #define InterlockedDecrementSSizeT(target) (SSIZE_T)InterlockedDecrementSizeT((SIZE_T*)target)
-#define InterlockedCompareExchangeSizeT(target, value, expected)\
+#define InterlockedCompareExchangeSizeT(target, value, expected) \
     (SIZE_T)InterlockedCompareExchangePointer((PVOID*)Target, (PVOID)Value, (PVOID)expected)
 
 FORCEINLINE
@@ -103,21 +103,23 @@ SIZE_T InterlockedExchangeIfGreaterSizeT(
     return expected;
 }
 
-#define ProbeOutputType(pointer, type)\
-_Pragma("warning(suppress : 6001)")\
+#define ProbeOutputType(pointer, type)                                        \
+_Pragma("warning(suppress : 6001)")                                           \
 ProbeForWrite(pointer, sizeof(type), TYPE_ALIGNMENT(type))
 
-#define ProbeInputType(pointer, type)\
-_Pragma("warning(suppress : 6001)")\
+#define ProbeInputType(pointer, type)                                         \
+_Pragma("warning(suppress : 6001)")                                           \
 ProbeForRead(pointer, sizeof(type), TYPE_ALIGNMENT(type))
 
 #define C_2sTo4(x) ((unsigned int)(signed short)(x))
 
-#define RebaseUnicodeString(string, oldBase, newBase)\
-if ((string)->Buffer)\
-{\
+#define RebaseUnicodeString(string, oldBase, newBase)                         \
+if ((string)->Buffer)                                                         \
+{                                                                             \
     (string)->Buffer = Add2Ptr(newBase, PtrOffset(oldBase, (string)->Buffer));\
 }
+
+#define KPH_TIMEOUT(ms) { .QuadPart = (-10000ll * (ms)) }
 
 typedef struct _KPH_SIZED_BUFFER
 {
@@ -139,20 +141,16 @@ extern PDRIVER_OBJECT KphDriverObject;
 extern RTL_OSVERSIONINFOEXW KphOsVersionInfo;
 extern KPH_FILE_VERSION KphKernelVersion;
 extern KPH_INFORMER_SETTINGS KphInformerSettings;
-extern BOOLEAN KphIgnoreProtectionSuppression;
+extern BOOLEAN KphIgnoreProtectionsSuppressed;
+extern BOOLEAN KphIgnoreTestSigningEnabled;
 extern SYSTEM_SECUREBOOT_INFORMATION KphSecureBootInfo;
 extern SYSTEM_CODEINTEGRITY_INFORMATION KphCodeIntegrityInfo;
 
 FORCEINLINE
-BOOLEAN KphSuppressProtections(
+BOOLEAN KphInDeveloperMode(
     VOID
     )
 {
-    if (KphIgnoreProtectionSuppression)
-    {
-        return FALSE;
-    }
-
     if (KphSecureBootInfo.SecureBootCapable &&
         KphSecureBootInfo.SecureBootEnabled)
     {
@@ -171,6 +169,32 @@ BOOLEAN KphSuppressProtections(
     }
 
     return TRUE;
+}
+
+FORCEINLINE
+BOOLEAN KphProtectionsSuppressed(
+    VOID
+    )
+{
+    if (KphIgnoreProtectionsSuppressed)
+    {
+        return FALSE;
+    }
+
+    return KphInDeveloperMode();
+}
+
+FORCEINLINE
+BOOLEAN KphTestSigningEnabled(
+    VOID
+    )
+{
+    if (KphIgnoreTestSigningEnabled)
+    {
+        return FALSE;
+    }
+
+    return KphInDeveloperMode();
 }
 
 // alloc
@@ -347,12 +371,6 @@ PVOID KphGetRoutineAddress(
     _In_z_ PCSTR RoutineName
     );
 
-_IRQL_requires_max_(PASSIVE_LEVEL)
-NTSTATUS KphLocateKernelImage(
-    _Out_ PVOID* ImageBase,
-    _Out_ PSIZE_T ImageSize
-    );
-
 // object
 
 #ifdef _X86_
@@ -363,7 +381,7 @@ NTSTATUS KphLocateKernelImage(
 
 #define IsKernelHandle(Handle) ((LONG_PTR)(Handle) < 0)
 #define MakeKernelHandle(Handle) ((HANDLE)((ULONG_PTR)(Handle) | KERNEL_HANDLE_BIT))
-#define IsPseudoHandle(Handle) (((ULONG_PTR)(Handle) <= (ULONG_PTR)-1) &&\
+#define IsPseudoHandle(Handle) (((ULONG_PTR)(Handle) <= (ULONG_PTR)-1) && \
                                 ((ULONG_PTR)(Handle) >= (ULONG_PTR)-6))
 
 _Acquires_lock_(Process)
@@ -573,16 +591,6 @@ NTSTATUS KphOpenThread(
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
 _Must_inspect_result_
-NTSTATUS KphOpenThreadToken(
-    _In_ HANDLE ThreadHandle,
-    _In_ ACCESS_MASK DesiredAccess,
-    _In_ BOOLEAN OpenAsSelf,
-    _Out_ PHANDLE TokenHandle,
-    _In_ KPROCESSOR_MODE AccessMode
-    );
-
-_IRQL_requires_max_(PASSIVE_LEVEL)
-_Must_inspect_result_
 NTSTATUS KphOpenThreadProcess(
     _In_ HANDLE ThreadHandle,
     _In_ ACCESS_MASK DesiredAccess,
@@ -591,46 +599,17 @@ NTSTATUS KphOpenThreadProcess(
     );
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
-VOID KphInitializeStackBackTrace(
-    VOID
-    );
-
-_IRQL_requires_max_(APC_LEVEL)
-_Success_(return != 0)
-ULONG KphCaptureStackBackTrace(
-    _In_ ULONG FramesToSkip,
-    _In_ ULONG FramesToCapture,
-    _In_opt_ ULONG Flags,
-    _Out_writes_(FramesToCapture) PVOID *BackTrace,
-    _Out_opt_ PULONG BackTraceHash
-    );
-
-_IRQL_requires_max_(PASSIVE_LEVEL)
-_Must_inspect_result_
-NTSTATUS KphCaptureStackBackTraceThread(
-    _In_ PETHREAD Thread,
-    _In_ ULONG FramesToSkip,
-    _In_ ULONG FramesToCapture,
-    _Out_writes_(FramesToCapture) PVOID *BackTrace,
-    _Out_opt_ PULONG CapturedFrames,
-    _Out_opt_ PULONG BackTraceHash,
-    _In_ KPROCESSOR_MODE AccessMode,
-    _In_ ULONG Flags,
-    _In_opt_ PLARGE_INTEGER Timeout
-    );
-
-_IRQL_requires_max_(PASSIVE_LEVEL)
 _Must_inspect_result_
 NTSTATUS KphCaptureStackBackTraceThreadByHandle(
     _In_ HANDLE ThreadHandle,
     _In_ ULONG FramesToSkip,
     _In_ ULONG FramesToCapture,
-    _Out_writes_(FramesToCapture) PVOID *BackTrace,
-    _Out_opt_ PULONG CapturedFrames,
+    _Out_writes_(FramesToCapture) PVOID* BackTrace,
+    _Out_ PULONG CapturedFrames,
     _Out_opt_ PULONG BackTraceHash,
-    _In_ KPROCESSOR_MODE AccessMode,
     _In_ ULONG Flags,
-    _In_opt_ PLARGE_INTEGER Timeout
+    _In_opt_ PLARGE_INTEGER Timeout,
+    _In_ KPROCESSOR_MODE AccessMode
     );
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -658,12 +637,6 @@ NTSTATUS KphQueryInformationThread(
 
 typedef EX_RUNDOWN_REF KPH_RUNDOWN;
 typedef KPH_RUNDOWN* PKPH_RUNDOWN;
-
-_IRQL_requires_max_(DISPATCH_LEVEL)
-ULONG KphCaptureStack(
-    _Out_ PVOID* Frames,
-    _In_ ULONG Count
-    );
 
 _IRQL_requires_max_(DISPATCH_LEVEL)
 _Must_inspect_result_
@@ -773,18 +746,6 @@ NTSTATUS KphMapViewInSystem(
 _IRQL_always_function_max_(PASSIVE_LEVEL)
 VOID KphUnmapViewInSystem(
     _In_ PVOID MappedBase
-    );
-
-_IRQL_requires_max_(PASSIVE_LEVEL)
-_Must_inspect_result_
-NTSTATUS KphGetProcessModules(
-    _In_ PEPROCESS Process,
-    _Outptr_allocatesMem_ PRTL_PROCESS_MODULES *Modules
-    );
-
-_IRQL_requires_max_(PASSIVE_LEVEL)
-VOID KphFreeProcessModules(
-    _In_freesMem_ PRTL_PROCESS_MODULES Modules
     );
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -1136,13 +1097,13 @@ KphGetObjectType(
 
 // cid_tracking
 
-#define KPH_PROTECTED_PROCESS_MASK (KPH_PROCESS_READ_ACCESS |\
-                                    PROCESS_TERMINATE |\
+#define KPH_PROTECTED_PROCESS_MASK (KPH_PROCESS_READ_ACCESS                  |\
+                                    PROCESS_TERMINATE                        |\
                                     PROCESS_SUSPEND_RESUME)
-#define KPH_PROTECTED_THREAD_MASK (KPH_THREAD_READ_ACCESS |\
-                                   THREAD_TERMINATE |\
-                                   THREAD_SUSPEND_RESUME |\
-                                   THREAD_RESUME)
+#define KPH_PROTECTED_THREAD_MASK  (KPH_THREAD_READ_ACCESS                   |\
+                                    THREAD_TERMINATE                         |\
+                                    THREAD_SUSPEND_RESUME                    |\
+                                    THREAD_RESUME)
 
 typedef struct _KPH_PROCESS_CONTEXT
 {
@@ -1234,7 +1195,8 @@ typedef struct _KPH_THREAD_CONTEXT
             ULONG IsCreatingProcess : 1;
             ULONG InitApcQueued : 1;
             ULONG InitApcExecuted : 1;
-            ULONG Reserved : 25;
+            ULONG CapturingUserModeStack : 1;
+            ULONG Reserved : 24;
         };
     };
 
@@ -1547,6 +1509,44 @@ KsiInsertQueueApc(
     _In_ KPRIORITY PriorityBoost
     );
 
+typedef
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_IRQL_requires_same_
+_Function_class_(KSI_WORK_QUEUE_ROUTINE)
+VOID
+KSI_WORK_QUEUE_ROUTINE(
+    _In_opt_ PVOID Parameter
+    );
+typedef KSI_WORK_QUEUE_ROUTINE *PKSI_WORK_QUEUE_ROUTINE;
+
+typedef struct _KSI_WORK_QUEUE_ITEM
+{
+    WORK_QUEUE_ITEM WorkItem;
+    PDRIVER_OBJECT DriverObject;
+    PKSI_WORK_QUEUE_ROUTINE Routine;
+    PVOID Parameter;
+} KSI_WORK_QUEUE_ITEM, *PKSI_WORK_QUEUE_ITEM;
+
+_IRQL_requires_max_(DISPATCH_LEVEL)
+KSISYSAPI
+VOID
+KSIAPI
+KsiInitializeWorkItem(
+    _Out_ PKSI_WORK_QUEUE_ITEM WorkItem,
+    _In_ PDRIVER_OBJECT DriverObject,
+    _In_ PKSI_WORK_QUEUE_ROUTINE Routine,
+    _In_opt_ PVOID Parameter
+    );
+
+_IRQL_requires_max_(DISPATCH_LEVEL)
+KSISYSAPI
+VOID
+KSIAPI
+KsiQueueWorkItem(
+    _Inout_ PKSI_WORK_QUEUE_ITEM WorkItem,
+    _In_ WORK_QUEUE_TYPE QueueType
+    );
+
 // system
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -1738,4 +1738,39 @@ NTSTATUS KphSocketTlsRecv(
     _In_ KPH_TLS_HANDLE Tls,
     _Out_writes_bytes_to_(*Length, *Length) PVOID Buffer,
     _Inout_ PULONG Length
+    );
+
+// back_trace.c
+
+#define KPH_STACK_BACK_TRACE_USER_MODE   0x00000001ul
+#define KPH_STACK_BACK_TRACE_SKIP_KPH    0x00000002ul
+#define KPH_STACK_BACK_TRACE_NO_SENTINEL 0x00000004ul
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphInitializeStackBackTrace(
+    VOID
+    );
+
+_IRQL_requires_max_(DISPATCH_LEVEL)
+_Success_(return != 0)
+ULONG KphCaptureStackBackTrace(
+    _In_ ULONG FramesToSkip,
+    _In_ ULONG FramesToCapture,
+    _Out_writes_(FramesToCapture) PVOID* BackTrace,
+    _Out_opt_ PULONG BackTraceHash,
+    _In_ ULONG Flags
+    );
+
+_IRQL_requires_max_(APC_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphCaptureStackBackTraceThread(
+    _In_ PETHREAD Thread,
+    _In_ ULONG FramesToSkip,
+    _In_ ULONG FramesToCapture,
+    _Out_writes_(FramesToCapture) PVOID* BackTrace,
+    _Out_ PULONG CapturedFrames,
+    _Out_opt_ PULONG BackTraceHash,
+    _In_ ULONG Flags,
+    _In_opt_ PLARGE_INTEGER Timeout
     );

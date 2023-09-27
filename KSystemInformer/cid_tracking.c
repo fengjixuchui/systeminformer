@@ -1006,6 +1006,7 @@ VOID KphCidCleanup(
 
     CidTableDelete(&KphpCidTable);
 
+    KphDereferenceObject(KphpCidApcLookaside);
     KphDereferenceObject(KphpThreadContextLookaside);
     KphDereferenceObject(KphpProcessContextLookaside);
 }
@@ -1229,11 +1230,11 @@ BOOLEAN CIDAPI KphpCidEnumPostPopulate(
 
 // from phnative.h
 #define KPH_FIRST_PROCESS(Processes) ((PSYSTEM_PROCESS_INFORMATION)(Processes))
-#define KPH_NEXT_PROCESS(Process) ( \
-    ((PSYSTEM_PROCESS_INFORMATION)(Process))->NextEntryOffset ? \
-    (PSYSTEM_PROCESS_INFORMATION)Add2Ptr((Process), \
-    ((PSYSTEM_PROCESS_INFORMATION)(Process))->NextEntryOffset) : \
-    NULL \
+#define KPH_NEXT_PROCESS(Process) (                                           \
+    ((PSYSTEM_PROCESS_INFORMATION)(Process))->NextEntryOffset ?               \
+    (PSYSTEM_PROCESS_INFORMATION)Add2Ptr((Process),                           \
+    ((PSYSTEM_PROCESS_INFORMATION)(Process))->NextEntryOffset) :              \
+    NULL                                                                      \
     )
 
 /**
@@ -1966,7 +1967,7 @@ VOID KphVerifyProcessAndProtectIfAppropriate(
         ACCESS_MASK processAllowedMask;
         ACCESS_MASK threadAllowedMask;
 
-        if (KphSuppressProtections())
+        if (KphProtectionsSuppressed())
         {
             //
             // Allow all access, but still exercise the code by registering.

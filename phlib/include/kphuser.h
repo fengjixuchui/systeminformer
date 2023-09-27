@@ -201,6 +201,10 @@ KphOpenThreadProcess(
     _Out_ PHANDLE ProcessHandle
     );
 
+#define KPH_STACK_BACK_TRACE_USER_MODE   0x00000001ul
+#define KPH_STACK_BACK_TRACE_SKIP_KPH    0x00000002ul
+#define KPH_STACK_BACK_TRACE_NO_SENTINEL 0x00000004ul
+
 PHLIBAPI
 NTSTATUS
 NTAPI
@@ -208,9 +212,9 @@ KphCaptureStackBackTraceThread(
     _In_ HANDLE ThreadHandle,
     _In_ ULONG FramesToSkip,
     _In_ ULONG FramesToCapture,
-    _Out_writes_(FramesToCapture) PVOID *BackTrace,
-    _Inout_opt_ PULONG CapturedFrames,
-    _Inout_opt_ PULONG BackTraceHash,
+    _Out_writes_(FramesToCapture) PVOID* BackTrace,
+    _Out_ PULONG CapturedFrames,
+    _Out_opt_ PULONG BackTraceHash,
     _In_ ULONG Flags
     );
 
@@ -250,7 +254,7 @@ NTAPI
 KphQueryObjectSectionMappingsInfo(
     _In_ HANDLE ProcessHandle,
     _In_ HANDLE Handle,
-    _Out_ PKPH_SECTION_MAPPINGS_INFORMATION* Info 
+    _Out_ PKPH_SECTION_MAPPINGS_INFORMATION* Info
     );
 
 PHLIBAPI
@@ -331,7 +335,7 @@ PHLIBAPI
 KPH_LEVEL
 NTAPI
 KphLevelEx(
-    BOOLEAN Cached 
+    _In_ BOOLEAN Cached
     );
 
 PHLIBAPI
@@ -482,7 +486,7 @@ NTSTATUS
 NTAPI
 KphQuerySectionMappingsInfo(
     _In_ HANDLE SectionHandle,
-    _Out_ PKPH_SECTION_MAPPINGS_INFORMATION* Info 
+    _Out_ PKPH_SECTION_MAPPINGS_INFORMATION* Info
     );
 
 PHLIBAPI
@@ -492,6 +496,20 @@ KphCompareObjects(
     _In_ HANDLE ProcessHandle,
     _In_ HANDLE FirstObjectHandle,
     _In_ HANDLE SecondObjectHandle
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphGetMessageTimeouts(
+    _Out_ PKPH_MESSAGE_TIMEOUTS Timeouts
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphSetMessageTimeouts(
+    _In_ PKPH_MESSAGE_TIMEOUTS Timeouts
     );
 
 EXTERN_C_END
