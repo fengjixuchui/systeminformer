@@ -191,7 +191,7 @@ namespace CustomBuildTool
 
                 Build.ShowBuildStats();
             }
-            else if (ProgramArgs.ContainsKey("-appveyor"))
+            else if (ProgramArgs.ContainsKey("-nightly-build"))
             {
                 Build.SetupBuildEnvironment(true);
 
@@ -211,14 +211,24 @@ namespace CustomBuildTool
                     BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildArm64bit |
                     BuildFlags.BuildDebug | BuildFlags.BuildRelease
                     );
+            }
+            else if (ProgramArgs.ContainsKey("-nightly-package"))
+            {
+                Build.SetupBuildEnvironment(true);
 
+                if (!Build.ResignFiles())
+                    Environment.Exit(1);
                 if (!Build.CopyTextFiles(true))
                     Environment.Exit(1);
-
                 if (!Build.BuildBinZip())
                     Environment.Exit(1);
                 if (!Build.BuildSetupExe())
                     Environment.Exit(1);
+            }
+            else if (ProgramArgs.ContainsKey("-nightly-deploy"))
+            {
+                Build.SetupBuildEnvironment(true);
+
                 if (!Build.BuildPdbZip(false))
                     Environment.Exit(1);
                 //if (!Build.BuildSdkZip())

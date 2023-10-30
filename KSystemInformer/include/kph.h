@@ -69,15 +69,55 @@
 #define MAX_PATH 260
 #endif
 
-#define InterlockedExchangeAddULongPtr(target, value) (ULONG_PTR)InterlockedExchangeAddSizeT((SIZE_T*)target, (SIZE_T)value)
-#define InterlockedIncrementSSizeT(target) (SSIZE_T)InterlockedIncrementSizeT((SIZE_T*)target)
-#define InterlockedDecrementSSizeT(target) (SSIZE_T)InterlockedDecrementSizeT((SIZE_T*)target)
-#define InterlockedCompareExchangeSizeT(target, value, expected) \
-    (SIZE_T)InterlockedCompareExchangePointer((PVOID*)Target, (PVOID)Value, (PVOID)expected)
+FORCEINLINE
+ULONG64 InterlockedExchangeU64(
+    _Inout_ _Interlocked_operand_ volatile ULONG64* Target,
+    _In_ ULONG64 Value
+    )
+{
+    return (ULONG64)InterlockedExchange64((LONG64*)Target, (LONG64)Value);
+}
+
+FORCEINLINE
+ULONG_PTR InterlockedExchangeAddULongPtr(
+    _Inout_ _Interlocked_operand_ volatile ULONG_PTR* Target,
+    _In_ ULONG_PTR Value
+    )
+{
+    return (ULONG_PTR)InterlockedExchangeAddSizeT((SIZE_T*)Target, (SIZE_T)Value);
+}
+
+FORCEINLINE
+SSIZE_T InterlockedIncrementSSizeT(
+    _Inout_ _Interlocked_operand_ volatile SSIZE_T* Target
+    )
+{
+    return (SSIZE_T)InterlockedIncrementSizeT((SIZE_T*)Target);
+}
+
+FORCEINLINE
+SSIZE_T InterlockedDecrementSSizeT(
+    _Inout_ _Interlocked_operand_ volatile SSIZE_T* Target
+    )
+{
+    return (SSIZE_T)InterlockedDecrementSizeT((SIZE_T*)Target);
+}
+
+FORCEINLINE
+SIZE_T InterlockedCompareExchangeSizeT(
+    _Inout_ _Interlocked_operand_ volatile SIZE_T* Target,
+    _In_ SIZE_T Value,
+    _In_ SIZE_T Expected
+    )
+{
+    return (SIZE_T)InterlockedCompareExchangePointer((PVOID*)Target,
+                                                     (PVOID)Value,
+                                                     (PVOID)Expected);
+}
 
 FORCEINLINE
 SIZE_T InterlockedExchangeIfGreaterSizeT(
-    _In_ volatile SIZE_T* Target,
+    _Inout_ _Interlocked_operand_ volatile SIZE_T* Target,
     _In_ SIZE_T Value
     )
 {
@@ -86,6 +126,7 @@ SIZE_T InterlockedExchangeIfGreaterSizeT(
     for (;;)
     {
         expected = *Target;
+        MemoryBarrier();
 
         if (Value <= expected)
         {
@@ -635,6 +676,31 @@ NTSTATUS KphQueryInformationThread(
 
 // util
 
+_Must_inspect_result_
+INT KphCompareMemory(
+    _In_reads_bytes_(Length) PVOID Buffer1,
+    _In_reads_bytes_(Length) PVOID Buffer2,
+    _In_ SIZE_T Length
+    );
+#pragma deprecated(memcmp)
+#pragma deprecated(RtlCompareMemory)
+
+_Must_inspect_result_
+BOOLEAN KphEqualMemory(
+    _In_reads_bytes_(Length) PVOID Buffer1,
+    _In_reads_bytes_(Length) PVOID Buffer2,
+    _In_ SIZE_T Length
+    );
+#pragma deprecated(RtlEqualMemory)
+
+_Must_inspect_result_
+PVOID KphSearchMemory(
+    _In_reads_bytes_(BufferLength) PVOID Buffer,
+    _In_ ULONG BufferLength,
+    _In_reads_bytes_(PatternLength) PVOID Pattern,
+    _In_ ULONG PatternLength
+    );
+
 typedef EX_RUNDOWN_REF KPH_RUNDOWN;
 typedef KPH_RUNDOWN* PKPH_RUNDOWN;
 
@@ -688,6 +754,25 @@ _IRQL_requires_max_(APC_LEVEL)
 _Releases_lock_(_Global_critical_region_)
 VOID KphReleaseRWLock(
     _Inout_ _Requires_lock_held_(*_Curr_) _Releases_lock_(*_Curr_) PKPH_RWLOCK Lock
+    );
+
+typedef struct _KPH_REFERENCE
+{
+    volatile LONG Count;
+} KPH_REFERENCE, *PKPH_REFERENCE;
+
+_IRQL_requires_max_(APC_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphAcquireReference(
+    _Inout_ PKPH_REFERENCE Reference,
+    _Out_opt_ PLONG PreviousCount
+    );
+
+_IRQL_requires_max_(APC_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphReleaseReference(
+    _Inout_ PKPH_REFERENCE Reference,
+    _Out_opt_ PLONG PreviousCount
     );
 
 _IRQL_requires_max_(APC_LEVEL)
@@ -822,6 +907,39 @@ NTSTATUS KphGetProcessImageName(
 _IRQL_requires_max_(APC_LEVEL)
 VOID KphFreeProcessImageName(
     _In_freesMem_ PUNICODE_STRING ImageName
+    );
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphOpenParametersKey(
+    _In_ PUNICODE_STRING RegistryPath,
+    _Out_ PHANDLE KeyHandle
+    );
+
+typedef struct _KPH_URL_INFORMATION
+{
+    //
+    // http://www.example.com:8080/path/index.html?key=x&v=1#Something
+    // |--|   |-------------| |--||--------------||--------||--------|
+    // Scheme   Domain Name   Port     Path       Parameters  Anchor
+    //        |------------------|
+    //             Authority
+    //
+
+    ANSI_STRING Scheme;
+    ANSI_STRING Authority;
+    ANSI_STRING Path;
+    ANSI_STRING Parameters;
+    ANSI_STRING Anchor;
+    ANSI_STRING DomainName;
+    ANSI_STRING Port;
+} KPH_URL_INFORMATION, *PKPH_URL_INFORMATION;
+
+_IRQL_requires_max_(APC_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphParseUrlInformation(
+    _In_ PANSI_STRING Url,
+    _Out_ PKPH_URL_INFORMATION UrlInfo
     );
 
 // vm
@@ -1093,6 +1211,23 @@ _Must_inspect_result_
 PKPH_OBJECT_TYPE
 KphGetObjectType(
     _In_ PVOID Object
+    );
+
+typedef struct _KPH_ATOMIC_OBJECT_REF
+{
+    volatile ULONG_PTR Object;
+} KPH_ATOMIC_OBJECT_REF, *PKPH_ATOMIC_OBJECT_REF;
+
+#define KPH_ATOMIC_OBJECT_REF_INIT { .Object = 0 }
+
+_Must_inspect_result_
+PVOID KphAtomicReferenceObject(
+    _In_ PKPH_ATOMIC_OBJECT_REF ObjectRef
+    );
+
+VOID KphAtomicAssignObjectReference(
+    _Inout_ PKPH_ATOMIC_OBJECT_REF ObjectRef,
+    _In_opt_ PVOID Object
     );
 
 // cid_tracking
@@ -1388,6 +1523,31 @@ VOID KphApplyImageProtections(
     _Inout_ PKPH_PROCESS_CONTEXT Process,
     _In_ PIMAGE_INFO_EX ImageInfo
     );
+
+_IRQL_requires_max_(APC_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphAcquireDriverUnloadProtection(
+    _Out_opt_ PLONG PreviousCount
+    );
+
+_IRQL_requires_max_(APC_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphReleaseDriverUnloadProtection(
+    _Out_opt_ PLONG PreviousCount
+    );
+
+_IRQL_requires_max_(APC_LEVEL)
+LONG KphGetDriverUnloadProtectionCount(
+    VOID
+    );
+
+FORCEINLINE
+BOOLEAN KphIsDriverUnloadProtected(
+    VOID
+    )
+{
+    return (KphGetDriverUnloadProtectionCount() > 0);
+}
 
 // verify
 
@@ -1740,7 +1900,93 @@ NTSTATUS KphSocketTlsRecv(
     _Inout_ PULONG Length
     );
 
-// back_trace.c
+// http
+
+typedef enum _KPH_HTTP_VERSION
+{
+    InvalidKphHttpVersion,
+    KphHttpVersion10,
+    KphHttpVersion11,
+    MaxKphHttpVersion,
+} KPH_HTTP_VERSION, *PKPH_HTTP_VERSION;
+
+typedef struct _KPH_HTTP_HEADER_ITEM
+{
+    ANSI_STRING Key;
+    ANSI_STRING Value;
+} KPH_HTTP_HEADER_ITEM, *PKPH_HTTP_HEADER_ITEM;
+
+typedef struct _KPH_HTTP_RESPONSE
+{
+    KPH_HTTP_VERSION Version;
+    USHORT StatusCode;
+    ANSI_STRING StatusMessage;
+    PVOID Body;
+    ULONG BodyLength;
+    ULONG HeaderItemCount;
+    KPH_HTTP_HEADER_ITEM HeaderItems[ANYSIZE_ARRAY];
+} KPH_HTTP_RESPONSE, *PKPH_HTTP_RESPONSE;
+
+_IRQL_requires_max_(APC_LEVEL)
+VOID KphHttpFreeResponse(
+    _In_freesMem_ PKPH_HTTP_RESPONSE Response
+    );
+
+_IRQL_requires_max_(APC_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphHttpParseResponse(
+    _In_ PVOID Buffer,
+    _In_ ULONG Length,
+    _Outptr_allocatesMem_ PKPH_HTTP_RESPONSE* Response
+    );
+
+_IRQL_requires_max_(APC_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphHttpBuildRequest(
+    _In_ PANSI_STRING Method,
+    _In_ PANSI_STRING Host,
+    _In_ PANSI_STRING Path,
+    _In_ PANSI_STRING Parameters,
+    _In_opt_ PKPH_HTTP_HEADER_ITEM HeaderItems,
+    _In_ ULONG HeaderItemCount,
+    _In_opt_ PVOID Body,
+    _In_ ULONG BodyLength,
+    _Out_writes_bytes_to_opt_(*Length, *Length) PVOID Buffer,
+    _Inout_ PULONG Length
+    );
+
+// download
+// download
+
+typedef PVOID KPH_DOWNLOAD_HANDLE;
+typedef PVOID* PKPH_DOWNLOAD_HANDLE;
+
+_IRQL_requires_max_(APC_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphDownloadBinary(
+    _In_ PANSI_STRING Url,
+    _In_opt_ PLARGE_INTEGER Timeout,
+    _In_ ULONG MaxRedirects,
+    _Out_writes_bytes_to_(*Length, *Length) PVOID Buffer,
+    _Inout_ PULONG Length,
+    _Outptr_allocatesMem_ PKPH_DOWNLOAD_HANDLE Handle
+    );
+
+_IRQL_requires_max_(APC_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphDownloadBinaryContinue(
+    _In_ KPH_DOWNLOAD_HANDLE Handle,
+    _In_opt_ PLARGE_INTEGER Timeout,
+    _Out_writes_bytes_to_(*Length, *Length) PVOID Buffer,
+    _Inout_ PULONG Length
+    );
+
+_IRQL_requires_max_(APC_LEVEL)
+VOID KphDownloadBinaryClose(
+    _In_ KPH_DOWNLOAD_HANDLE Handle
+    );
+
+// back_trace
 
 #define KPH_STACK_BACK_TRACE_USER_MODE   0x00000001ul
 #define KPH_STACK_BACK_TRACE_SKIP_KPH    0x00000002ul

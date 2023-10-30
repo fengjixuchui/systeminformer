@@ -82,7 +82,7 @@ VOID PhShowKsiStatus(
 {
     KPH_PROCESS_STATE processState;
 
-    if (!PhGetIntegerSetting(L"EnableKphWarnings") || PhStartupParameters.PhSvc)
+    if (!PhGetIntegerSetting(L"KsiEnableWarnings") || PhStartupParameters.PhSvc)
         return;
 
     processState = KphGetCurrentProcessState();
@@ -135,7 +135,7 @@ VOID PhShowKsiStatus(
             PhGetString(infoString)
             ))
         {
-            PhSetIntegerSetting(L"EnableKphWarnings", FALSE);
+            PhSetIntegerSetting(L"KsiEnableWarnings", FALSE);
         }
 
         PhDereferenceObject(infoString);
@@ -158,7 +158,7 @@ VOID PhpShowKsiMessage(
     PPH_STRING messageString;
     ULONG processState;
 
-    if (!Force && !PhGetIntegerSetting(L"EnableKphWarnings") || PhStartupParameters.PhSvc)
+    if (!Force && !PhGetIntegerSetting(L"KsiEnableWarnings") || PhStartupParameters.PhSvc)
         return;
 
     errorMessage = NULL;
@@ -216,7 +216,7 @@ VOID PhpShowKsiMessage(
         PhAppendStringBuilder2(&stringBuilder, L"\r\n");
     }
 
-    if (Force && !PhGetIntegerSetting(L"EnableKphWarnings"))
+    if (Force && !PhGetIntegerSetting(L"KsiEnableWarnings"))
     {
         PhAppendStringBuilder2(&stringBuilder, L"Driver warnings are disabled.");
         PhAppendStringBuilder2(&stringBuilder, L"\r\n");
@@ -247,7 +247,7 @@ VOID PhpShowKsiMessage(
             PhGetString(messageString)
             ))
         {
-            PhSetIntegerSetting(L"EnableKphWarnings", FALSE);
+            PhSetIntegerSetting(L"KsiEnableWarnings", FALSE);
         }
     }
 
@@ -410,7 +410,7 @@ PPH_STRING PhGetKsiServiceName(
 {
     PPH_STRING string;
 
-    string = PhGetStringSetting(L"KphServiceName");
+    string = PhGetStringSetting(L"KsiServiceName");
 
     if (PhIsNullOrEmptyString(string))
     {
@@ -474,14 +474,14 @@ NTSTATUS KsiInitializeCallbackThread(
         BOOLEAN disableImageLoadProtection = FALSE;
         BOOLEAN randomizedPoolTag = FALSE;
 
-        if (PhIsNullOrEmptyString(objectName = PhGetStringSetting(L"KphObjectName")))
+        if (PhIsNullOrEmptyString(objectName = PhGetStringSetting(L"KsiObjectName")))
             PhMoveReference(&objectName, PhCreateString(KPH_OBJECT_NAME));
-        if (PhIsNullOrEmptyString(portName = PhGetStringSetting(L"KphPortName")))
+        if (PhIsNullOrEmptyString(portName = PhGetStringSetting(L"KsiPortName")))
             PhMoveReference(&portName, PhCreateString(KPH_PORT_NAME));
-        if (PhIsNullOrEmptyString(altitudeName = PhGetStringSetting(L"KphAltitude")))
+        if (PhIsNullOrEmptyString(altitudeName = PhGetStringSetting(L"KsiAltitude")))
             PhMoveReference(&altitudeName, PhCreateString(KPH_ALTITUDE_NAME));
-        disableImageLoadProtection = !!PhGetIntegerSetting(L"KphDisableImageLoadProtection");
-        randomizedPoolTag = !!PhGetIntegerSetting(L"KphRandomizedPoolTag");
+        disableImageLoadProtection = !!PhGetIntegerSetting(L"KsiDisableImageLoadProtection");
+        randomizedPoolTag = !!PhGetIntegerSetting(L"KsiRandomizedPoolTag");
 
         config.FileName = &ksiFileName->sr;
         config.ServiceName = &ksiServiceName->sr;
@@ -528,6 +528,9 @@ NTSTATUS KsiInitializeCallbackThread(
                         );
                 }
             }
+
+            if (level == KphLevelMax && PhGetIntegerSetting(L"KsiEnableUnloadProtection"))
+                KphAcquireDriverUnloadProtection(NULL, NULL);
         }
         else if (status == STATUS_SI_DYNDATA_UNSUPPORTED_KERNEL)
         {
@@ -749,16 +752,44 @@ VOID PhInitializeKsi(
         KsiInitializeCallbackThread(NULL);
 }
 
-NTSTATUS PhDestroyKsi(
+NTSTATUS PhCleanupKsi(
     VOID
     )
 {
     NTSTATUS status;
     PPH_STRING ksiServiceName;
     KPH_CONFIG_PARAMETERS config = { 0 };
+    BOOLEAN shouldUnload;
 
     if (!KphCommsIsConnected())
         return STATUS_SUCCESS;
+
+    if (PhGetIntegerSetting(L"KsiEnableUnloadProtection"))
+        KphReleaseDriverUnloadProtection(NULL, NULL);
+
+    if (PhGetIntegerSetting(L"KsiUnloadOnExit"))
+    {
+        ULONG clientCount;
+
+        if (!NT_SUCCESS(status = KphGetConnectedClientCount(&clientCount)))
+            return status;
+
+        shouldUnload = (clientCount == 1);
+    }
+    else
+    {
+        shouldUnload = FALSE;
+    }
+
+    KphCommsStop();
+
+#ifdef DEBUG
+    KsiDebugLogDestroy();
+#endif
+
+    if (!shouldUnload)
+        return STATUS_SUCCESS;
+
     if (!(ksiServiceName = PhGetKsiServiceName()))
         return STATUS_UNSUCCESSFUL;
 
@@ -766,10 +797,6 @@ NTSTATUS PhDestroyKsi(
     config.EnableNativeLoad = KsiEnableLoadNative;
     config.EnableFilterLoad = KsiEnableLoadFilter;
     status = KphServiceStop(&config);
-
-#ifdef DEBUG
-    KsiDebugLogDestroy();
-#endif
 
     return status;
 }

@@ -159,12 +159,12 @@ BOOLEAN PhShowRunFileDialog(
 {
     // Note: Task Manager launches the command prompt instead of RunFileDlg
     // when holding CTRL and selecting the 'Run New Task' menu. (dmex)
-
-    if (PhGetKeyState(VK_CONTROL))
-    {
-        if (PhRunAsExecuteCommandPrompt(ParentWindowHandle))
-            return TRUE;
-    }
+    // Todo: The CTRL key is required for the menu hotkey. (GH #1859)
+    //if (PhGetKeyState(VK_CONTROL))
+    //{
+    //    if (PhRunAsExecuteCommandPrompt(ParentWindowHandle))
+    //        return TRUE;
+    //}
 
     if (PhDialogBox(
         PhInstanceHandle,
@@ -1267,7 +1267,7 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
                     }
                     else if (status != STATUS_TIMEOUT)
                     {
-                        PhRecentListAddString(hwndDlg, PhGetString(program));
+                        PhRecentListAddCommand(&program->sr);
                         //PhSetStringSetting2(L"RunAsProgram", &program->sr);
                         PhSetStringSetting2(L"RunAsUserName", &username->sr);
                         EndDialog(hwndDlg, IDOK);

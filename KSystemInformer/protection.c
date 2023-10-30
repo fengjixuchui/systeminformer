@@ -15,11 +15,6 @@
 
 #include <trace.h>
 
-static UNICODE_STRING KphpImageLoadApcTypeName = RTL_CONSTANT_STRING(L"KphImageLoadApc");
-static PKPH_OBJECT_TYPE KphpImageLoadApcType = NULL;
-
-PAGED_FILE();
-
 typedef struct _KPH_ENUM_FOR_PROTECTION
 {
     PKPH_PROCESS_CONTEXT ProcessEnum;
@@ -41,6 +36,15 @@ typedef struct _KPH_IMAGE_LOAD_APC_INIT
     PVOID ImageBase;
     PFILE_OBJECT FileObject;
 } KPH_IMAGE_LOAD_APC_INIT, *PKPH_IMAGE_LOAD_APC_INIT;
+
+static UNICODE_STRING KphpImageLoadApcTypeName = RTL_CONSTANT_STRING(L"KphImageLoadApc");
+static PKPH_OBJECT_TYPE KphpImageLoadApcType = NULL;
+
+
+PAGED_FILE();
+
+static KPH_REFERENCE KphpDriverUnloadProtectionRef = { 0 };
+static PVOID KphpDriverUnloadPreviousRoutine = NULL;
 
 /**
  * \brief Allocates an image load APC object.
@@ -145,28 +149,6 @@ VOID KSIAPI KphpFreeImageLoadApc(
 }
 
 /**
- * \brief Initializes the protection infrastructure.
- */
-_IRQL_requires_max_(PASSIVE_LEVEL)
-VOID KphInitializeProtection(
-    VOID
-    )
-{
-    KPH_OBJECT_TYPE_INFO typeInfo;
-
-    PAGED_CODE_PASSIVE();
-
-    typeInfo.Allocate = KphpAllocateImageLoadApc;
-    typeInfo.Initialize = KphpInitializeImageLoadApc;
-    typeInfo.Delete = KphpDeleteImageLoadApc;
-    typeInfo.Free = KphpFreeImageLoadApc;
-
-    KphCreateObjectType(&KphpImageLoadApcTypeName,
-                        &typeInfo,
-                        &KphpImageLoadApcType);
-}
-
-/**
  * \brief Checks if object protections should be suppressed.
  *
  * \param[in] Actor The actor process.
@@ -230,7 +212,7 @@ BOOLEAN KphpShouldSuppressObjectProtections(
 _Function_class_(KPH_ENUM_PROCESS_HANDLES_CALLBACK)
 _IRQL_requires_max_(PASSIVE_LEVEL)
 _Must_inspect_result_
-BOOLEAN KSIAPI KphEnumProcessHandlesForProtection(
+BOOLEAN KSIAPI KphpEnumProcessHandlesForProtection(
     _Inout_ PHANDLE_TABLE_ENTRY HandleTableEntry,
     _In_ HANDLE Handle,
     _In_opt_ PVOID Parameter
@@ -348,7 +330,7 @@ BOOLEAN KSIAPI KphEnumProcessHandlesForProtection(
 _Function_class_(KPH_ENUM_PROCESS_CONTEXTS_CALLBACK)
 _IRQL_requires_max_(PASSIVE_LEVEL)
 _Must_inspect_result_
-BOOLEAN KSIAPI KphEnumProcessContextsForProtection(
+BOOLEAN KSIAPI KphpEnumProcessContextsForProtection(
     _In_ PKPH_PROCESS_CONTEXT Process,
     _In_opt_ PVOID Parameter
     )
@@ -370,7 +352,7 @@ BOOLEAN KSIAPI KphEnumProcessContextsForProtection(
     parameter->ProcessEnum = Process;
 
     status = KphEnumerateProcessHandlesEx(Process->EProcess,
-                                          KphEnumProcessHandlesForProtection,
+                                          KphpEnumProcessHandlesForProtection,
                                           parameter);
     if (status == STATUS_NOINTERFACE)
     {
@@ -520,7 +502,7 @@ NTSTATUS KphStartProtectingProcess(
     context.Status = STATUS_SUCCESS;
     context.Process = Process;
 
-    KphEnumerateProcessContexts(KphEnumProcessContextsForProtection, &context);
+    KphEnumerateProcessContexts(KphpEnumProcessContextsForProtection, &context);
 
     status = context.Status;
 
@@ -782,7 +764,6 @@ Exit:
     {
         KphDereferenceObject(actor);
     }
-
 }
 
 /**
@@ -1308,7 +1289,6 @@ Exit:
     {
         KphFreeNameFileObject(fileName);
     }
-
 }
 
 /**
@@ -1527,5 +1507,187 @@ VOID KphApplyImageProtections(
 Exit:
 
     KphReleaseRWLock(&Process->ProtectionLock);
+}
 
+/**
+ * \brief Acquires a reference to the driver unload protection. Enables driver
+ * unload protection if this is the first reference.
+ *
+ * \param[out] PreviousCount Optionally set to the previous reference count.
+ *
+ * \return Successful or errant status.
+ */
+_IRQL_requires_max_(APC_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphAcquireDriverUnloadProtection(
+    _Out_opt_ PLONG PreviousCount
+    )
+{
+    NTSTATUS status;
+    LONG previousCount;
+
+    PAGED_CODE();
+
+    status = KphAcquireReference(&KphpDriverUnloadProtectionRef,
+                                 &previousCount);
+    if (!NT_SUCCESS(status))
+    {
+        KphTracePrint(TRACE_LEVEL_ERROR,
+                      PROTECTION,
+                      "KphAcquireReference failed: %!STATUS!",
+                      status);
+
+        previousCount = 0;
+        goto Exit;
+    }
+
+    KphTracePrint(TRACE_LEVEL_VERBOSE,
+                  PROTECTION,
+                  "Acquired driver unload protection (%ld)",
+                  previousCount + 1);
+
+    if (previousCount == 0)
+    {
+#pragma prefast(push)
+#pragma prefast(disable : 28175)
+
+        NT_ASSERT(KphDriverObject->DriverUnload);
+        NT_ASSERT(!KphpDriverUnloadPreviousRoutine);
+
+        KphpDriverUnloadPreviousRoutine = InterlockedExchangePointer(
+                               (volatile PVOID*)&KphDriverObject->DriverUnload,
+                               NULL);
+
+        NT_ASSERT(!KphDriverObject->DriverUnload);
+        NT_ASSERT(KphpDriverUnloadPreviousRoutine);
+
+#pragma prefast(pop)
+
+        KphTracePrint(TRACE_LEVEL_INFORMATION,
+                      PROTECTION,
+                      "Driver unload protection activated");
+    }
+
+Exit:
+
+    if (PreviousCount)
+    {
+        *PreviousCount = previousCount;
+    }
+
+    return STATUS_SUCCESS;
+}
+
+/**
+ * \brief Releases a reference to the driver unload protection. Disables driver
+ * unload protection if this is the last reference.
+ *
+ * \param[out] PreviousCount Optionally set to the previous reference count.
+ *
+ * \return Successful or errant status.
+ */
+_IRQL_requires_max_(APC_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphReleaseDriverUnloadProtection(
+    _Out_opt_ PLONG PreviousCount
+    )
+{
+    NTSTATUS status;
+    LONG previousCount;
+
+    PAGED_CODE();
+
+    status = KphReleaseReference(&KphpDriverUnloadProtectionRef,
+                                 &previousCount);
+    if (!NT_SUCCESS(status))
+    {
+        KphTracePrint(TRACE_LEVEL_ERROR,
+                      PROTECTION,
+                      "KphReleaseReference failed: %!STATUS!",
+                      status);
+
+        previousCount = 0;
+        goto Exit;
+    }
+
+    KphTracePrint(TRACE_LEVEL_VERBOSE,
+                  PROTECTION,
+                  "Released driver unload protection (%ld)",
+                  previousCount - 1);
+
+    if (previousCount == 1)
+    {
+#pragma prefast(push)
+#pragma prefast(disable : 28175)
+
+        NT_ASSERT(!KphDriverObject->DriverUnload);
+        NT_ASSERT(KphpDriverUnloadPreviousRoutine);
+
+        KphpDriverUnloadPreviousRoutine = InterlockedExchangePointer(
+                               (volatile PVOID*)&KphDriverObject->DriverUnload,
+                               KphpDriverUnloadPreviousRoutine);
+
+        NT_ASSERT(KphDriverObject->DriverUnload);
+        NT_ASSERT(!KphpDriverUnloadPreviousRoutine);
+
+#pragma prefast(pop)
+
+        KphTracePrint(TRACE_LEVEL_INFORMATION,
+                      PROTECTION,
+                      "Driver unload protection deactivated");
+    }
+
+Exit:
+
+    if (PreviousCount)
+    {
+        *PreviousCount = previousCount;
+    }
+
+    return status;
+}
+
+/**
+ * \brief Retrieves the current driver unload protection reference count.
+ *
+ * \details If the driver unload protection reference count is greater than
+ * zero, the driver unload protection is active.
+ *
+ * \return The current driver unload protection reference count.
+ */
+_IRQL_requires_max_(APC_LEVEL)
+LONG KphGetDriverUnloadProtectionCount(
+    VOID
+    )
+{
+    LONG count;
+
+    PAGED_CODE();
+
+    count = KphpDriverUnloadProtectionRef.Count;
+    MemoryBarrier();
+
+    return count;
+}
+
+/**
+ * \brief Initializes the protection infrastructure.
+ */
+_IRQL_requires_max_(PASSIVE_LEVEL)
+VOID KphInitializeProtection(
+    VOID
+    )
+{
+    KPH_OBJECT_TYPE_INFO typeInfo;
+
+    PAGED_CODE_PASSIVE();
+
+    typeInfo.Allocate = KphpAllocateImageLoadApc;
+    typeInfo.Initialize = KphpInitializeImageLoadApc;
+    typeInfo.Delete = KphpDeleteImageLoadApc;
+    typeInfo.Free = KphpFreeImageLoadApc;
+
+    KphCreateObjectType(&KphpImageLoadApcTypeName,
+                        &typeInfo,
+                        &KphpImageLoadApcType);
 }

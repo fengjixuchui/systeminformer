@@ -26,6 +26,7 @@ static PAGED_LOOKASIDE_LIST KphpMessageLookaside;
 static NPAGED_LOOKASIDE_LIST KphpNPagedMessageLookaside;
 static KPH_RWLOCK KphpConnectedClientLock;
 static LIST_ENTRY KphpConnectedClientList;
+static ULONG KphpConnectedClientCount = 0;
 static NPAGED_LOOKASIDE_LIST KphpMessageQueueItemLookaside;
 static KQUEUE KphpMessageQueue;
 static PKTHREAD* KphpMessageQueueThreads = NULL;
@@ -47,15 +48,6 @@ typedef struct _KPHM_QUEUE_ITEM
     PEPROCESS TargetClientProcess;
     PKPH_MESSAGE Message;
 } KPHM_QUEUE_ITEM, *PKPHM_QUEUE_ITEM;
-
-typedef struct _KPH_CLIENT
-{
-    LIST_ENTRY Entry;
-    PKPH_PROCESS_CONTEXT Process;
-    PFLT_PORT Port;
-} KPH_CLIENT, *PKPH_CLIENT;
-
-typedef const KPH_CLIENT* PCKPH_CLIENT;
 
 /**
  * \brief Allocates a message queue item.
@@ -279,11 +271,30 @@ VOID KSIAPI KphpDeleteClientObject(
     _Inout_ PVOID Object
     )
 {
+    NTSTATUS status;
     PKPH_CLIENT client;
 
     PAGED_CODE();
 
     client = Object;
+
+    if (client->DriverUnloadProtectionRef.Count)
+    {
+        //
+        // The client is being destroyed while it has acquired driver unload
+        // protection. The communication handlers only acquire or release the
+        // protection once for each client, so we only need to call this once
+        // here.
+        //
+        status = KphReleaseDriverUnloadProtection(NULL);
+        if (!NT_SUCCESS(status))
+        {
+            KphTracePrint(TRACE_LEVEL_ERROR,
+                          COMMS,
+                          "KphReleaseDriverUnloadProtection failed: %!STATUS!",
+                          status);
+        }
+    }
 
     KphDereferenceObject(client->Process);
 
@@ -402,6 +413,7 @@ NTSTATUS FLTAPI KphpCommsConnectNotifyCallback(
     KphReferenceObject(client);
     KphAcquireRWLockExclusive(&KphpConnectedClientLock);
     InsertTailList(&KphpConnectedClientList, &client->Entry);
+    KphpConnectedClientCount++;
     KphReleaseRWLock(&KphpConnectedClientLock);
 
     KphTracePrint(TRACE_LEVEL_INFORMATION,
@@ -450,6 +462,7 @@ VOID FLTAPI KphpCommsDisconnectNotifyCallback(
 
     KphAcquireRWLockExclusive(&KphpConnectedClientLock);
     RemoveEntryList(&client->Entry);
+    KphpConnectedClientCount--;
     KphReleaseRWLock(&KphpConnectedClientLock);
 
     KphTracePrint(TRACE_LEVEL_INFORMATION,
@@ -644,7 +657,7 @@ NTSTATUS FLTAPI KphpCommsMessageNotifyCallback(
     NT_ASSERT(handler->RequiredState);
 
     processState = KphGetProcessState(client->Process);
-    requiredState = handler->RequiredState(msg);
+    requiredState = handler->RequiredState(client, msg);
 
     if ((processState & requiredState) != requiredState)
     {
@@ -664,7 +677,7 @@ NTSTATUS FLTAPI KphpCommsMessageNotifyCallback(
         goto Exit;
     }
 
-    status = handler->Handler(msg);
+    status = handler->Handler(client, msg);
     if (!NT_SUCCESS(status))
     {
         goto Exit;
@@ -763,6 +776,27 @@ NTSTATUS KphpBuildCommsSecurityDescriptor(
 Exit:
 
     return status;
+}
+
+/**
+ * \brief Gets the number of connected clients.
+ *
+ * \return Number of connected clients.
+ */
+_IRQL_requires_max_(APC_LEVEL)
+ULONG KphGetConnectedClientCount(
+    VOID
+    )
+{
+    ULONG count;
+
+    PAGED_CODE();
+
+    KphAcquireRWLockShared(&KphpConnectedClientLock);
+    count = KphpConnectedClientCount;
+    KphReleaseRWLock(&KphpConnectedClientLock);
+
+    return count;
 }
 
 /**

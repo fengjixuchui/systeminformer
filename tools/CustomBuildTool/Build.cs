@@ -59,8 +59,16 @@ namespace CustomBuildTool
 
             Build.TimeStart = DateTime.Now;
             Build.BuildWorkingFolder = Environment.CurrentDirectory;
-            Build.BuildNightly = !string.IsNullOrWhiteSpace(Win32.GetEnvironmentVariable("%APPVEYOR_BUILD_API%"));
             Build.BuildOutputFolder = Utils.GetOutputDirectoryPath();
+
+            var buildDef = Win32.GetEnvironmentVariable("%BUILD_DEFINITIONNAME%");
+            if (!string.IsNullOrWhiteSpace(buildDef))
+            {
+                if (buildDef.Contains("nightly", StringComparison.OrdinalIgnoreCase))
+                {
+                    Build.BuildNightly = true;
+                }
+            }
 
             //{
             //    VisualStudioInstance instance = Utils.GetVisualStudioInstance();
@@ -201,6 +209,7 @@ namespace CustomBuildTool
 
             if (!string.IsNullOrWhiteSpace(currentGitDir) && !string.IsNullOrWhiteSpace(currentGitPath))
             {
+                Win32.ShellExecute(currentGitPath, $"{currentGitDir} fetch --unshallow");
                 BuildBranch = Win32.ShellExecute(currentGitPath, $"{currentGitDir} rev-parse --abbrev-ref HEAD").Trim();
                 BuildCommit = Win32.ShellExecute(currentGitPath, $"{currentGitDir} rev-parse HEAD").Trim();
                 BuildCount = Win32.ShellExecute(currentGitPath, $"{currentGitDir} rev-list --count {BuildBranch}").Trim();
@@ -718,6 +727,50 @@ namespace CustomBuildTool
             return true;
         }
 
+        public static bool ResignFiles()
+        {
+            var files = new List<string>();
+            foreach (string sigFile in Directory.EnumerateFiles("bin", "*.sig", SearchOption.AllDirectories))
+            {
+                var file = Path.ChangeExtension(sigFile, ".dll");
+
+                if (File.Exists(file))
+                    files.Add(file);
+
+                file = Path.ChangeExtension(sigFile, ".exe");
+
+                if (File.Exists(file))
+                    files.Add(file);
+            }
+
+            if (BuildNightly && !File.Exists(Verify.GetPath("kph.key")))
+            {
+                string kphKey = Win32.GetEnvironmentVariable("%KPH_BUILD_KEY%");
+
+                if (!string.IsNullOrWhiteSpace(kphKey))
+                {
+                    Verify.Decrypt(Verify.GetPath("kph.s"), Verify.GetPath("kph.key"), kphKey);
+                }
+
+                if (!File.Exists(Verify.GetPath("kph.key")))
+                {
+                    Program.PrintColorMessage("[SKIPPED] kph.key not found.", ConsoleColor.Yellow);
+                    return true;
+                }
+            }
+
+            if (File.Exists(Verify.GetPath("kph.key")))
+            {
+                foreach (string file in files)
+                {
+                    if (!Verify.CreateSignatureFile(Verify.GetPath("kph.key"), file, false))
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
         public static bool BuildSdk(BuildFlags Flags)
         {
             try
@@ -1035,7 +1088,7 @@ namespace CustomBuildTool
                 if (!string.IsNullOrWhiteSpace(BuildCount))
                     compilerOptions.Append($"PHAPP_VERSION_BUILD=\"{BuildCount}\"");
 
-                commandLine.Append("/m /nologo /nodereuse:false /verbosity:quiet ");
+                commandLine.Append("/m /nologo /nodereuse:false /verbosity:quiet /restore ");
                 commandLine.Append("/p:Platform=Win32 /p:Configuration=" + (Flags.HasFlag(BuildFlags.BuildDebug) ? "Debug " : "Release "));
                 commandLine.Append($"/p:ExternalCompilerOptions=\"{compilerOptions.ToString()}\" ");
                 commandLine.Append(Solution);
@@ -1144,51 +1197,6 @@ namespace CustomBuildTool
             return true;
         }
 
-        //public static bool BuildVersionInfo(BuildFlags Flags)
-        //{
-        //    if (!File.Exists("tools\\versioning\\version.rc"))
-        //        return true;
-        //
-        //    StringBuilder commandLine = new StringBuilder();
-        //    string windowsSdkPath = Utils.GetWindowsSdkPath();
-        //    string windowsSdkIncludePath = Utils.GetWindowsSdkIncludePath();
-        //    string resIncludePath = Path.GetFullPath("systeminformer");
-        //    string rcExePath = windowsSdkPath + "\\x64\\rc.exe";
-        //
-        //    if (!File.Exists(rcExePath))
-        //    {
-        //        Program.PrintColorMessage("Unable to find the resource compiler.", ConsoleColor.Red);
-        //        return true;
-        //    }
-        //
-        //    commandLine.Append($"/nologo /v /i \"{windowsSdkIncludePath}\\um\" /i \"{windowsSdkIncludePath}\\shared\" /i \"{resIncludePath}\" ");
-        //
-        //    if (Flags.HasFlag(BuildFlags.BuildApi))
-        //        commandLine.Append(" /d \"PH_BUILD_API\" ");
-        //    if (!string.IsNullOrWhiteSpace(BuildCommit))
-        //        commandLine.Append($"/d \"PHAPP_VERSION_COMMITHASH=\"{BuildCommit.AsSpan(0, 7)}\"\" ");
-        //    if (!string.IsNullOrWhiteSpace(BuildRevision))
-        //        commandLine.Append($"/d \"PHAPP_VERSION_REVISION=\"{BuildRevision}\"\" ");
-        //    if (!string.IsNullOrWhiteSpace(BuildCount))
-        //        commandLine.Append($"/d \"PHAPP_VERSION_BUILD=\"{BuildCount}\"\" ");
-        //
-        //    commandLine.Append("/fo tools\\versioning\\version.res tools\\versioning\\version.rc");
-        //
-        //    int errorcode = Win32.CreateProcess(
-        //        rcExePath,
-        //        commandLine.ToString(),
-        //        out string errorstring
-        //        );
-        //
-        //    if (errorcode != 0)
-        //    {
-        //        Program.PrintColorMessage($"[ERROR] ({errorcode}) {errorstring}", ConsoleColor.Red, true, Flags | BuildFlags.BuildVerbose);
-        //        return false;
-        //    }
-        //
-        //    return true;
-        //}
-
         public static bool BuildDeployUpdateConfig()
         {
             string buildBuildId;
@@ -1205,9 +1213,9 @@ namespace CustomBuildTool
             if (!BuildNightly)
                 return true;
 
-            buildBuildId = Win32.GetEnvironmentVariable("%APPVEYOR_BUILD_ID%");
-            buildPostSfUrl = Win32.GetEnvironmentVariable("%APPVEYOR_BUILD_SF_API%");
-            buildPostSfApiKey = Win32.GetEnvironmentVariable("%APPVEYOR_BUILD_SF_KEY%");
+            buildBuildId = Win32.GetEnvironmentVariable("%BUILD_BUILDID%");
+            buildPostSfUrl = Win32.GetEnvironmentVariable("%BUILD_SF_API%");
+            buildPostSfApiKey = Win32.GetEnvironmentVariable("%BUILD_SF_KEY%");
             buildBinFileLength = 0;
             buildSetupFileLength = 0;
             buildBinHash = null;
@@ -1313,11 +1321,11 @@ namespace CustomBuildTool
                     BuildVersion = BuildVersion,
                     BuildCommit = BuildCommit,
                     BuildId = buildBuildId,
-                    BinUrl = binziplink, // $"https://ci.appveyor.com/api/buildjobs/{buildJobId}/artifacts/systeminformer-{BuildVersion}-bin.zip",
+                    BinUrl = binziplink,
                     BinLength = buildBinFileLength.ToString(),
                     BinHash = buildBinHash,
                     BinSig = BuildBinSig,
-                    SetupUrl = setupexelink, // $"https://ci.appveyor.com/api/buildjobs/{buildJobId}/artifacts/systeminformer-{BuildVersion}-setup.exe",
+                    SetupUrl = setupexelink,
                     SetupLength = buildSetupFileLength.ToString(),
                     SetupHash = buildSetupHash,
                     SetupSig = BuildSetupSig,
@@ -1360,126 +1368,8 @@ namespace CustomBuildTool
                 return false;
             }
 
-            if (!AppVeyor.UpdateBuildVersion(BuildVersion)) // Update Appveyor build version string.
-            {
-                return false;
-            }
-
             return true;
         }
-
-        //public static bool BuildDeployUploadArtifacts()
-        //{
-        //    string buildPostUrl;
-        //    string buildPostKey;
-        //    string buildPostName;
-        //
-        //    if (!BuildNightly)
-        //        return true;
-        //
-        //    buildPostUrl = Win32.GetEnvironmentVariable("%APPVEYOR_NIGHTLY_URL%");
-        //    buildPostKey = Win32.GetEnvironmentVariable("%APPVEYOR_NIGHTLY_KEY%");
-        //    buildPostName = Win32.GetEnvironmentVariable("%APPVEYOR_NIGHTLY_NAME%");
-        //
-        //    if (string.IsNullOrWhiteSpace(buildPostUrl))
-        //        return false;
-        //    if (string.IsNullOrWhiteSpace(buildPostKey))
-        //        return false;
-        //    if (string.IsNullOrWhiteSpace(buildPostName))
-        //        return false;
-        //
-        //    Program.PrintColorMessage(string.Empty, ConsoleColor.Black);
-        //
-        //    try
-        //    {
-        //        foreach (BuildFile file in BuildConfig.Build_Release_Files)
-        //        {
-        //            string sourceFile = BuildOutputFolder + file.FileName;
-        //
-        //            if (File.Exists(sourceFile))
-        //            {
-        //                string filename;
-        //                FtpWebRequest request;
-        //
-        //                filename = Path.GetFileName(sourceFile);
-        //                //filename = filename.Replace("-build-", $"-{BuildVersion}-", StringComparison.OrdinalIgnoreCase);
-        //
-        //                #pragma warning disable SYSLIB0014 // Type or member is obsolete
-        //                request = (FtpWebRequest)WebRequest.Create(buildPostUrl + filename);
-        //                #pragma warning restore SYSLIB0014 // Type or member is obsolete
-        //                request.Credentials = new NetworkCredential(buildPostKey, buildPostName);
-        //                request.Method = WebRequestMethods.Ftp.UploadFile;
-        //                request.Timeout = System.Threading.Timeout.Infinite;
-        //                request.EnableSsl = true;
-        //                request.UsePassive = true;
-        //                request.UseBinary = true;
-        //
-        //                Program.PrintColorMessage($"Uploading {filename}...", ConsoleColor.Cyan, true);
-        //
-        //                using (FileStream fileStream = File.OpenRead(sourceFile))
-        //                using (BufferedStream localStream = new BufferedStream(fileStream))
-        //                using (BufferedStream remoteStream = new BufferedStream(request.GetRequestStream()))
-        //                {
-        //                    localStream.CopyTo(remoteStream);
-        //                }
-        //
-        //                using (FtpWebResponse response = (FtpWebResponse)request.GetResponse())
-        //                {
-        //                    if (response.StatusCode != FtpStatusCode.CommandOK && response.StatusCode != FtpStatusCode.ClosingData)
-        //                    {
-        //                        Program.PrintColorMessage($"[HttpWebResponse] {response.StatusDescription}", ConsoleColor.Red);
-        //                        return false;
-        //                    }
-        //                }
-        //            }
-        //        }
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Program.PrintColorMessage($"[UploadBuildWebServiceAsync-Exception] {ex.Message}", ConsoleColor.Red);
-        //        return false;
-        //    }
-        //
-        //    //try
-        //    //{
-        //    //    foreach (BuildFile file in BuildConfig.Build_Release_Files)
-        //    //    {
-        //    //        if (!file.UploadNightly)
-        //    //            continue;
-        //    //
-        //    //        string sourceFile = BuildOutputFolder + file.FileName;
-        //    //
-        //    //        if (File.Exists(sourceFile))
-        //    //        {
-        //    //            bool uploaded;
-        //    //            string fileName;
-        //    //
-        //    //            fileName = sourceFile.Replace("-build-", $"-{BuildVersion}-", StringComparison.OrdinalIgnoreCase);
-        //    //
-        //    //            File.Move(sourceFile, fileName, true);
-        //    //            uploaded = AppVeyor.UploadFile(fileName);
-        //    //            File.Move(fileName, sourceFile, true);
-        //    //
-        //    //            if (!uploaded)
-        //    //            {
-        //    //                Program.PrintColorMessage("[WebServiceAppveyorUploadFile]", ConsoleColor.Red);
-        //    //                return false;
-        //    //            }
-        //    //        }
-        //    //        else
-        //    //        {
-        //    //            Program.PrintColorMessage("[SKIPPED] missing file: " + sourceFile, ConsoleColor.Yellow);
-        //    //        }
-        //    //    }
-        //    //}
-        //    //catch (Exception ex)
-        //    //{
-        //    //    Program.PrintColorMessage("[WebServiceAppveyorPushArtifact] " + ex, ConsoleColor.Red);
-        //    //    return false;
-        //    //}
-        //
-        //    return true;
-        //}
 
         public static GithubRelease BuildDeployUploadGithubConfig()
         {

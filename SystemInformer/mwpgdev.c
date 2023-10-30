@@ -10,10 +10,11 @@
  */
 
 #include <phapp.h>
-#include <mainwnd.h>
 #include <devprv.h>
+#include <settings.h>
 
 #include <phplug.h>
+#include <mainwnd.h>
 #include <mainwndp.h>
 
 #include <devguid.h>
@@ -48,7 +49,7 @@ PPH_STRING PhpNotifyDeviceGetString(
     PPH_STRING string;
 
     string = PhGetDeviceProperty(Node, Class)->AsString;
-    if (!string || string->Length == 0)
+    if (PhIsNullOrEmptyString(string))
         return NULL;
 
     sr = string->sr;
@@ -111,10 +112,13 @@ VOID NTAPI PhpDeviceProviderCallbackHandler(
     PhDereferenceObject(tree);
 }
 
-VOID PhMwpInitializesDeviceNotifications(
+VOID PhMwpInitializeDeviceNotifications(
     VOID
     )
 {
+    if (!PhGetIntegerSetting(L"EnableDeviceNotifySupport")) // EnableDeviceNotificationSupport
+        return;
+
     if (!PhDeviceProviderInitialization())
         return;
 
