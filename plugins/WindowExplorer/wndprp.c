@@ -176,28 +176,30 @@ static STRING_INTEGER_PAIR WepStylePairs[] =
 
 static STRING_INTEGER_PAIR WepExtendedStylePairs[] =
 {
-    DEFINE_PAIR(WS_EX_DLGMODALFRAME),
-    DEFINE_PAIR(WS_EX_NOPARENTNOTIFY),
-    DEFINE_PAIR(WS_EX_TOPMOST),
-    DEFINE_PAIR(WS_EX_ACCEPTFILES),
-    DEFINE_PAIR(WS_EX_TRANSPARENT),
-    DEFINE_PAIR(WS_EX_MDICHILD),
-    DEFINE_PAIR(WS_EX_TOOLWINDOW),
-    DEFINE_PAIR(WS_EX_WINDOWEDGE),
-    DEFINE_PAIR(WS_EX_CLIENTEDGE),
-    DEFINE_PAIR(WS_EX_CONTEXTHELP),
-    DEFINE_PAIR(WS_EX_RIGHT),
-    DEFINE_PAIR(WS_EX_RTLREADING),
-    DEFINE_PAIR(WS_EX_LEFTSCROLLBAR),
-    DEFINE_PAIR(WS_EX_CONTROLPARENT),
-    DEFINE_PAIR(WS_EX_STATICEDGE),
-    DEFINE_PAIR(WS_EX_APPWINDOW),
-    DEFINE_PAIR(WS_EX_LAYERED),
-    DEFINE_PAIR(WS_EX_NOINHERITLAYOUT),
-    DEFINE_PAIR(WS_EX_NOREDIRECTIONBITMAP),
-    DEFINE_PAIR(WS_EX_LAYOUTRTL),
-    DEFINE_PAIR(WS_EX_COMPOSITED),
-    DEFINE_PAIR(WS_EX_NOACTIVATE),
+    DEFINE_PAIR(WS_EX_DLGMODALFRAME),       // 0x1
+    DEFINE_PAIR(WS_EX_NOPARENTNOTIFY),      // 0x4
+    DEFINE_PAIR(WS_EX_TOPMOST),             // 0x8
+    DEFINE_PAIR(WS_EX_ACCEPTFILES),         // 0x10
+    DEFINE_PAIR(WS_EX_TRANSPARENT),         // 0x20
+    DEFINE_PAIR(WS_EX_MDICHILD),            // 0x40
+    DEFINE_PAIR(WS_EX_TOOLWINDOW),          // 0x80
+    DEFINE_PAIR(WS_EX_WINDOWEDGE),          // 0x100
+    DEFINE_PAIR(WS_EX_PALETTEWINDOW),       // 0x188
+    DEFINE_PAIR(WS_EX_CLIENTEDGE),          // 0x200
+    DEFINE_PAIR(WS_EX_OVERLAPPEDWINDOW),    // 0x300
+    DEFINE_PAIR(WS_EX_CONTEXTHELP),         // 0x400
+    DEFINE_PAIR(WS_EX_RIGHT),               // 0x1000
+    DEFINE_PAIR(WS_EX_RTLREADING),          // 0x2000
+    DEFINE_PAIR(WS_EX_LEFTSCROLLBAR),       // 0x4000
+    DEFINE_PAIR(WS_EX_CONTROLPARENT),       // 0x10000
+    DEFINE_PAIR(WS_EX_STATICEDGE),          // 0x20000
+    DEFINE_PAIR(WS_EX_APPWINDOW),           // 0x40000
+    DEFINE_PAIR(WS_EX_LAYERED),             // 0x80000
+    DEFINE_PAIR(WS_EX_NOINHERITLAYOUT),     // 0x100000
+    DEFINE_PAIR(WS_EX_NOREDIRECTIONBITMAP), // 0x200000
+    DEFINE_PAIR(WS_EX_LAYOUTRTL),           // 0x400000
+    DEFINE_PAIR(WS_EX_COMPOSITED),          // 0x2000000
+    DEFINE_PAIR(WS_EX_NOACTIVATE),          // 0x8000000
 };
 
 static STRING_INTEGER_PAIR WepClassStylePairs[] =
@@ -1983,6 +1985,8 @@ INT_PTR CALLBACK WepWindowPropListDlgProc(
                             break;
                         case PHAPP_IDC_DELETE:
                             {
+                                NTSTATUS status;
+
                                 if (PhGetIntegerSetting(L"EnableWarnings") && !PhShowConfirmMessage(
                                     hwndDlg,
                                     L"remove",
@@ -1996,9 +2000,9 @@ INT_PTR CALLBACK WepWindowPropListDlgProc(
 
                                 RemoveProp(context->WindowHandle, PhGetString(listviewItems[0]));
 
-                                ULONG status = GetLastError();
-                                if (status != ERROR_SUCCESS)
-                                    PhShowStatus(hwndDlg, L"Unable to remove the window property.", 0, status);
+                                status = PhGetLastWin32ErrorAsNtStatus();
+                                if (status != STATUS_CANCELLED)
+                                    PhShowStatus(hwndDlg, L"Unable to remove the window property.", status, 0);
 
                                 //WepRefreshWindowProps(context);
                                 PvRefreshChildWindows(hwndDlg);

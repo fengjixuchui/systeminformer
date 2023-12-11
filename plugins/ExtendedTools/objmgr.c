@@ -502,6 +502,29 @@ NTSTATUS EtEnumCurrentDirectoryObjects(
     return STATUS_SUCCESS;
 }
 
+VOID EtObjectManagerFreeListViewItems(
+    _In_ POBJECT_CONTEXT Context
+    )
+{
+    INT index = INT_ERROR;
+
+    while ((index = PhFindListViewItemByFlags(
+        Context->ListViewHandle,
+        index,
+        LVNI_ALL
+        )) != INT_ERROR)
+    {
+        POBJECT_ENTRY param;
+
+        if (PhGetListViewItemParam(Context->ListViewHandle, index, &param))
+        {
+            PhClearReference(&param->Name);
+            PhClearReference(&param->TypeName);
+            PhFree(param);
+        }
+    }
+}
+
 typedef struct _HANDLE_OPEN_CONTEXT
 {
     PPH_STRING CurrentPath;
@@ -859,6 +882,7 @@ INT_PTR CALLBACK WinObjDlgProc(
         break;
     case WM_DESTROY:
         {
+            EtObjectManagerFreeListViewItems(context);
             EtCleanupTreeViewItemParams(context, context->RootTreeObject);
 
             if (context->TreeImageList)
@@ -916,6 +940,7 @@ INT_PTR CALLBACK WinObjDlgProc(
                     context->SelectedTreeItem = TreeView_GetSelection(context->TreeViewHandle);
 
                     ExtendedListView_SetRedraw(context->ListViewHandle, FALSE);
+                    EtObjectManagerFreeListViewItems(context);
                     ListView_DeleteAllItems(context->ListViewHandle);
 
                     if (context->SelectedTreeItem == context->RootTreeObject)
@@ -1029,10 +1054,15 @@ INT_PTR CALLBACK WinObjDlgProc(
                             {
                             case 2:
                                 {
-                                    POBJECT_ENTRY entry = listviewItems[0];
+                                    POBJECT_ENTRY results = listviewItems[0];
                                     PHANDLE_OPEN_CONTEXT objectContext;
+                                    POBJECT_ENTRY entry;
                                     NTSTATUS status;
                                     HANDLE objectHandle;
+
+                                    entry = PhAllocateZero(sizeof(ET_OBJECT_ENTRY));
+                                    PhSetReference(&entry->Name, results->Name);
+                                    PhSetReference(&entry->TypeName, results->TypeName);
 
                                     objectContext = PhAllocateZero(sizeof(HANDLE_OPEN_CONTEXT));
                                     objectContext->CurrentPath = EtGetSelectedTreeViewPath(context);
