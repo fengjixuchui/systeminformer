@@ -92,6 +92,9 @@ VOID PhAddDefaultSettings(
     PhpAddStringSetting(L"FindObjTreeListColumns", L"");
     PhpAddIntegerPairSetting(L"FindObjWindowPosition", L"0,0");
     PhpAddScalableIntegerPairSetting(L"FindObjWindowSize", L"@96|550,420");
+    PhpAddStringSetting(L"ThreadStacksTreeListColumns", L"");
+    PhpAddIntegerPairSetting(L"ThreadStacksWindowPosition", L"0,0");
+    PhpAddScalableIntegerPairSetting(L"ThreadStacksWindowSize", L"@96|550,420");
     PhpAddStringSetting(L"FileBrowseExecutable", L"%SystemRoot%\\explorer.exe /select,\"%s\"");
     PhpAddIntegerSetting(L"FirstRun", L"1");
     PhpAddStringSetting(L"Font", L""); // null
@@ -341,14 +344,17 @@ VOID PhAddDefaultSettings(
     PhpAddStringSetting(L"KsiServiceName", L"");
     PhpAddStringSetting(L"KsiObjectName", L"");
     PhpAddStringSetting(L"KsiPortName", L"");
-    PhpAddStringSetting(L"KsiAltitude", L"385210.5");
+    PhpAddStringSetting(L"KsiAltitude", L"");
     PhpAddIntegerSetting(L"KsiDisableImageLoadProtection", L"0");
     PhpAddIntegerSetting(L"KsiEnableSplashScreen", L"0");
     PhpAddIntegerSetting(L"KsiEnableLoadNative", L"0");
     PhpAddIntegerSetting(L"KsiEnableLoadFilter", L"0");
-    PhpAddIntegerSetting(L"KsiUnloadOnExit", L"0");
+    PhpAddIntegerSetting(L"KsiUnloadOnExit", L"1");
     PhpAddIntegerSetting(L"KsiRandomizedPoolTag", L"0");
     PhpAddIntegerSetting(L"KsiEnableUnloadProtection", L"0");
+    PhpAddIntegerSetting(L"KsiDynDataNoEmbedded", L"0");
+    PhpAddIntegerSetting(L"KsiClientProcessProtectionLevel", L"0");
+    PhpAddStringSetting(L"KsiPreviousTemporaryDriverFile", L"");
 }
 
 VOID PhUpdateCachedSettings(

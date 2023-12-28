@@ -10021,7 +10021,7 @@ RtlUnsubscribeWnfStateChangeNotification(
 
 #if (PHNT_VERSION >= PHNT_WIN11)
 
-NTSYSAPI
+NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtCopyFileChunk(
@@ -10032,8 +10032,8 @@ NtCopyFileChunk(
     _In_ ULONG Length,
     _In_ PLARGE_INTEGER SourceOffset,
     _In_ PLARGE_INTEGER DestOffset,
-    _In_opt_ PGUID SourceKey,
-    _In_opt_ PGUID DestKey,
+    _In_opt_ PULONG SourceKey,
+    _In_opt_ PULONG DestKey,
     _In_ ULONG Flags
     );
 
