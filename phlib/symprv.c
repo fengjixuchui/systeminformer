@@ -56,7 +56,11 @@ VOID NTAPI PhpSymbolProviderDeleteProcedure(
     _In_ ULONG Flags
     );
 
-VOID PhpRegisterSymbolProvider(
+BOOLEAN PhpRegisterSymbolProvider(
+    _In_opt_ PPH_SYMBOL_PROVIDER SymbolProvider
+    );
+
+VOID PhpUnregisterSymbolProvider(
     _In_opt_ PPH_SYMBOL_PROVIDER SymbolProvider
     );
 
@@ -165,15 +169,7 @@ VOID NTAPI PhpSymbolProviderDeleteProcedure(
 
     symbolProvider->Terminating = TRUE;
 
-    if (SymCleanup_I)
-    {
-        PH_LOCK_SYMBOLS();
-
-        if (symbolProvider->IsRegistered)
-            SymCleanup_I(symbolProvider->ProcessHandle);
-
-        PH_UNLOCK_SYMBOLS();
-    }
+    PhpUnregisterSymbolProvider(symbolProvider);
 
     listEntry = symbolProvider->ModulesListHead.Flink;
 
@@ -510,7 +506,7 @@ VOID PhpSymbolProviderCompleteInitialization(
     }
 }
 
-VOID PhpRegisterSymbolProvider(
+BOOLEAN PhpRegisterSymbolProvider(
     _In_opt_ PPH_SYMBOL_PROVIDER SymbolProvider
     )
 {
@@ -536,7 +532,7 @@ VOID PhpRegisterSymbolProvider(
     }
 
     if (!SymbolProvider)
-        return;
+        return FALSE;
 
     if (PhBeginInitOnce(&SymbolProvider->InitOnce))
     {
@@ -554,7 +550,32 @@ VOID PhpRegisterSymbolProvider(
             SymbolProvider->IsRegistered = TRUE;
         }
 
+
         PhEndInitOnce(&SymbolProvider->InitOnce);
+    }
+
+    return SymbolProvider->IsRegistered;
+}
+
+VOID PhpUnregisterSymbolProvider(
+    _In_opt_ PPH_SYMBOL_PROVIDER SymbolProvider
+    )
+{
+    if (!SymbolProvider)
+        return;
+
+    if (SymCleanup_I)
+    {
+        if (SymbolProvider->IsRegistered)
+        {
+            PH_LOCK_SYMBOLS();
+
+            SymCleanup_I(SymbolProvider->ProcessHandle);
+
+            PH_UNLOCK_SYMBOLS();
+        }
+
+        SymbolProvider->IsRegistered = FALSE;
     }
 }
 
@@ -592,7 +613,8 @@ BOOLEAN PhGetLineFromAddress(
     ULONG displacement;
     PPH_STRING fileName;
 
-    PhpRegisterSymbolProvider(SymbolProvider);
+    if (!PhpRegisterSymbolProvider(SymbolProvider))
+        return FALSE;
 
     if (!SymGetLineFromAddrW64_I)
         return FALSE;
@@ -823,7 +845,8 @@ PPH_STRING PhGetSymbolFromAddress(
         return NULL;
     }
 
-    PhpRegisterSymbolProvider(SymbolProvider);
+    if (!PhpRegisterSymbolProvider(SymbolProvider))
+        return NULL;
 
     if (!SymFromAddrW_I)
         return NULL;
@@ -973,7 +996,8 @@ BOOLEAN PhGetSymbolFromName(
     UCHAR symbolInfoBuffer[FIELD_OFFSET(SYMBOL_INFOW, Name) + PH_MAX_SYMBOL_NAME_LEN * sizeof(WCHAR)];
     BOOL result;
 
-    PhpRegisterSymbolProvider(SymbolProvider);
+    if (!PhpRegisterSymbolProvider(SymbolProvider))
+        return FALSE;
 
     if (!SymFromNameW_I)
         return FALSE;
@@ -1094,7 +1118,8 @@ BOOLEAN PhLoadModuleSymbolProvider(
     PPH_AVL_LINKS existingLinks;
     PH_SYMBOL_MODULE lookupSymbolModule;
 
-    PhpRegisterSymbolProvider(SymbolProvider);
+    if (!PhpRegisterSymbolProvider(SymbolProvider))
+        return FALSE;
 
     if (!SymLoadModuleExW_I)
         return FALSE;
@@ -1161,7 +1186,8 @@ BOOLEAN PhLoadFileNameSymbolProvider(
     PPH_AVL_LINKS existingLinks;
     PH_SYMBOL_MODULE lookupSymbolModule;
 
-    PhpRegisterSymbolProvider(SymbolProvider);
+    if (!PhpRegisterSymbolProvider(SymbolProvider))
+        return FALSE;
 
     if (!SymLoadModuleExW_I)
         return FALSE;
@@ -2541,7 +2567,8 @@ BOOLEAN PhEnumerateSymbols(
     BOOL result;
     PH_ENUMERATE_SYMBOLS_CONTEXT enumContext;
 
-    PhpRegisterSymbolProvider(SymbolProvider);
+    if (!PhpRegisterSymbolProvider(SymbolProvider))
+        return FALSE;
 
     if (!SymEnumSymbolsW_I)
         SymEnumSymbolsW_I = PhGetDllProcedureAddress(L"dbghelp.dll", "SymEnumSymbolsW", 0);
@@ -2583,7 +2610,8 @@ BOOLEAN PhGetSymbolProviderDiaSource(
     BOOLEAN result;
     PVOID source; // IDiaDataSource COM interface
 
-    PhpRegisterSymbolProvider(SymbolProvider);
+    if (!PhpRegisterSymbolProvider(SymbolProvider))
+        return FALSE;
 
     if (!SymGetDiaSource_I)
         SymGetDiaSource_I = PhGetDllProcedureAddress(L"dbghelp.dll", "SymGetDiaSource", 0);
@@ -2620,7 +2648,8 @@ BOOLEAN PhGetSymbolProviderDiaSession(
     BOOLEAN result;
     PVOID session; // IDiaSession COM interface
 
-    PhpRegisterSymbolProvider(SymbolProvider);
+    if (!PhpRegisterSymbolProvider(SymbolProvider))
+        return FALSE;
 
     if (!SymGetDiaSession_I)
         SymGetDiaSession_I = PhGetDllProcedureAddress(L"dbghelp.dll", "SymGetDiaSession", 0);
@@ -2651,8 +2680,6 @@ VOID PhSymbolProviderFreeDiaString(
     _In_ PWSTR DiaString
     )
 {
-    //PhpRegisterSymbolProvider(SymbolProvider);
-
     if ((SymGetDiaSession_I || SymGetDiaSource_I) && !SymFreeDiaString_I)
         SymFreeDiaString_I = PhGetDllProcedureAddress(L"dbghelp.dll", "SymFreeDiaString", 0);
     if (!SymFreeDiaString_I)
@@ -2700,7 +2727,8 @@ PPH_STRING PhGetSymbolFromInlineContext(
         return NULL;
     }
 
-    PhpRegisterSymbolProvider(SymbolProvider);
+    if (!PhpRegisterSymbolProvider(SymbolProvider))
+        return FALSE;
 
     if (!SymFromInlineContextW_I)
         return NULL;
@@ -2844,7 +2872,8 @@ BOOLEAN PhGetLineFromInlineContext(
     ULONG displacement;
     PPH_STRING fileName;
 
-    PhpRegisterSymbolProvider(SymbolProvider);
+    if (!PhpRegisterSymbolProvider(SymbolProvider))
+        return FALSE;
 
     if (!SymGetLineFromInlineContextW_I)
         return FALSE;
@@ -2904,7 +2933,8 @@ BOOLEAN PhGetLineFromInlineContext(
 //    if (StackFrame->PcAddress == 0)
 //        return NULL;
 //
-//    PhpRegisterSymbolProvider(SymbolProvider);
+//    if (!PhpRegisterSymbolProvider(SymbolProvider))
+//        return NULL;
 //
 //    if (!SymAddrIncludeInlineTrace_I)
 //        SymAddrIncludeInlineTrace_I = PhGetDllProcedureAddress(L"dbghelp.dll", "SymAddrIncludeInlineTrace", 0);
@@ -3423,4 +3453,11 @@ BOOLEAN PhGetDiaSymbolInformation(
     memcpy(SymbolInformation, &symbolInfo, sizeof(PH_DIA_SYMBOL_INFORMATION));
 
     return TRUE;
+}
+
+VOID PhUnregisterSymbolProvider(
+    _In_ PPH_SYMBOL_PROVIDER SymbolProvider
+    )
+{
+    PhpUnregisterSymbolProvider(SymbolProvider);
 }
