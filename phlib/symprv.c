@@ -27,18 +27,12 @@
 #include "../tools/thirdparty/winsdk/dia3.h"
 
 #if defined(_ARM64_)
-static const ULONG NativeMachine = IMAGE_FILE_MACHINE_ARM64;
-static const ULONG NativeFrame = PH_THREAD_STACK_FRAME_ARM64;
+#define PH_THREAD_STACK_NATIVE_MACHINE IMAGE_FILE_MACHINE_ARM64
 #elif defined(_AMD64_)
-static const ULONG NativeMachine = IMAGE_FILE_MACHINE_AMD64;
-static const ULONG NativeFrame = PH_THREAD_STACK_FRAME_AMD64;
+#define PH_THREAD_STACK_NATIVE_MACHINE IMAGE_FILE_MACHINE_AMD64
 #else
-static const ULONG NativeMachine = IMAGE_FILE_MACHINE_I386;
-static const ULONG NativeFrame = PH_THREAD_STACK_FRAME_I386;
+#define PH_THREAD_STACK_NATIVE_MACHINE IMAGE_FILE_MACHINE_I386
 #endif
-
-#define PH_SYMBOL_MODULE_FLAG_CHPE    0x00000001ul
-#define PH_SYMBOL_MODULE_FLAG_ARM64EC 0x00000002ul
 
 typedef struct _PH_SYMBOL_MODULE
 {
@@ -47,8 +41,8 @@ typedef struct _PH_SYMBOL_MODULE
     ULONG64 BaseAddress;
     ULONG Size;
     PPH_STRING FileName;
-    ULONG Machine;
-    ULONG Flags;
+    USHORT Machine;
+    USHORT MappedMachine;
 } PH_SYMBOL_MODULE, *PPH_SYMBOL_MODULE;
 
 VOID NTAPI PhpSymbolProviderDeleteProcedure(
@@ -733,23 +727,21 @@ PPH_SYMBOL_MODULE PhGetSymbolModuleFromAddress(
     return module;
 }
 
-BOOLEAN PhpGetMachineFromAddress(
+USHORT PhpGetMachineForAddress(
     _In_ PPH_SYMBOL_PROVIDER SymbolProvider,
-    _In_ ULONG64 Address,
-    _Out_opt_ PULONG Machine,
-    _Out_opt_ PULONG Flags
+    _In_opt_ HANDLE ProcessHandle,
+    _In_ ULONG64 Address
     )
 {
     PH_SYMBOL_MODULE lookupModule;
     PPH_AVL_LINKS links;
     PPH_SYMBOL_MODULE module;
-    BOOLEAN foundMachine = FALSE;
+    USHORT machine;
+#ifdef _ARM64_
+    BOOLEAN isEcCode;
+#endif
 
-    if (Machine)
-        *Machine = 0;
-
-    if (Flags)
-        *Flags = 0;
+    machine = IMAGE_FILE_MACHINE_UNKNOWN;
 
     PhAcquireQueuedLockShared(&SymbolProvider->ModulesListLock);
 
@@ -762,21 +754,34 @@ BOOLEAN PhpGetMachineFromAddress(
     {
         module = CONTAINING_RECORD(links, PH_SYMBOL_MODULE, Links);
 
-        if (Address < module->BaseAddress + module->Size)
-        {
-            if (Machine)
-                *Machine = module->Machine;
-
-            if (Flags)
-                *Flags = module->Flags;
-
-            foundMachine = TRUE;
-        }
+        if (module->Machine && (Address < (module->BaseAddress + module->Size)))
+            machine = module->Machine;
     }
 
     PhReleaseQueuedLockShared(&SymbolProvider->ModulesListLock);
 
-    return foundMachine;
+    if (!ProcessHandle)
+        return machine;
+
+#ifdef _ARM64_
+    if (machine == IMAGE_FILE_MACHINE_UNKNOWN)
+    {
+        if (NT_SUCCESS(PhIsEcCode(ProcessHandle, Address, &isEcCode)))
+        {
+            if (isEcCode)
+                machine = IMAGE_FILE_MACHINE_ARM64EC;
+            else
+                machine = IMAGE_FILE_MACHINE_AMD64;
+        }
+    }
+    else if (machine == IMAGE_FILE_MACHINE_ARM64 || machine == IMAGE_FILE_MACHINE_AMD64)
+    {
+        if (NT_SUCCESS(PhIsEcCode(ProcessHandle, Address, &isEcCode)) && isEcCode)
+            machine = IMAGE_FILE_MACHINE_ARM64EC;
+    }
+#endif
+
+    return machine;
 }
 
 VOID PhpSymbolInfoAnsiToUnicode(
@@ -1045,61 +1050,16 @@ PPH_SYMBOL_MODULE PhpCreateSymbolModule(
     PhSetReference(&symbolModule->FileName, FileName);
 
 #if defined(_ARM64_)
-    HANDLE fileHandle;
     PH_MAPPED_IMAGE mappedImage;
-    PH_REMOTE_MAPPED_IMAGE remoteMappedImage;
 
-    if (NT_SUCCESS(PhCreateFile(
-        &fileHandle,
-        &symbolModule->FileName->sr,
-        FILE_READ_ATTRIBUTES | FILE_READ_DATA | SYNCHRONIZE,
-        FILE_ATTRIBUTE_NORMAL,
-        FILE_SHARE_READ,
-        FILE_OPEN,
-        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
-        )))
+    if (NT_SUCCESS(PhLoadMappedImageHeaderPageSize(&FileName->sr, NULL, &mappedImage)))
     {
-        if (NT_SUCCESS(PhLoadMappedImage(NULL, fileHandle, &mappedImage)))
-        {
-            if (mappedImage.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
-            {
-                PIMAGE_LOAD_CONFIG_DIRECTORY64 loadConifg64;
+        if (mappedImage.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+            symbolModule->Machine = mappedImage.NtHeaders->FileHeader.Machine;
+        else if (mappedImage.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
+            symbolModule->Machine = mappedImage.NtHeaders32->FileHeader.Machine;
 
-                symbolModule->Machine = mappedImage.NtHeaders->FileHeader.Machine;
-
-                loadConifg64 = PhGetMappedImageDirectoryEntry(&mappedImage, IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG);
-                if (loadConifg64 && loadConifg64->CHPEMetadataPointer)
-                    symbolModule->Flags |= PH_SYMBOL_MODULE_FLAG_CHPE;
-            }
-            else
-            {
-                PIMAGE_LOAD_CONFIG_DIRECTORY32 loadConifg32;
-
-                symbolModule->Machine = mappedImage.NtHeaders32->FileHeader.Machine;
-
-                loadConifg32 = PhGetMappedImageDirectoryEntry(&mappedImage, IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG);
-                if (loadConifg32 && loadConifg32->CHPEMetadataPointer)
-                    symbolModule->Flags |= PH_SYMBOL_MODULE_FLAG_CHPE;
-            }
-
-            PhUnloadMappedImage(&mappedImage);
-        }
-
-        NtClose(fileHandle);
-    }
-
-    if (symbolModule->Machine == IMAGE_FILE_MACHINE_ARM64)
-    {
-        if (NT_SUCCESS(PhLoadRemoteMappedImage(ProcessHandle, (PVOID)BaseAddress, Size, &remoteMappedImage)))
-        {
-            if (remoteMappedImage.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC &&
-                remoteMappedImage.NtHeaders->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64)
-            {
-                symbolModule->Flags |= PH_SYMBOL_MODULE_FLAG_ARM64EC;
-            }
-
-            PhUnloadRemoteMappedImage(&remoteMappedImage);
-        }
+        PhUnloadMappedImage(&mappedImage);
     }
 #endif
 
@@ -2011,12 +1971,14 @@ BOOLEAN PhWriteMiniDumpProcess(
  * Converts a STACKFRAME64 structure to a PH_THREAD_STACK_FRAME structure.
  *
  * \param StackFrame A pointer to the STACKFRAME64 structure to convert.
+ * \param Machine Machine to set in the resulting structure.
  * \param Flags Flags to set in the resulting structure.
  * \param ThreadStackFrame A pointer to the resulting PH_THREAD_STACK_FRAME structure.
  */
 VOID PhpConvertStackFrame(
     _In_ STACKFRAME_EX *StackFrame,
-    _In_ ULONG Flags,
+    _In_ USHORT Machine,
+    _In_ USHORT Flags,
     _Out_ PPH_THREAD_STACK_FRAME ThreadStackFrame
     )
 {
@@ -2031,6 +1993,7 @@ VOID PhpConvertStackFrame(
     for (i = 0; i < 4; i++)
         ThreadStackFrame->Params[i] = (PVOID)StackFrame->Params[i];
 
+    ThreadStackFrame->Machine = Machine;
     ThreadStackFrame->Flags = Flags;
 
     if (StackFrame->FuncTableEntry)
@@ -2168,7 +2131,8 @@ NTSTATUS PhWalkThreadStack(
             for (i = 0; i < capturedFrames; i++)
             {
                 threadStackFrame.PcAddress = stack[i];
-                threadStackFrame.Flags = PH_THREAD_STACK_FRAME_KERNEL | NativeFrame;
+                threadStackFrame.Machine = PH_THREAD_STACK_NATIVE_MACHINE;
+                threadStackFrame.Flags = PH_THREAD_STACK_FRAME_KERNEL;
 
                 if ((UINT_PTR)stack[i] <= PhSystemBasicInformation.MaximumUserModeAddress)
                     break;
@@ -2185,20 +2149,20 @@ NTSTATUS PhWalkThreadStack(
     {
         STACKFRAME_EX stackFrame;
         PH_THREAD_STACK_FRAME threadStackFrame;
-        union
-        {
-            CONTEXT Context;
+        ULONG machine;
+        PVOID contextRecord;
+        CONTEXT context;
 #if defined(_ARM64_)
-            ARM64EC_NT_CONTEXT EmulationCompatible;
+        ARM64EC_NT_CONTEXT ecContext;
 #endif
-        } u;
-        ULONG machine = NativeMachine;
-        ULONG flags = NativeFrame;
 
-        memset(&u, 0, sizeof(u));
-        u.Context.ContextFlags = CONTEXT_FULL;
+        contextRecord = &context;
+        machine = PH_THREAD_STACK_NATIVE_MACHINE;
 
-        if (!NT_SUCCESS(status = NtGetContextThread(ThreadHandle, &u.Context)))
+        memset(&context, 0, sizeof(context));
+        context.ContextFlags = CONTEXT_FULL;
+
+        if (!NT_SUCCESS(status = NtGetContextThread(ThreadHandle, &context)))
             goto SkipUserStack;
 
         memset(&stackFrame, 0, sizeof(STACKFRAME_EX));
@@ -2207,25 +2171,25 @@ NTSTATUS PhWalkThreadStack(
         // Program counter, Stack pointer, Frame pointer
 #if defined(_ARM64_)
         stackFrame.AddrPC.Mode = AddrModeFlat;
-        stackFrame.AddrPC.Offset = u.Context.Pc;
+        stackFrame.AddrPC.Offset = context.Pc;
         stackFrame.AddrStack.Mode = AddrModeFlat;
-        stackFrame.AddrStack.Offset = u.Context.Sp;
+        stackFrame.AddrStack.Offset = context.Sp;
         stackFrame.AddrFrame.Mode = AddrModeFlat;
-        stackFrame.AddrFrame.Offset = u.Context.Fp;
+        stackFrame.AddrFrame.Offset = context.Fp;
 #elif defined(_AMD64_)
         stackFrame.AddrPC.Mode = AddrModeFlat;
-        stackFrame.AddrPC.Offset = u.Context.Rip;
+        stackFrame.AddrPC.Offset = context.Rip;
         stackFrame.AddrStack.Mode = AddrModeFlat;
-        stackFrame.AddrStack.Offset = u.Context.Rsp;
+        stackFrame.AddrStack.Offset = context.Rsp;
         stackFrame.AddrFrame.Mode = AddrModeFlat;
-        stackFrame.AddrFrame.Offset = u.Context.Rbp;
+        stackFrame.AddrFrame.Offset = context.Rbp;
 #else
         stackFrame.AddrPC.Mode = AddrModeFlat;
-        stackFrame.AddrPC.Offset = u.Context.Eip;
+        stackFrame.AddrPC.Offset = context.Eip;
         stackFrame.AddrStack.Mode = AddrModeFlat;
-        stackFrame.AddrStack.Offset = u.Context.Esp;
+        stackFrame.AddrStack.Offset = context.Esp;
         stackFrame.AddrFrame.Mode = AddrModeFlat;
-        stackFrame.AddrFrame.Offset = u.Context.Ebp;
+        stackFrame.AddrFrame.Offset = context.Ebp;
 #endif
 
         while (TRUE)
@@ -2235,7 +2199,7 @@ NTSTATUS PhWalkThreadStack(
                 ProcessHandle,
                 ThreadHandle,
                 &stackFrame,
-                &u,
+                contextRecord,
                 SymbolProvider,
                 NULL,
                 NULL,
@@ -2249,70 +2213,62 @@ NTSTATUS PhWalkThreadStack(
                 break;
 
 #if defined(_ARM64_)
-            // Handle emulation switching between frames.
+            USHORT frameMachine;
 
-            ULONG moduleMachine;
-            ULONG moduleFlags;
-            if (PhpGetMachineFromAddress(SymbolProvider, stackFrame.AddrPC.Offset, &moduleMachine, &moduleFlags))
+            // TODO(jxy-s)
+            //
+            // This needs work to handle enter, exit, and inlined thunks.
+            //
+            // Much of the stack walk handling for EC code is in dbgeng and not dbghelp. Since we
+            // only rely on dbghelp we need some special handling too. The following are known
+            // issues with possible solutions. These need more time to investigate:
+            //
+            // - ARM64EC <-> x64 enter and exit thunks work (the frames will be shown) but the
+            //   return address is lost for certain frames. The frame calling into the entry thunk
+            //   will not have a return address displayed. And the frame of the exit thunk will
+            //   also not have a return address displayed. The ARM64EC ABI defines the handling of
+            //   return addresses in the context. We likely need more state tracking to remembr the
+            //   context around these frames. Then manually fix them ourselves.
+            // - ARM64EC <-> ARM64EC "inlined thunks" do not work. The loader will inline an
+            //   ARM64EC call when it identifies no emulation switching is necessary. This causes
+            //   us to fail to walk past these frames. For use to handle this we likely need to
+            //   extract more metadata from the PE file to be able to identify inlining of these
+            //   push thunks and walk past them ourselves.
+
+            frameMachine = PhpGetMachineForAddress(SymbolProvider, ProcessHandle, stackFrame.AddrPC.Offset);
+
+            if (machine != frameMachine)
             {
-                if (machine != moduleMachine)
-                {
-                    if (moduleMachine == IMAGE_FILE_MACHINE_ARM64)
-                    {
-                        // AMD64 -> ARM64
-                        u.Context.ContextFlags = u.EmulationCompatible.ContextFlags;
-                        u.Context.Pc = u.EmulationCompatible.Pc;
-                        u.Context.Sp = u.EmulationCompatible.Sp;
-                        u.Context.Fp = u.EmulationCompatible.Fp;
-                    }
-                    else if (moduleMachine == IMAGE_FILE_MACHINE_AMD64)
-                    {
-                        // ARM64 -> AMD64
-                        u.EmulationCompatible.ContextFlags = u.Context.ContextFlags;
-                        u.EmulationCompatible.Pc = u.Context.Pc;
-                        u.EmulationCompatible.Sp = u.Context.Sp;
-                        u.EmulationCompatible.Fp = u.Context.Fp;
-                    }
-                }
+                // switch the effective machine
+                machine = frameMachine;
 
-                machine = moduleMachine;
-                switch (machine)
+                if (frameMachine == IMAGE_FILE_MACHINE_AMD64 && contextRecord != &ecContext)
                 {
-                case IMAGE_FILE_MACHINE_AMD64:
-                    flags = PH_THREAD_STACK_FRAME_AMD64;
-                    break;
-                case IMAGE_FILE_MACHINE_ARM64:
-                    flags = PH_THREAD_STACK_FRAME_ARM64;
-                    break;
-                default:
-                    flags = NativeMachine;
-                    break;
+                    PhNativeContextToEcContext(&ecContext, &context, TRUE);
+                    contextRecord = &ecContext;
                 }
-
-                if (moduleFlags & PH_SYMBOL_MODULE_FLAG_ARM64EC)
-                    flags |= PH_THREAD_STACK_FRAME_ARM64EC;
-            }
-            else
-            {
-                machine = NativeMachine;
-                flags = NativeFrame;
+                else if (contextRecord != &context)
+                {
+                    PhEcContextToNativeContext(&context, &ecContext);
+                    contextRecord = &context;
+                }
             }
 #endif
 
             // Convert the stack frame and execute the callback.
 
-            PhpConvertStackFrame(&stackFrame, flags, &threadStackFrame);
+            PhpConvertStackFrame(&stackFrame, (USHORT)machine, 0, &threadStackFrame);
 
             if (!Callback(&threadStackFrame, Context))
                 goto ResumeExit;
 
 #if defined(_X86_)
             // (x86 only) Allow the user to change Eip, Esp and Ebp.
-            u.Context.Eip = PtrToUlong(threadStackFrame.PcAddress);
+            context.Eip = PtrToUlong(threadStackFrame.PcAddress);
             stackFrame.AddrPC.Offset = PtrToUlong(threadStackFrame.PcAddress);
-            u.Context.Ebp = PtrToUlong(threadStackFrame.FrameAddress);
+            context.Ebp = PtrToUlong(threadStackFrame.FrameAddress);
             stackFrame.AddrFrame.Offset = PtrToUlong(threadStackFrame.FrameAddress);
-            u.Context.Esp = PtrToUlong(threadStackFrame.StackAddress);
+            context.Esp = PtrToUlong(threadStackFrame.StackAddress);
             stackFrame.AddrStack.Offset = PtrToUlong(threadStackFrame.StackAddress);
 #endif
         }
@@ -2327,7 +2283,6 @@ SkipUserStack:
         STACKFRAME_EX stackFrame;
         PH_THREAD_STACK_FRAME threadStackFrame;
         WOW64_CONTEXT context;
-        ULONG flags = PH_THREAD_STACK_FRAME_I386;
 
         memset(&context, 0, sizeof(WOW64_CONTEXT));
         context.ContextFlags = WOW64_CONTEXT_ALL;
@@ -2364,21 +2319,9 @@ SkipUserStack:
             if (!stackFrame.AddrPC.Offset || stackFrame.AddrPC.Offset == -1)
                 break;
 
-#if defined(_ARM64_)
-            // Flag CHPE frames.
-
-            ULONG moduleFlags;
-            PhpGetMachineFromAddress(SymbolProvider, stackFrame.AddrPC.Offset, NULL, &moduleFlags);
-
-            if (moduleFlags & PH_SYMBOL_MODULE_FLAG_CHPE)
-                flags |= PH_THREAD_STACK_FRAME_CHPE;
-            else
-                flags &= ~PH_THREAD_STACK_FRAME_CHPE;
-#endif
-
             // Convert the stack frame and execute the callback.
 
-            PhpConvertStackFrame(&stackFrame, flags, &threadStackFrame);
+            PhpConvertStackFrame(&stackFrame, IMAGE_FILE_MACHINE_I386, 0, &threadStackFrame);
 
             if (!Callback(&threadStackFrame, Context))
                 goto ResumeExit;
@@ -2445,7 +2388,7 @@ SkipI386Stack:
 
             // Convert the stack frame and execute the callback.
 
-            PhpConvertStackFrame(&stackFrame, PH_THREAD_STACK_FRAME_ARM, &threadStackFrame);
+            PhpConvertStackFrame(&stackFrame, IMAGE_FILE_MACHINE_ARMNT, 0, &threadStackFrame);
 
             if (!Callback(&threadStackFrame, Context))
                 goto ResumeExit;

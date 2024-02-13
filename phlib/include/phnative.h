@@ -2876,36 +2876,6 @@ typedef struct _PH_PROCESS_DEBUG_HEAP_INFORMATION32
     PH_PROCESS_DEBUG_HEAP_ENTRY32 Heaps[1];
 } PH_PROCESS_DEBUG_HEAP_INFORMATION32, *PPH_PROCESS_DEBUG_HEAP_INFORMATION32;
 
-typedef struct _PH_IMAGE_RUNTIME_FUNCTION_ENTRY_AMD64
-{
-    ULONG BeginAddress;
-    ULONG EndAddress;
-    union
-    {
-        ULONG UnwindInfoAddress;
-        ULONG UnwindData;
-    } DUMMYUNIONNAME;
-} PH_IMAGE_RUNTIME_FUNCTION_ENTRY_AMD64, *PPH_IMAGE_RUNTIME_FUNCTION_ENTRY_AMD64;
-
-typedef struct _PH_IMAGE_RUNTIME_FUNCTION_ENTRY_ARM64
-{
-    ULONG BeginAddress;
-    union
-    {
-        ULONG UnwindData;
-        struct
-        {
-            ULONG Flag : 2;
-            ULONG FunctionLength : 11;
-            ULONG RegF : 3;
-            ULONG RegI : 4;
-            ULONG H : 1;
-            ULONG CR : 2;
-            ULONG FrameSize : 9;
-        } DUMMYSTRUCTNAME;
-    } DUMMYUNIONNAME;
-} PH_IMAGE_RUNTIME_FUNCTION_ENTRY_ARM64, *PPH_IMAGE_RUNTIME_FUNCTION_ENTRY_ARM64;
-
 PHLIBAPI
 NTSTATUS
 NTAPI
@@ -3524,6 +3494,34 @@ PhGetProcessLdrTableEntryNames(
     _Out_ PPH_STRING* Name,
     _Out_ PPH_STRING* FileName
     );
+
+#ifdef _M_ARM64
+PHLIBAPI
+VOID
+NTAPI
+PhEcContextToNativeContext(
+    _Out_ PCONTEXT Context,
+    _In_ PARM64EC_NT_CONTEXT EcContext
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhNativeContextToEcContext(
+    _When_(InitializeEc, _Out_) _When_(!InitializeEc, _Inout_) PARM64EC_NT_CONTEXT EcContext,
+    _In_ PCONTEXT Context,
+    _In_ BOOLEAN InitializeEc
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhIsEcCode(
+    _In_ HANDLE ProcessHandle,
+    _In_ ULONG64 CodePointer,
+    _Out_ PBOOLEAN IsEcCode
+    );
+#endif
 
 EXTERN_C_END
 

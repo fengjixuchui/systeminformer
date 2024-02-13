@@ -148,7 +148,7 @@
 #define PHPN_ERRORMODE 0x8000
 #define PHPN_CODEPAGE 0x10000
 #define PHPN_POWERTHROTTLING 0x20000
-#define PHPN_ARCHITECTURE 0x40000
+//#define UNUSED 0x40000
 #define PHPN_PRIORITYBOOST 0x80000
 #define PHPN_GRANTEDACCESS 0x100000
 #define PHPN_TLSBITMAPDELTA 0x200000
@@ -202,9 +202,13 @@ typedef struct _PH_PROCESS_NODE
     // Image
     ULONG ImageTimeDateStamp;
     USHORT ImageCharacteristics;
-    USHORT ImageReserved;
+    USHORT ImageMachine;
     USHORT ImageSubsystem;
     USHORT ImageDllCharacteristics;
+#ifdef _ARM64_
+    ULONG ImageCHPEVersion;
+#endif
+
     // App ID
     PPH_STRING AppIdText;
     // DPI awareness
