@@ -1628,6 +1628,15 @@ PhGetKernelFileName2(
     VOID
     );
 
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhGetKernelFileNameEx(
+    _Out_ PPH_STRING* FileName,
+    _Out_ PVOID* ImageBase,
+    _Out_ ULONG* ImageSize
+    );
+
 /**
  * Gets a pointer to the first process information structure in a buffer returned by
  * PhEnumProcesses().
@@ -1895,14 +1904,12 @@ PhEnumDirectoryFileEx(
     _In_opt_ PVOID Context
     );
 
-_Function_class_(PH_ENUM_REPARSE_POINT)
-typedef NTSTATUS (NTAPI PH_ENUM_REPARSE_POINT)(
+typedef NTSTATUS (NTAPI *PPH_ENUM_REPARSE_POINT)(
     _In_ HANDLE RootDirectory,
     _In_ PVOID Information,
     _In_ SIZE_T InformationLength,
     _In_opt_ PVOID Context
     );
-typedef PH_ENUM_REPARSE_POINT *PPH_ENUM_REPARSE_POINT;
 
 PHLIBAPI
 NTSTATUS
@@ -1913,14 +1920,12 @@ PhEnumReparsePointInformation(
     _In_opt_ PVOID Context
     );
 
-_Function_class_(PH_ENUM_OBJECT_ID)
-typedef NTSTATUS (NTAPI PH_ENUM_OBJECT_ID)(
+typedef NTSTATUS (NTAPI *PPH_ENUM_OBJECT_ID)(
     _In_ HANDLE RootDirectory,
     _In_ PVOID Information,
     _In_ SIZE_T InformationLength,
     _In_opt_ PVOID Context
     );
-typedef PH_ENUM_OBJECT_ID *PPH_ENUM_OBJECT_ID;
 
 PHLIBAPI
 NTSTATUS
@@ -2036,6 +2041,13 @@ PHLIBAPI
 VOID
 NTAPI
 PhUpdateDosDevicePrefixes(
+    VOID
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhFlushVolumeCache(
     VOID
     );
 

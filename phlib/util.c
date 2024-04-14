@@ -3468,7 +3468,7 @@ PPH_STRING PhGetTemporaryDirectoryRandomAlphaFileName(
     PH_STRINGREF randomAlphaString;
     WCHAR randomAlphaStringBuffer[33] = L"";
 
-    PhGenerateRandomAlphaString(randomAlphaStringBuffer, ARRAYSIZE(randomAlphaStringBuffer));
+    PhGenerateRandomAlphaString(randomAlphaStringBuffer, RTL_NUMBER_OF(randomAlphaStringBuffer));
     randomAlphaStringBuffer[0] = OBJ_NAME_PATH_SEPARATOR;
     randomAlphaString.Buffer = randomAlphaStringBuffer;
     randomAlphaString.Length = sizeof(randomAlphaStringBuffer) - sizeof(UNICODE_NULL);
@@ -4565,11 +4565,12 @@ NTSTATUS PhCreateProcessAsUser(
         WINSTATIONUSERTOKEN userToken;
         ULONG returnLength;
 
-        if (!WinStationQueryInformationW_Import())
-            return STATUS_PROCEDURE_NOT_FOUND;
+        memset(&userToken, 0, sizeof(WINSTATIONUSERTOKEN));
+        //userToken.ProcessId = NtCurrentProcessId();
+        //userToken.ThreadId = NtCurrentThreadId();
 
-        if (!WinStationQueryInformationW_Import()(
-            NULL,
+        if (!WinStationQueryInformationW(
+            WINSTATION_CURRENT_SERVER,
             Information->SessionIdWithToken,
             WinStationUserToken,
             &userToken,
@@ -5107,8 +5108,7 @@ VOID PhShellExecute(
  * after the application is started.
  * \param ProcessHandle A variable which receives a handle to the new process.
  */
-_Success_(return)
-BOOLEAN PhShellExecuteEx(
+NTSTATUS PhShellExecuteEx(
     _In_opt_ HWND WindowHandle,
     _In_ PWSTR FileName,
     _In_opt_ PWSTR Parameters,
@@ -5119,32 +5119,36 @@ BOOLEAN PhShellExecuteEx(
     _Out_opt_ PHANDLE ProcessHandle
     )
 {
-    SHELLEXECUTEINFO info = { sizeof(SHELLEXECUTEINFO) };
+    SHELLEXECUTEINFO info;
 
+    memset(&info, 0, sizeof(SHELLEXECUTEINFO));
+    info.cbSize = sizeof(SHELLEXECUTEINFO);
+    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI | SEE_MASK_NOZONECHECKS;
+    info.hwnd = WindowHandle;
     info.lpFile = FileName;
     info.lpParameters = Parameters;
     info.lpDirectory = Directory;
-    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC | SEE_MASK_NOZONECHECKS;
     info.nShow = ShowWindowType;
-    info.hwnd = WindowHandle;
 
-    if (Flags & PH_SHELL_EXECUTE_ADMIN)
+    if (FlagOn(Flags, PH_SHELL_EXECUTE_ADMIN))
+    {
         info.lpVerb = L"runas";
+    }
 
     if (PhShellExecuteWin32(&info))
     {
         if (Timeout)
         {
-            if (!(Flags & PH_SHELL_EXECUTE_PUMP_MESSAGES))
+            if (FlagOn(Flags, PH_SHELL_EXECUTE_PUMP_MESSAGES))
+            {
+                PhWaitForMultipleObjectsAndPump(NULL, 1, &info.hProcess, Timeout, QS_ALLEVENTS);
+            }
+            else
             {
                 if (info.hProcess)
                 {
                     PhWaitForSingleObject(info.hProcess, PhTimeoutFromMillisecondsEx(Timeout));
                 }
-            }
-            else
-            {
-                PhWaitForMultipleObjectsAndPump(NULL, 1, &info.hProcess, Timeout, QS_ALLEVENTS);
             }
         }
 
@@ -5153,11 +5157,11 @@ BOOLEAN PhShellExecuteEx(
         else if (info.hProcess)
             NtClose(info.hProcess);
 
-        return TRUE;
+        return STATUS_SUCCESS;
     }
     else
     {
-        return FALSE;
+        return PhGetLastWin32ErrorAsNtStatus();
     }
 }
 
