@@ -74,6 +74,7 @@ typedef struct _PH_STARTUP_PARAMETERS
     PPH_LIST PluginParameters;
     PPH_STRING SelectTab;
     PPH_STRING SysInfo;
+    PPH_STRING Channel;
 } PH_STARTUP_PARAMETERS, *PPH_STARTUP_PARAMETERS;
 
 extern BOOLEAN PhPluginsEnabled;
@@ -308,6 +309,10 @@ VOID PhShowAboutDialog(
 
 PPH_STRING PhGetDiagnosticsString(
     VOID
+    );
+
+PPH_STRING PhGetApplicationVersionString(
+    _In_ BOOLEAN LinkToCommit
     );
 
 // affinity
